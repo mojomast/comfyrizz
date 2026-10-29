@@ -614,6 +614,7 @@ test('failed, cancelled and stop_unconfirmed runs never become final success', a
     assert.equal(result.ok, false, status);
     if (result.ok) return;
     assert.equal(result.code, 'RUN_FAILED');
+    assert.equal(typeof result.failedRunId === 'string', status === 'failed');
     assert.match(result.message, new RegExp(status, 'u'));
     assert.equal(calls.some(call => call.kind === 'run-video'), false);
     store.flush();

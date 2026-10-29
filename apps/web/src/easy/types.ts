@@ -84,7 +84,8 @@ export interface EasyHost {
   getPackage(): any;
   clips(): readonly import('../takes/api.ts').ClipSummary[];
   subscribeClips(listener: () => void): () => void;
-  takesApi: Pick<import('../takes/api.ts').TakesApi, 'getTakes' | 'select' | 'verdict'>;
+  takesApi: Pick<import('../takes/api.ts').TakesApi, 'getTakes' | 'select' | 'verdict'>
+    & Partial<Pick<import('../takes/api.ts').TakesApi, 'listClips'>>;
   adoptBuiltPackage(body: any): void;
   /** A production-owned package needs its production id to render. */
   renderMp4(options?: { productionId?: string | null; persistedRevision?: number }): Promise<{ blob: Blob; revision: number; renderId?: string }>;

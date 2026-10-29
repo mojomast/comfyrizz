@@ -90,6 +90,7 @@ export interface SuperEasyMountOptions {
   failure?(): SuperEasyProgressFailure | null;
   /** Re-run the last prompt after a visible failure. */
   onRetry?(): void;
+  onRecoverDownloadedOutputs?(): void;
   onReviseNarration?(): void;
   /** Review the playable preview, then export from Studio. */
   onReview?(packageId: string | null): void;
@@ -350,6 +351,14 @@ export function mountSuperEasy(options: SuperEasyMountOptions): SuperEasyMountHa
     if (closest('[data-super-easy-retry]')) {
       event.preventDefault();
       options.onRetry?.();
+      return;
+    }
+    const recover = closest('[data-super-easy-recover-outputs]') as HTMLButtonElement | null;
+    if (recover) {
+      event.preventDefault();
+      if (recover.disabled || !options.failure?.()?.downloadedOutputsRecovery) return;
+      recover.disabled = true;
+      options.onRecoverDownloadedOutputs?.();
       return;
     }
     if (closest('[data-super-easy-more-control]') || closest('[data-super-easy-open-studio]')) {
@@ -710,6 +719,7 @@ export function mountSuperEasy(options: SuperEasyMountOptions): SuperEasyMountHa
               retryable: failure.retryable !== false && typeof options.onRetry === 'function',
               narrationRevision: Boolean(failure.narrationRevision && options.onReviseNarration),
               proposalRevisionNote: failure.proposalRevisionNote,
+              downloadedOutputsRecovery: Boolean(failure.downloadedOutputsRecovery && options.onRecoverDownloadedOutputs),
             },
           }),
     };

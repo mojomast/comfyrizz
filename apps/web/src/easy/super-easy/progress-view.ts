@@ -29,6 +29,7 @@ export interface SuperEasyProgressFailure {
   retryable?: boolean;
   narrationRevision?: boolean | string;
   proposalRevisionNote?: string;
+  downloadedOutputsRecovery?: boolean;
 }
 
 export interface SuperEasyProgressViewOptions {
@@ -285,7 +286,7 @@ function actionsKeyOf(
 ): string {
   const message = failure === null ? '' : failure.message;
   const retryable = failure === null ? 0 : failure.retryable === false ? 0 : 1;
-  return `${finalReady ? 1 : 0}|${gallery.final.url ?? ''}|${previewReady ? 1 : 0}|${message}|${retryable}|${failure?.narrationRevision ? 1 : 0}|${failure?.proposalRevisionNote ?? ''}|${options.packageId ?? ''}|${options.search ?? ''}`;
+  return `${finalReady ? 1 : 0}|${gallery.final.url ?? ''}|${previewReady ? 1 : 0}|${message}|${retryable}|${failure?.narrationRevision ? 1 : 0}|${failure?.proposalRevisionNote ?? ''}|${failure?.downloadedOutputsRecovery ? 1 : 0}|${options.packageId ?? ''}|${options.search ?? ''}`;
 }
 
 function previewMarkup(): string {
@@ -311,6 +312,7 @@ function failureMarkup(failure: SuperEasyProgressFailure): string {
 <p class="super-easy-progress-error-message" data-super-easy-error-message>${escapeHtml(failure.message)}</p>
 ${failure.proposalRevisionNote !== undefined ? `<form class="super-easy-proposal-revise" data-super-easy-revise-proposal><label for="super-easy-proposal-change">Edit your revision request</label><div><textarea id="super-easy-proposal-change" rows="4">${escapeHtml(failure.proposalRevisionNote)}</textarea><button type="submit" class="btn btn-primary">Revise proposal</button></div></form>` : ''}
 <div class="super-easy-progress-error-actions">${retry}${revise}
+${failure.downloadedOutputsRecovery ? '<button type="button" class="btn btn-primary" data-super-easy-recover-outputs>Recover downloaded outputs</button><p>Uses downloaded files; no new generation credits. Verifies the files and renders a new MP4 on this computer.</p>' : ''}
 <button type="button" class="btn btn-secondary" data-super-easy-more-control>${escapeHtml(COPY.done.openStudio)}</button>
 <button type="button" class="btn btn-secondary" data-super-easy-open-editor>${escapeHtml(EASY_COPY.shell.openEditor)}</button>
 </div>
@@ -331,12 +333,16 @@ export function superEasyProgressParts(
   const stages = stagesForFinalArtifact(rawStages, finalReady);
   const overall = finalReady ? stages.overall : Math.min(stages.overall, 0.99);
   const failure = options.failure ?? null;
+  const recovery = (snapshot as { downloadedOutputsRecovery?: string } | null)?.downloadedOutputsRecovery;
+  const recoveryText = recovery === 'completed' ? 'Your video was recovered from downloaded outputs.'
+    : recovery === 'rendering' ? 'Rendering recovered outputs on this computer…'
+      : recovery === 'verifying' ? 'Recovering downloaded outputs: verifying files…' : '';
   const previewReady = options.previewReady === true && !finalReady && failure === null;
   const overallValue = finalReady ? COPY.making.overall : `${percent(overall)}%`;
   const overallLabel = finalReady ? COPY.done.title : COPY.making.title;
   const liveText = typeof options.liveText === 'string'
     ? options.liveText
-    : progressLiveText(stages, gallery, {
+    : recoveryText || progressLiveText(stages, gallery, {
         previewReady,
         failure: failure === null ? null : failure.message,
       });
@@ -381,19 +387,20 @@ ${gallerySlots.map((slot) => slot.html).join('\n')}
         : '';
   const startOverHtml = finalReady ? '' : `<div class="super-easy-progress-start-over">
 <button type="button" class="btn btn-secondary" data-super-easy-make-another>Stop and start a new prompt</button>
-<p class="hint">Return to the idea screen. Any active video run is cancelled.</p>
+<p class="hint">${recovery ? 'Return to the idea screen and stop following this recovery.' : 'Return to the idea screen. Any active video run is cancelled.'}</p>
 </div>`;
   const studioHtml = finalReady ? '' : `<div class="super-easy-progress-mode-actions"><button type="button" class="btn btn-secondary" data-super-easy-more-control>${escapeHtml(COPY.done.openStudio)}</button><span class="hint">Switch views without stopping your work.</span></div>`;
-  const actionsHtml = `${studioHtml}${primaryActionsHtml}${startOverHtml}`;
+  const recoveryHtml = recoveryText ? `<p data-super-easy-recovery-status>${escapeHtml(recoveryText)}</p>${!finalReady && !failure ? '<button type="button" class="btn btn-primary" disabled>Recovering downloaded outputs…</button><p>Uses downloaded files; no new generation credits.</p>' : ''}` : '';
+  const actionsHtml = `${studioHtml}${recoveryHtml}${primaryActionsHtml}${startOverHtml}`;
 
   const keys: SuperEasyProgressKeys = {
-    live: progressLiveKey(stages, gallery, {
+    live: recoveryText + progressLiveKey(stages, gallery, {
       previewReady,
       failure: failure === null ? null : failure.message,
     }),
     chrome: chromeKeyOf(stages, finalReady),
     gallery: galleryKeyOf(gallery),
-    actions: actionsKeyOf(finalReady, gallery, previewReady, failure, options),
+    actions: recoveryText + actionsKeyOf(finalReady, gallery, previewReady, failure, options),
   };
 
   const html = `<section class="${rootClasses.join(' ')}"${reducedAttribute} data-super-easy-progress data-super-easy-live-key="${escapeHtml(keys.live)}" data-super-easy-chrome-key="${escapeHtml(keys.chrome)}" data-super-easy-gallery-key="${escapeHtml(keys.gallery)}" data-super-easy-actions-key="${escapeHtml(keys.actions)}" aria-labelledby="super-easy-progress-title">

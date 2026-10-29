@@ -705,8 +705,13 @@ function mountExport(el: HTMLElement, ctx: EasyStepContext): ExportController {
       return;
     }
     const access = await resolveSavedExport(artifactRecord, artifactResolver());
+    if (destroyed) {
+      if (access.href?.startsWith('blob:')) URL.revokeObjectURL(access.href);
+      return;
+    }
     if (access.state === 'ready' && access.href) {
       recovery = null;
+      blobUrl = access.href;
       triggerDownload(doc, access.href, exportFileName(currentPackage()?.title));
       paintDone();
       return;

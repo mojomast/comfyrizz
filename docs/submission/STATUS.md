@@ -31,14 +31,20 @@ Updated 2026-10-27 on `feat/hackathon-submission` / draft PR #53.
 - **Presentation fixes:** exact-duration repair, measured H3 dialogue conditioning,
   production-bound Keep requests and historical take-freshness recovery are
   implemented. Neon now passes actual browser Keep → Export → Download → reload
-  with its revised caption, but that editor export route still needs a durable
-  final receipt/artifact; the completed revised MP4 is not yet shared as accepted.
+  with its revised caption, a trusted final receipt and durable artifact.
+  Reopened Download returns identical bytes without another render. The accepted
+  revised film is 12.000 seconds, 1080p/30 fps, silent; all six generated-media
+  hashes and saved r14 remain unchanged. The private Tailscale share is verified.
 - **45-second show films:** credits now plan exactly 45 seconds and all 12 image/
   video outputs were generated and collected with matching hashes. Three missing
   workflow sidecars blocked import/export. Verified recovery from actual embedded
   MP4 workflow metadata is being used for a separate CPU-only recovery operation.
-  Bundled collection is implemented for subsequent multi-shot runs; the speaking
-  film is being retried with it. No new completed show film is claimed yet.
+  Bundled collection is implemented for subsequent multi-shot runs. The latest
+  speaking plan prepared real conditioning and seven H3 shots but was stopped
+  before spending because native audio remained muted, detached narration was
+  enabled and saved-project correction failed. Those paths are being fixed;
+  45 seconds at 24 fps is valid and is not itself a brief failure. No completed
+  45-second show film is claimed yet.
 - **Verification:** full agent/web/server checks passed **578 / 1,645 / 2,132**
   tests, with one web and four server skips. Bundled collection separately passed
   **230 backend tests**, one Windows-only skip. Later recovery/export UI changes

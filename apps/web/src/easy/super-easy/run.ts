@@ -54,6 +54,8 @@ export interface SuperEasyApi {
   dispatchAction(id: string, body: unknown): Promise<unknown>;
   startRun(body: unknown): Promise<unknown>;
   getRun(id: string): Promise<unknown>;
+  getRunRecovery?(id: string): Promise<unknown>;
+  recoverRunOutputs?(id: string, body: { baseRevision: number }): Promise<unknown>;
   cancelRun?(id: string): Promise<unknown>;
   getRunVideo(id: string): Promise<Blob>;
   generateLocalNarration?(body: { packageId: string; productionId: string; baseRevision: number; recoveryInputs?: unknown }): Promise<any>;
@@ -82,6 +84,8 @@ export interface SuperEasyRunPollingOptions {
   timeoutMs?: number;
   pollMs?: number;
   setTimer?: (callback: () => void, delayMs: number) => unknown;
+  isCurrent?(): boolean;
+  onRecord?(record: Record<string, unknown>): void;
 }
 
 export interface RunSuperEasyInput {
@@ -140,6 +144,7 @@ export type SuperEasyRunFailureCode =
   | 'FINAL_PLAN_FAILED'
   | 'RUN_ID_REQUIRED'
   | 'RUN_FAILED'
+  | 'RECOVERY_FAILED'
   | 'FINAL_VIDEO_FAILED'
   | 'LOCAL_RENDER_FAILED';
 
@@ -151,6 +156,9 @@ export interface SuperEasyRunFailure {
   retryable?: boolean;
   narrationRevision?: string;
   proposalRevisionNote?: string;
+  /** Only a terminal failure of a known paid run can advertise recovery. */
+  failedRunId?: string;
+  downloadedOutputsRecovery?: boolean;
 }
 
 export interface SuperEasyFinalArtifact {
@@ -353,7 +361,11 @@ function pause(options: SuperEasyRunPollingOptions | undefined, milliseconds: nu
   });
 }
 
-async function pollFinalRun(
+class TerminalRunError extends Error {
+  recoveryEligible = false;
+}
+
+export async function pollFinalRun(
   api: SuperEasyApi,
   runId: string,
   options: SuperEasyRunPollingOptions | undefined,
@@ -362,12 +374,15 @@ async function pollFinalRun(
   const timeoutMs = options?.timeoutMs ?? DEFAULT_RUN_TIMEOUT_MS;
   const pollMs = options?.pollMs ?? DEFAULT_RUN_POLL_MS;
   for (;;) {
+    if (options?.isCurrent?.() === false) throw new Error('Recovery stopped or the project changed.');
     const run = runRecordOf(await api.getRun(runId));
+    if (options?.isCurrent?.() === false) throw new Error('Recovery stopped or the project changed.');
     const failed = terminalRunFailure(run);
-    if (failed !== null) throw new Error(failed);
+    if (failed !== null) throw Object.assign(new TerminalRunError(failed), { recoveryEligible: run.status === 'failed' });
+    options?.onRecord?.(run);
     const status = typeof run.status === 'string' ? run.status.toLowerCase() : '';
-    if (status === 'done' || status === 'idle') return run;
-    if (!['starting', 'running', 'rendering', 'queued', 'dispatching', 'pending'].includes(status)) {
+    if (status === 'done' || status === 'idle' || status === 'completed') return run;
+    if (!['starting', 'running', 'rendering', 'verifying', 'queued', 'dispatching', 'pending'].includes(status)) {
       throw new Error(runFailureMessage(run));
     }
     if (Date.now() - startedAt >= timeoutMs) throw new Error('The final video run timed out.');
@@ -755,7 +770,8 @@ export async function runSuperEasy(input: RunSuperEasyInput, deps: RunSuperEasyD
     try {
       await pollFinalRun(deps.api, runId, input.run);
     } catch (error) {
-      return failure('RUN_FAILED', 'run', messageOf(error, RUN_FAILED));
+      return { ...failure('RUN_FAILED', 'run', messageOf(error, RUN_FAILED)),
+        ...(error instanceof TerminalRunError && error.recoveryEligible ? { failedRunId: runId } : {}) };
     }
     try {
       const blob = await deps.api.getRunVideo(runId);

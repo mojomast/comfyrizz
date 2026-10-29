@@ -228,7 +228,12 @@ export function mountEasyStudio(root: HTMLElement, baseHost: EasyHost, deps: Eas
 
   async function loadFacts(): Promise<StepFacts> {
     const initial = store.get();
-    const productionId = new URLSearchParams(search()).get('production') ?? initial.productionId;
+    let productionId = new URLSearchParams(search()).get('production') ?? initial.productionId;
+    if (!productionId && initial.packageId && !initial.idea.text.trim() && host.takesApi?.listClips) {
+      try {
+        productionId = (await host.takesApi.listClips(initial.packageId)).productionId ?? null;
+      } catch { /* An unavailable owner lookup cannot establish recovery. */ }
+    }
     if (!narrationRecoveryChecked && productionId && initial.packageId && (!initial.productionId || initial.productionId === productionId)) {
       narrationRecoveryChecked = true;
       const generation = store.generation();
@@ -342,6 +347,7 @@ export function mountEasyStudio(root: HTMLElement, baseHost: EasyHost, deps: Eas
       store: {
         get: () => store.get(),
         patch: (partial) => store.patch(partial),
+        generation: () => store.generation(),
       },
       go: () => {},
       onProgress: (_html, snapshot) => {
@@ -620,6 +626,7 @@ export function mountEasyStudio(root: HTMLElement, baseHost: EasyHost, deps: Eas
       onRetry: () => {
         void superEasySession?.retry();
       },
+      onRecoverDownloadedOutputs: () => { void superEasySession?.recoverDownloadedOutputs?.(); },
       onReview: (packageId) => openStudioFromSuperEasy('review', packageId),
       onExport: (packageId) => openStudioFromSuperEasy('export', packageId),
       stages: (snapshot) => superEasyStages(snapshot),

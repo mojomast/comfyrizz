@@ -22,6 +22,7 @@ export async function load(url, context, next) {
 const { mountEasyStudio } = await import('../src/easy/mount.ts');
 const { createSuperEasySession } = await import('../src/easy/super-easy/session.ts');
 const { defaultEasyState, planInputsHash } = await import('../src/easy/store.ts');
+const { proposalForPackage } = await import('../src/easy/super-easy/proposal.ts');
 
 const PRODUCTION_ID = 'prod_0123456789abcdef01234567';
 const PLAN_HASH = 'c'.repeat(64);
@@ -432,6 +433,7 @@ function finalWatchState() {
 function mountShell(backend, options = {}) {
   const previousStorage = globalThis.localStorage;
   globalThis.localStorage = memoryStorage();
+  if (options.setup) globalThis.localStorage.setItem('comfyrizz.super-easy.setup.v1', JSON.stringify(options.setup));
   const document = new FakeDocument();
   document.defaultView.location.search = options.search ?? '';
   const root = new FakeRoot(document);
@@ -473,6 +475,7 @@ function mountShell(backend, options = {}) {
       createCalls += 1;
       return createSuperEasySession({
         ...sessionOptions,
+        ...(options.run ? { run: options.run } : {}),
         watch: (next) => {
           watchOptions = next;
           return () => {
@@ -508,6 +511,165 @@ function mountShell(backend, options = {}) {
     },
   };
 }
+
+function deferred() {
+  let resolve;
+  const promise = new Promise(done => { resolve = done; });
+  return { promise, resolve };
+}
+
+async function recoveryShell(options = {}) {
+  const pkg = { id: 'pkg_recover', revision: 7, title: 'Downloaded film', scenes: [], assets: {} };
+  const offer = { runId: 'failed_paid', packageId: pkg.id, baseRevision: 7,
+    action: 'recover_downloaded_outputs', additionalGenerationCredits: 0, view: '/unused/recovery/view' };
+  const record = { runId: 'recovery_new', sourceRunId: offer.runId, packageId: pkg.id, status: 'completed' };
+  const requests = [];
+  const backend = createBackend();
+  const baseFetch = backend.apiFetch;
+  let polls = 0;
+  backend.apiFetch = async (url, init = {}) => {
+    if (!String(url).startsWith('/api/run/')) return baseFetch(url, init);
+    const method = init.method ?? 'GET';
+    requests.push({ url: String(url), method, body: init.body && JSON.parse(init.body) });
+    if (String(url).endsWith('/recovery')) {
+      if (method === 'GET') {
+        if (options.getGate) await options.getGate.promise;
+        return json(options.offer ?? { ...offer, ...options.offerOverride }, options.getStatus ?? 200);
+      }
+      if (options.postGate) await options.postGate.promise;
+      return json(options.postBody ?? { runId: record.runId, sourceRunId: offer.runId, status: 'verifying' }, options.postStatus ?? 202);
+    }
+    if (String(url).endsWith('/cancel')) return json({});
+    if (String(url).endsWith('/video')) {
+      if (options.videoGate) await options.videoGate.promise;
+      return options.videoStatus ? json({ error: 'Recovered media receipt failed verification.' }, options.videoStatus)
+        : new Response('verified fixture MP4 bytes', { headers: { 'content-type': options.videoType ?? 'video/mp4' } });
+    }
+    if (options.pollGate) await options.pollGate.promise;
+    const status = options.statuses?.[polls++] ?? 'completed';
+    return json({ run: { ...record, status, ...(options.record ?? {}) } });
+  };
+  let runCalls = 0;
+  const shell = mountShell(backend, {
+    setup: { compute: 'colab', confirmed: true, spendCap: 10 },
+    run: async (input, deps) => {
+      runCalls++;
+      deps.host.adoptBuiltPackage({ package: pkg });
+      deps.store.patch({ packageId: pkg.id, productionId: PRODUCTION_ID });
+      if (input.proposalOnly) return { ok: true, proposal: proposalForPackage(pkg, input.prompt, []), snapshot: null };
+      input.run = { pollMs: 0 };
+      deps.onRunStarted(offer.runId);
+      return { ok: false, code: 'RUN_FAILED', stage: 'run', message: 'The paid collection failed.',
+        ...(options.noKnownFailure ? {} : { failedRunId: offer.runId }) };
+    },
+  });
+  shell.root.submit(PROMPT);
+  await approveProposal(shell);
+  await waitFor(() => shell.root.innerHTML.includes('The paid collection failed.'));
+  return { ...shell, requests, backend, pkg, runCalls: () => runCalls };
+}
+
+test('normal failed-run UI explicitly recovers once, polls, then offers the new authenticated MP4 download', async () => {
+  const postGate = deferred();
+  const shell = await recoveryShell({ postGate, statuses: ['verifying', 'rendering', 'completed'] });
+  try {
+    await waitFor(() => shell.root.innerHTML.includes('data-super-easy-recover-outputs'));
+    assert.match(shell.root.innerHTML, /Uses downloaded files; no new generation credits/);
+    assert.doesNotMatch(shell.root.innerHTML, /data-super-easy-retry/);
+    assert.deepEqual(shell.requests.map(r => r.method), ['GET']);
+    shell.root.click('[data-super-easy-recover-outputs]');
+    shell.root.click('[data-super-easy-recover-outputs]');
+    assert.match(shell.root.innerHTML, /disabled>Recovering downloaded outputs/);
+    assert.deepEqual(shell.requests.filter(r => r.method === 'POST'), [
+      { url: '/api/run/failed_paid/recovery', method: 'POST', body: { baseRevision: 7 } },
+    ]);
+    postGate.resolve();
+    await waitFor(() => shell.root.innerHTML.includes('data-super-easy-download'));
+    assert.match(shell.root.innerHTML, /Your video was recovered from downloaded outputs/);
+    assert.match(shell.root.innerHTML, /href="blob:/);
+    assert.equal(shell.requests.at(-1).url, '/api/run/recovery_new/video');
+    assert.equal(shell.requests.filter(r => r.url.endsWith('/recovery')).length, 2, 'no silent review refresh');
+    assert.equal(shell.runCalls(), 2, 'only original proposal and approved run');
+    assert.equal(shell.backend.calls.some(r => ['plan', 'command', 'run', 'spend-cap', 'dispatch'].includes(r.kind)), false);
+    assert.ok(shell.requests.every(r => !r.url.includes('?') && !r.url.includes('/view')));
+  } finally { shell.dispose(); shell.restore(); }
+});
+
+test('availability refuses GET errors, unrelated packages, missing actions, and unknown run failures', async () => {
+  for (const options of [{ getStatus: 422 }, { getStatus: 409 }, { offerOverride: { packageId: 'other' } },
+    { offerOverride: { baseRevision: 8 } }, { offerOverride: { additionalGenerationCredits: 1 } },
+    { offerOverride: { runId: 'other_run' } }, { offer: {} }, { noKnownFailure: true }]) {
+    const shell = await recoveryShell(options);
+    try {
+      await new Promise(resolve => setTimeout(resolve, 10));
+      assert.doesNotMatch(shell.root.innerHTML, /data-super-easy-recover-outputs/);
+      shell.root.click('[data-super-easy-recover-outputs]');
+      assert.equal(shell.requests.filter(r => r.method === 'POST').length, 0);
+      assert.equal(shell.requests.length, options.noKnownFailure ? 0 : 1);
+    } finally { shell.dispose(); shell.restore(); }
+  }
+});
+
+test('stale recovery and corrupt or refused media never retry, regenerate, or enter the done gallery', async () => {
+  for (const options of [{ postStatus: 409, postBody: { code: 'RECOVERY_STALE', error: 'The reviewed package changed.' } },
+    { record: { status: 'failed', error: 'Downloaded media is corrupt.' } }, { videoStatus: 422 }, { videoType: 'text/html' }]) {
+    const shell = await recoveryShell(options);
+    try {
+      await waitFor(() => shell.root.innerHTML.includes('data-super-easy-recover-outputs'));
+      shell.root.click('[data-super-easy-recover-outputs]');
+      await waitFor(() => shell.root.innerHTML.includes('No new generation was requested.'));
+      assert.match(shell.root.innerHTML, /in Studio before trying recovery again/);
+      assert.doesNotMatch(shell.root.innerHTML, /data-super-easy-download|data-super-easy-recover-outputs|data-super-easy-retry/);
+      shell.root.click('[data-super-easy-recover-outputs]');
+      shell.root.click('[data-super-easy-retry]');
+      assert.equal(shell.requests.filter(r => r.method === 'POST').length, 1);
+      assert.equal(shell.runCalls(), 2);
+    } finally { shell.dispose(); shell.restore(); }
+  }
+});
+
+test('package edits invalidate the displayed review rather than silently refreshing it on click', async () => {
+  const shell = await recoveryShell();
+  try {
+    await waitFor(() => shell.root.innerHTML.includes('data-super-easy-recover-outputs'));
+    shell.editPackage({ ...shell.pkg, revision: 8 });
+    shell.root.click('[data-super-easy-recover-outputs]');
+    assert.deepEqual(shell.requests.map(r => r.method), ['GET']);
+  } finally { shell.dispose(); shell.restore(); }
+});
+
+test('changed creative inputs hide the recovery action and cannot spend its old review', async () => {
+  const shell = await recoveryShell();
+  try {
+    await waitFor(() => shell.root.innerHTML.includes('data-super-easy-recover-outputs'));
+    shell.root.selectLength(45);
+    assert.doesNotMatch(shell.root.innerHTML, /data-super-easy-recover-outputs/);
+    shell.root.click('[data-super-easy-recover-outputs]');
+    assert.deepEqual(shell.requests.map(r => r.method), ['GET']);
+  } finally { shell.dispose(); shell.restore(); }
+});
+
+test('cancel and package changes discard late availability, POST and video responses', async () => {
+  for (const phase of ['get', 'post', 'poll', 'video']) for (const change of ['cancel', 'package']) {
+    const gate = deferred();
+    const shell = await recoveryShell({ [`${phase}Gate`]: gate });
+    try {
+      if (phase !== 'get') {
+        await waitFor(() => shell.root.innerHTML.includes('data-super-easy-recover-outputs'));
+        shell.root.click('[data-super-easy-recover-outputs]');
+        if (phase === 'poll') await waitFor(() => shell.requests.some(r => r.url === '/api/run/recovery_new'));
+        if (phase === 'video') await waitFor(() => shell.requests.some(r => r.url.endsWith('/video')));
+      }
+      if (change === 'cancel') shell.root.click('[data-super-easy-make-another]');
+      else shell.editPackage({ ...shell.pkg, id: 'pkg_other' });
+      gate.resolve();
+      await new Promise(resolve => setTimeout(resolve, 10));
+      assert.doesNotMatch(shell.root.innerHTML, /data-super-easy-download|data-super-easy-recover-outputs/);
+      if (change === 'cancel' && phase !== 'get') assert.ok(shell.requests.some(r => r.url === '/api/run/recovery_new/cancel'));
+      assert.equal(shell.runCalls(), 2);
+    } finally { gate.resolve(); shell.dispose(); shell.restore(); }
+  }
+});
 
 test('a fresh Easy shell opens the saved measured failure and offers a scoped narration revision', async () => {
   const pkg = { id: 'pkg_1', revision: 1, title: 'Story', scenes: [{ id: 's1', narration: 'The original narration.' }] };

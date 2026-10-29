@@ -863,3 +863,55 @@ Tailscale link was published. Server-owned receipt/durable export recording and 
 fresh normal render are being implemented; no receipt will be fabricated for the
 old export. New namespace:
 `/tmp/opencode/easy-colab-acceptance/neon-reexport-receipted/`.
+
+### Revised Neon delivery completed, including receipt and reopen
+
+The fresh normal browser flow now completes **Keep three → Export → Download →
+full 1× playback → reload → Download again**, with exactly one CPU render and
+identical reopened bytes. KEEP IT ELECTRIC is visibly confirmed. The revised
+movie is **12.000 seconds, 1920×1080, 360 frames at 30 fps, silent**, 17,066,179
+bytes, SHA-256
+`5b4c3af1e5ac7e5b809c0b480f5bf355fed049bcc05d1b847f19dac896064c80`.
+The normal render took **243.682 seconds**. Saved r14 and all six generated-media
+hashes remain unchanged, with zero generation/provider requests observed.
+
+Render `r_1880a9d10e74` has a trusted final receipt and durable
+`runtime/renders/r_1880a9d10e74.artifact.json`, binding immutable render inputs and
+verified movie bytes. Authenticated artifact metadata/video routes support
+reopening and reject modified bytes, missing receipts or changed historical
+binding. The web client persists artifact identity rather than tokens or expiring
+URLs, resolves fresh authenticated access on reload and verifies the hash.
+
+Report: `/tmp/opencode/easy-colab-acceptance/neon-reexport-receipted/READY.md`.
+Private share: `http://100.72.41.9:8766/neon-after-rain-revised.mp4`; a full GET
+matches the receipt/download hash. **91 focused tests**, typecheck and production
+build passed. Full normal-speed browser playback completed and 14 timed frames
+were inspected; this is not continuous human-viewing acceptance. The original
+movie, prior unreceipted export and all original evidence remain preserved. Owned
+4671 server/browser and temporary credentials are cleaned up; the share remains.
+
+### Speaking retry: genuine conditioning ready; native-audio/chat gaps remain
+
+`/tmp/opencode/easy-colab-acceptance/presentation-speaking-bundled/PARENT-HANDOFF.md`
+records one initial UI plan, seven H3 shots and six real, hash-verified Kokoro
+conditioning WAVs containing the full exact monologue in order. Grouped lines fit
+their source/scene windows. However, H3 backgrounds retained the default muted
+playback while detached Kokoro narration remained enabled; extra visible copy and
+an opening foreground still also failed review. The one supported correction
+failed with `project_patch_plan: No draft exists yet; use project_update_plan
+first`, and r41 remained unchanged. These production paths are being repaired.
+
+**Correction to the worker's report:** 1080 frames at 24 fps is exactly 45 seconds
+and satisfies the user's duration request. Thirty fps was not requested and must
+not be enforced as an extra acceptance requirement. No paid approval, generation
+or spending occurred. Account remained **207.96**, campaign **5.15 spent / 0
+reserved / 54.85 remaining**, with zero active sessions/assignments/usage at cleanup.
+
+Normal Super Easy now also has an explicit **Recover downloaded outputs** action
+for matching server-advertised, zero-generation-credit recovery. It sends the
+reviewed revision once, tracks the new recovery run and returns verified output to
+the gallery/Download flow without re-planning or paid retry. **141 focused UI
+checks and typecheck passed**, then 47 affected tests after final wording changes.
+Stop abandons tracking and prevents late adoption; it does not promise server-side
+CPU recovery cancellation. Actual credits recovery/export remains independently
+in progress; no completed credits film is inferred from these UI tests.

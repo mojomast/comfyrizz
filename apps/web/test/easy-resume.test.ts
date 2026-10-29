@@ -89,6 +89,41 @@ test('recovery rejects mismatched package, revision, approval, newer plan and it
   }
 });
 
+test('completed approved Super Easy generation reopens copy-edited packages for explicit review', async () => {
+  const fresh = state({ packageId: 'pkg_1' });
+  const host = hostFor({ id: 'pkg_1', revision: 14 }, { ok: false });
+  const snapshot = journal();
+  snapshot.actions = [];
+  snapshot.events[0].data.actions = [{ id: 'final_1', kind: 'final', upperBound: 2 }];
+  snapshot.events[2] = { type: 'action.state_changed', data: { id: 'final_1', kind: 'final',
+    planId: 'plan_1', planHash: 'hash', state: 'completed', runId: 'run_original', expected: { packageRevision: 12 } } };
+  const api = { getProduction: async () => snapshot };
+  const recovered = await recoverProductionIdentity({ state: fresh, host, api, productionId: 'prod_1' });
+  assert.deepEqual(recovered, { productionId: 'prod_1', chatId: 'chat_1' });
+  const resumed = { ...fresh, ...recovered };
+  const facts = await resumeFacts({ state: resumed, host, api });
+  assert.equal(facts.allShotsKept, false);
+  assert.equal(facts.exportCurrent, false);
+  assert.equal(initialRoute('?package=pkg_1&step=export', resumed, facts).step, 'review');
+  assert.equal(resumed.planHash, null, 'no spend input hash or approval is fabricated');
+  for (const mutate of [
+    s => { s.events[2].data.state = 'running'; },
+    s => { s.events[2].data.state = 'failed'; },
+    s => { s.events[2].data.kind = 'shot.generate'; },
+    s => { s.events[2].data.planId = 'other'; },
+    s => { s.events[2].data.planHash = 'other'; },
+    s => { s.events[0].data.actions = []; },
+    s => { s.events[2].data.runId = null; },
+    s => { s.events[2].data.expected.packageRevision = 15; },
+    s => { s.events.splice(1, 1); },
+    s => { s.events.push({ type: 'action.state_changed', data: { ...s.events[2].data, state: 'failed' } }); },
+  ]) {
+    const refused = structuredClone(snapshot); mutate(refused);
+    assert.equal(await recoverProductionIdentity({ state: fresh, host,
+      api: { getProduction: async () => refused }, productionId: 'prod_1' }), null);
+  }
+});
+
 test('a mismatched package, an open gate and an idle snapshot stay false', async () => {
   const facts = await resumeFacts({
     state: state({ packageId: 'pkg_1', productionId: 'prod_1', exported: { revision: 2, at: null } }),

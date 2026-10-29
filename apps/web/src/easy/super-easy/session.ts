@@ -7,7 +7,7 @@
 
 import { watchProduction } from '../events.ts';
 import type { ProductionWatchState, WatchProductionOptions } from '../events.ts';
-import { runSuperEasy } from './run.ts';
+import { pollFinalRun, runSuperEasy } from './run.ts';
 import type {
   RunSuperEasyDeps,
   RunSuperEasyInput,
@@ -49,6 +49,7 @@ export interface SuperEasySession {
   generate(input: RunSuperEasyInput): Promise<SuperEasyRunResult>;
   /** Re-run the last prompt after a visible planning or preview failure. */
   retry(): Promise<SuperEasyRunResult | null>;
+  recoverDownloadedOutputs?(): Promise<void>;
   proposal(): SuperEasyProposal | null;
   /** Re-review an acknowledged editor save on return, never as part of approval. */
   refreshProposal(): 'refreshed' | 'waiting' | 'unchanged';
@@ -90,6 +91,90 @@ export function createSuperEasySession(options: SuperEasySessionOptions): SuperE
   let proposal: SuperEasyProposal | null = null;
   let reviewedPackage: any = null;
   let activeRunId: string | null = null;
+  let epoch = 0;
+  let recoveryContext: string | null = null;
+  let recoveryOffer: { runId: string; packageId: string; baseRevision: number } | null = null;
+
+  function contextKey(): string {
+    const state = options.store.get();
+    return JSON.stringify([state.packageId, planInputsHash(state), state.motionModel, state.chatId,
+      options.store.generation?.(), options.host.getPackage?.()]);
+  }
+
+  function recoveryAvailable(): boolean {
+    return !stopped && status === 'error' && recoveryOffer !== null && recoveryContext === contextKey();
+  }
+
+  function visibleFailure(): SuperEasyRunFailure | null {
+    return failure ? { ...failure, downloadedOutputsRecovery: recoveryAvailable() } : null;
+  }
+
+  async function recoverDownloadedOutputs(): Promise<void> {
+    if (!recoveryAvailable() || !options.api.recoverRunOutputs) return;
+    const offer = recoveryOffer!;
+    const context = recoveryContext;
+    const ticket = ++epoch;
+    const current = () => !stopped && ticket === epoch && context === contextKey();
+    recoveryOffer = null; // Consume the reviewed offer once, including ambiguous POST failures.
+    failure = null;
+    phase = 'run';
+    snapshot = { downloadedOutputsRecovery: 'verifying' };
+    patchStatus('running');
+    publish();
+    let recoveryId: string | null = null;
+    try {
+      const started = await options.api.recoverRunOutputs(offer.runId, { baseRevision: offer.baseRevision });
+      const body = started as { runId?: unknown; sourceRunId?: unknown } | null;
+      if (typeof body?.runId !== 'string' || !body.runId || body.runId === offer.runId || body.sourceRunId !== offer.runId) {
+        throw new Error('The server did not return a recovery operation for this run.');
+      }
+      recoveryId = body.runId;
+      if (!current()) {
+        void options.api.cancelRun?.(recoveryId).catch(() => {});
+        return;
+      }
+      activeRunId = recoveryId;
+      const record = await pollFinalRun(options.api, recoveryId, {
+        ...lastInput?.run,
+        isCurrent: current,
+        onRecord(record) {
+          snapshot = { downloadedOutputsRecovery: record.status === 'rendering' ? 'rendering' : 'verifying' };
+          publish();
+        },
+      });
+      if (record.status !== 'completed' || record.runId !== recoveryId || record.packageId !== offer.packageId || record.sourceRunId !== offer.runId) {
+        throw new Error('The recovery did not produce a completed record for this project.');
+      }
+      const blob = await options.api.getRunVideo(recoveryId);
+      if (!current()) return;
+      if (!blob.size || (blob.type && blob.type !== 'video/mp4')) throw new Error('The recovered MP4 response is invalid.');
+      const url = URL.createObjectURL(blob);
+      snapshot = { downloadedOutputsRecovery: 'completed',
+        finalVideo: { ready: true, status: 'done', url, runId: recoveryId } };
+      rememberObjectUrl(snapshot);
+      patchStatus('done');
+      publish();
+      options.onDone?.(snapshot);
+    } catch (error) {
+      if (!current()) return;
+      const message = error instanceof Error ? error.message : 'Recovery failed.';
+      failure = { ok: false, code: 'RECOVERY_FAILED', stage: 'run', retryable: false,
+        message: `${message} Check ${recoveryId ? `recovery ${recoveryId}` : 'the existing run'} in Studio before trying recovery again. No new generation was requested.` };
+      snapshot = null;
+      patchStatus('error');
+      publish();
+      options.onError?.(failure);
+    } finally {
+      if (ticket === epoch) {
+        activeRunId = null;
+        if (!stopped && context !== contextKey()) {
+          snapshot = null;
+          patchStatus('stopped');
+          publish();
+        }
+      }
+    }
+  }
 
   function withLiveInputs(input: RunSuperEasyInput): RunSuperEasyInput {
     const current = options.store.get();
@@ -143,7 +228,7 @@ export function createSuperEasySession(options: SuperEasySessionOptions): SuperE
       previewReady: preview,
       ...(failure === null
         ? {}
-        : { failure: { message: failure.message, retryable: failure.retryable !== false, narrationRevision: Boolean(failure.narrationRevision), proposalRevisionNote: failure.proposalRevisionNote } }),
+        : { failure: { ...visibleFailure()!, narrationRevision: Boolean(failure.narrationRevision) } }),
     });
   }
 
@@ -204,6 +289,9 @@ export function createSuperEasySession(options: SuperEasySessionOptions): SuperE
       ...(input.recoveryProductionId === undefined ? {} : { recoveryProductionId: input.recoveryProductionId }),
     };
     lastInput = nextInput;
+    const ticket = ++epoch;
+    recoveryOffer = null;
+    recoveryContext = null;
     activeRunId = null;
     stopped = false;
     proposal = null;
@@ -221,6 +309,7 @@ export function createSuperEasySession(options: SuperEasySessionOptions): SuperE
       ...options,
       onRunStarted(runId) {
         activeRunId = runId;
+        recoveryContext = options.host.getPackage?.() && options.store.get().idea ? contextKey() : null;
         options.onRunStarted?.(runId);
       },
       onPhase(next) {
@@ -252,6 +341,21 @@ export function createSuperEasySession(options: SuperEasySessionOptions): SuperE
       patchStatus('error');
       publish();
       options.onError?.(failure);
+      if (uncertainPaidWork && result.code === 'RUN_FAILED' && result.failedRunId
+        && recoveryContext !== null && recoveryContext === contextKey() && options.api.getRunRecovery && options.api.recoverRunOutputs) {
+        try {
+          const offered = await options.api.getRunRecovery(result.failedRunId) as any;
+          const pkg = options.host.getPackage?.();
+          if (!stopped && ticket === epoch && recoveryContext === contextKey()
+            && offered?.action === 'recover_downloaded_outputs' && offered.additionalGenerationCredits === 0
+            && offered.runId === result.failedRunId && offered.packageId === options.store.get().packageId
+            && offered.packageId === pkg?.id && Number.isSafeInteger(offered.baseRevision)
+            && offered.baseRevision >= 0 && offered.baseRevision === pkg?.revision) {
+            recoveryOffer = { runId: offered.runId, packageId: offered.packageId, baseRevision: offered.baseRevision };
+            publish();
+          }
+        } catch { /* Read-only availability is optional; a refusal never enables an action. */ }
+      }
       return failure;
     }
 
@@ -424,6 +528,8 @@ export function createSuperEasySession(options: SuperEasySessionOptions): SuperE
     }
     if (stopped) return;
     stopped = true;
+    epoch += 1;
+    recoveryOffer = null;
     const runId = activeRunId;
     activeRunId = null;
     if (runId) void options.api.cancelRun?.(runId).catch(() => {});
@@ -436,6 +542,7 @@ export function createSuperEasySession(options: SuperEasySessionOptions): SuperE
   return {
     generate,
     retry,
+    recoverDownloadedOutputs,
     proposal: () => proposal,
     refreshProposal,
     approveProposal,
@@ -446,7 +553,7 @@ export function createSuperEasySession(options: SuperEasySessionOptions): SuperE
     status: () => status,
     snapshot: () => snapshot,
     previewReady: () => preview,
-    failure: () => failure,
+    failure: visibleFailure,
     phase: () => phase,
     progressHtml,
   };

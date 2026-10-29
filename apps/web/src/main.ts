@@ -2366,11 +2366,15 @@ async function renderExportBlob(overrideReason?: string, options: { productionId
   for (let attempt = 0; ; attempt += 1) {
     const production = bound ? await productionRenderFields(productionId) : {};
     const requestBody = { ...(audioMixEnabled ? body : { ...body, mixAudio: false }), ...production };
+    const renderedRevision = Number(pkg.revision) || 0;
+    const renderedPackageId = String(pkg.id);
     const response = await apiFetch('/api/render', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(withRenderOverride(requestBody, overrideReason)) });
     if (response.ok) {
       const blob = await response.blob();
       const renderId = response.headers.get('x-comfyrizz-render-id') ?? undefined;
-      return { blob, revision: Number(pkg.revision) || 0, ...(renderId ? { renderId } : {}) };
+      const { readRenderedArtifact } = await import('./easy/render-artifact-client.ts');
+      const artifact = await readRenderedArtifact(apiFetch, response, blob, { packageId: renderedPackageId, revision: renderedRevision });
+      return { ...artifact, blob, revision: renderedRevision, ...(renderId ? { renderId } : {}) };
     }
     const errorBody = (await response.json().catch(() => ({}))) as { error?: string; code?: string; gate?: RenderGateSummary };
     if (bound && errorBody.code === 'REVISION_CONFLICT' && attempt < 2) continue;
@@ -2878,10 +2882,7 @@ function init(opened: OpenedProject): void {
 
   const easyRoot = document.getElementById('easy-root');
   if (easyRoot) {
-    // UX16F: the Easy export step persists only the canonical delivery record
-    // (name and bytes). A stable artifact resolver is not mounted because UX15
-    // exposes no artifact lookup route; the step reports "not connected" rather
-    // than pretending a saved download is recoverable.
+    // Saved MP4 records resolve through authenticated, byte-verified downloads.
     const easyHost = {
       apiFetch, editorStore, previewTake, refreshClips, adoptBuiltPackage, seekToScene,
       hasToken: () => Boolean(sessionToken()), getPackage: () => pkg, renderMp4: (options?: { productionId?: string | null; persistedRevision?: number }) => renderExportBlob(undefined, options),
@@ -2890,6 +2891,10 @@ function init(opened: OpenedProject): void {
       openAgentSettings: () => document.getElementById('agent-settings-open')?.dispatchEvent(new MouseEvent('click', { bubbles: true })),
       openEditor: () => { setMode('advanced'); }, playerElement: () => $('player'),
       exportArtifactStorage: exportArtifactStorage(),
+      resolveExportArtifact: async (record: { exportId: string; packageId: string; revision: number | null }) => {
+        const { resolveRenderedArtifact } = await import('./easy/render-artifact-client.ts');
+        return resolveRenderedArtifact(apiFetch, record);
+      },
     };
     mountEasyStudio(easyRoot, easyHost);
   }

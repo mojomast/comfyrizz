@@ -85,8 +85,10 @@ function planApproved(snapshot: unknown): boolean {
   return card.status === 'ready' && !card.stale && card.approved;
 }
 
-/** Recover identity only. Journalled render admission is evidence of the exact
- * package revision previously used; it is not evidence of a finished render. */
+/** Recover identity for review/local re-export, never new spend or clip approval.
+ * An exact render admission or a completed, approved final generation action
+ * permits reopening. Copy-only edits after completion still go through explicit
+ * clip review and the server's current-package freshness/render gates. */
 export async function recoverProductionIdentity(input: ResumeInput & { productionId: string }): Promise<Partial<EasyState> | null> {
   const pkg = asRecord(input.host.getPackage());
   if (!pkg || pkg.id !== input.state.packageId || !Number.isSafeInteger(pkg.revision)) return null;
@@ -108,7 +110,22 @@ export async function recoverProductionIdentity(input: ResumeInput & { productio
     return event?.type === 'action.planned' && data?.path === '/api/render'
       && data.packageId === pkg.id && data.packageRevision === pkg.revision;
   });
-  if (approvalIndex < 0 || !admitted) return null;
+  const finalActions = new Map<string, Record<string, unknown>>();
+  for (const value of events.slice(approvalIndex + 1)) {
+    const event = asRecord(value);
+    const data = asRecord(event?.data);
+    if (event?.type === 'action.state_changed' && data?.kind === 'final'
+      && data.planId === card.planId && data.planHash === card.planHash && typeof data.id === 'string') {
+      finalActions.set(data.id, data);
+    }
+  }
+  const completed = [...finalActions.values()].some(action => {
+    const expected = asRecord(action.expected);
+    return card.actions.some(slot => slot.id === action.id && slot.kind === 'final')
+      && action.state === 'completed' && typeof action.runId === 'string' && action.runId.startsWith('run_')
+      && Number.isSafeInteger(expected?.packageRevision) && Number(expected?.packageRevision) <= Number(pkg.revision);
+  });
+  if (approvalIndex < 0 || (!admitted && !completed)) return null;
   return { productionId: input.productionId, chatId: typeof production.conversationId === 'string' ? production.conversationId : null };
 }
 
