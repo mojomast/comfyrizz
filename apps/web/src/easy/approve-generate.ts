@@ -97,6 +97,7 @@ export interface ApproveAndGenerateOptions {
   onRunStarted?: RunStartedCallback;
   /** Approval still happens when a server-priced plan needs no paid dispatch. */
   dispatchActions?: boolean;
+  expectedPackageRevision?: number;
 }
 
 interface ApproveDeps extends ApproveAndGenerateOptions {
@@ -234,7 +235,7 @@ async function approveBody(
         ...built.command.payload,
         ...(Object.keys(decisions).length > 0 ? { decisions } : {}),
       },
-      expected: { productionRevision: revision },
+      expected: { productionRevision: revision, ...(options.expectedPackageRevision !== undefined ? { packageRevision: options.expectedPackageRevision } : {}) },
     };
     const approved = await sendPlanApproval(
       { sendCommand: (next) => deps.api.sendCommand(id, next) },
@@ -249,7 +250,7 @@ async function approveBody(
     const actions = card.actions.filter((action) => typeof action?.id === 'string'
       && action.id !== ''
       && (options.runMode !== 'final' || isPaidAction(action)));
-    const dispatched: Array<{ actionId: string; assetIds: string[]; response: unknown; revision: number }> = [];
+    const dispatched: Array<{ actionId: string; assetIds: string[]; serverExecuted: boolean; response: unknown; revision: number }> = [];
     for (const action of actions) {
       const commandId = stableId('cmd_dispatch', [...identity, action.id, revision]);
       let response: unknown;
@@ -257,7 +258,7 @@ async function approveBody(
         response = await deps.api.dispatchAction(id, {
           commandId,
           idempotencyKey: stableId('idem_dispatch', [...identity, action.id, revision]),
-          expected: { productionRevision: revision },
+          expected: { productionRevision: revision, ...(options.expectedPackageRevision !== undefined ? { packageRevision: options.expectedPackageRevision } : {}) },
           payload: { planId: card.planId, planRevision: card.proposalRevision, actionId: action.id },
         });
       } catch (error) {
@@ -268,11 +269,15 @@ async function approveBody(
       dispatched.push({
         actionId: action.id,
         assetIds: Array.isArray(action.assetIds) ? action.assetIds.filter((id): id is string => typeof id === 'string' && id !== '') : [],
+        serverExecuted: action.executor === 'chat-correction-take',
         response,
         revision,
       });
     }
     for (const item of dispatched) {
+      // Chat correction actions are consumed by the server's outbox and take
+      // runner. A second /api/run request races that durable dispatch.
+      if (item.serverExecuted) continue;
       try {
         // Later dispatches advance the production revision. An action's revision
         // from dispatch time is therefore stale by the time its run starts.
@@ -292,7 +297,7 @@ async function approveBody(
             planHash: card.planHash,
             actionId: item.actionId,
           },
-          expected: { productionRevision: expectedRevision },
+          expected: { productionRevision: expectedRevision, ...(options.expectedPackageRevision !== undefined ? { packageRevision: options.expectedPackageRevision } : {}) },
         });
         revision = revisionOf(started, expectedRevision);
         const runId = started && typeof started === 'object'
@@ -323,6 +328,7 @@ export async function approveAndGenerate(
     runMode: options.runMode ?? deps.runMode ?? 'take',
     onRunStarted: options.onRunStarted ?? deps.onRunStarted,
     dispatchActions: options.dispatchActions ?? deps.dispatchActions ?? true,
+    expectedPackageRevision: options.expectedPackageRevision ?? deps.expectedPackageRevision,
   };
   try {
     return await runApproval(() => approveBody(state, deps, deps.snapshot, true, resolved));

@@ -565,3 +565,56 @@ test('a response from another package is rejected before chat or package handoff
     dom.restore();
   }
 });
+
+test('Advanced chat reads a Super Easy package at send time and rejects a substituted reply', async () => {
+  const dom = installDom();
+  try {
+    const host = dom.doc.createElement('div');
+    dom.doc.body.appendChild(host);
+    let current = null;
+    const bodies = [];
+    const applied = [];
+    const chat = create(host, {
+      getEditContext: () => current,
+      applyProject: project => applied.push(project.package.id),
+      apiFetch: async (_url, init = {}) => {
+        bodies.push(JSON.parse(init.body));
+        return jsonResponse({ conversation: conversation({ projectId: 'pkg_replacement', phase: 'built' }), reply: 'Replaced.', built: true,
+          project: { package: { id: 'pkg_replacement', revision: 1 }, revision: 1 } });
+      },
+    });
+    await chat.ready;
+    current = { packageId: 'pkg_7c235c863aa8707a', revision: 6 };
+    await chat.send('Correct the existing olive video.', 'plan');
+    assert.equal(bodies[0].expectedPackageId, current.packageId);
+    assert.equal(bodies[0].expectedPackageRevision, 6);
+    assert.deepEqual(applied, []);
+    assert.match(host.querySelector('[data-project-chat-panel]').innerHTML, /different project/);
+    assert.equal(chat.conversation, null);
+  } finally { dom.restore(); }
+});
+
+test('an explicit new-video action leaves edit mode, while opening another package restores it', async () => {
+  const dom = installDom();
+  try {
+    const host = dom.doc.createElement('div');
+    dom.doc.body.appendChild(host);
+    let current = { packageId: 'pkg_existing', revision: 6 };
+    const bodies = [];
+    const chat = create(host, {
+      getEditContext: () => current,
+      apiFetch: async (_url, init = {}) => {
+        const body = JSON.parse(init.body); bodies.push(body);
+        return jsonResponse({ conversation: conversation({ id: body.conversationId, projectId: body.expectedPackageId ?? null }), reply: 'Draft only.', built: false });
+      },
+    });
+    await chat.ready;
+    host.querySelector('#project-new').dispatchEvent({ type: 'click', bubbles: true });
+    await chat.send('Make a new film.', 'plan');
+    assert.equal(bodies[0].expectedPackageId, undefined);
+    current = { packageId: 'pkg_other_opened', revision: 2 };
+    await chat.send('Edit the newly opened film.', 'plan');
+    assert.equal(bodies[1].expectedPackageId, current.packageId);
+    assert.equal(bodies[1].expectedPackageRevision, 2);
+  } finally { dom.restore(); }
+});

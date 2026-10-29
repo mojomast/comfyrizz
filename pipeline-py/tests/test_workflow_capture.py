@@ -125,6 +125,12 @@ def test_runner_saves_the_submitted_graph_without_secrets(make_runner, fake, out
 
     by_id = {entry["job"]: entry for entry in manifest["jobs"]}
     assert by_id["a_cutout.still"]["outputs"][0]["workflow"] == "assets/a_cutout.workflow.api.json"
+    assert by_id["a_cutout.still"]["outputs"][0]["workflow_submitted"] is True
+    plate_provenance = by_id["a_plate1.plate"]["outputs"][0]
+    assert plate_provenance["workflow_submitted"] is True
+    for consumed in plate_provenance["conditioning_inputs"]:
+        assert re.fullmatch(r"[a-f0-9]{64}", consumed["sha256"])
+        assert plate[consumed["nodeId"]]["inputs"][consumed["input"]] == consumed["uploadedName"]
     assert "workflow" not in (by_id["a_narr.audio"]["outputs"][0] if by_id["a_narr.audio"]["outputs"] else {})
 
 
@@ -140,5 +146,7 @@ def test_a_cache_hit_keeps_the_captured_workflow(make_runner, servers, out_dir: 
     again = make_runner(second, job_timeout=10.0).run()
     assert again["counts"].get("cached") == 5
     assert second.submit_count() == 0
+    assert all(output.get("workflow_submitted") is not True
+               for entry in again["jobs"] for output in entry["outputs"])
     assert api.read_bytes() == original
     assert json.loads(api.read_text(encoding="utf-8")) == _submitted(first, "a_plate1.plate")

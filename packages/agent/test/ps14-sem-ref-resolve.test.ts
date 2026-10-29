@@ -76,6 +76,57 @@ test('PS14 an invented identity-reference id fails the image tool with the bad i
   );
 });
 
+test('library IDs and unknown asset IDs fail before entering the package', async () => {
+  const { tools, getDraft } = mascotTools();
+  await proposeMascot(tools);
+  for (const id of ['ref_da2a332b660b055e', 'a_img_missing']) {
+    assert.throws(() => tools['assets.generate_image'].run({
+      scene_id: 'shot2', kind: 'illustration', intent: 'A historical motion study.', refs: [id],
+    }), (error: any) => {
+      assertSemRef(error, id);
+      if (id.startsWith('ref_')) assert.match(error.message, /library ID, not a package asset ID/);
+      return true;
+    });
+    assert.ok(!JSON.stringify(getDraft()).includes(id));
+  }
+});
+
+test('a scene ID cannot be used as an image reference, even when that scene has an image', async () => {
+  const { tools, getDraft } = mascotTools();
+  await tools['storyboard.propose'].run({
+    brief: 'A wordless generated film of an olive rolling across a table.',
+    scenes: [{ id: 's1', layout: 'hero' }, { id: 's2', layout: 'hero' }],
+  });
+  await tools['assets.generate_image'].run({ scene_id: 's1', intent: 'A green olive.' });
+  assert.throws(() => tools['assets.generate_image'].run({
+    scene_id: 's2', intent: 'The olive above a silver tray.', refs: ['s1'],
+  }), (error: any) => assertSemRef(error, 's1'));
+  assert.ok(!Object.values(getDraft().assets).some((asset: any) => asset.gen?.inputs?.reference === 's1'));
+});
+
+test('generated-film scene edits reveal editorial copy and keep wordless footage copy-free', async () => {
+  const { tools, getDraft } = mascotTools();
+  await tools['storyboard.propose'].run({
+    brief: 'A generated film of an olive rolling across a table.',
+    scenes: [{ id: 's0', layout: 'hero' }, { id: 's1', layout: 'hero', media_only: true }, { id: 's2', layout: 'hero' }],
+  });
+  assert.equal(getDraft().scenes[1].layout, 'list');
+  await tools['storyboard.edit'].run({ scene_id: 's1', patch: { copy: { headline: 'The Catch' } } });
+  assert.equal(getDraft().scenes[1].media_only, false);
+  assert.equal(getDraft().scenes[1].copy.headline, 'The Catch');
+  assert.equal(schema.validatePackage(getDraft()).valid, true, JSON.stringify(schema.validatePackage(getDraft()).errors));
+
+  const wordless = mascotTools();
+  await wordless.tools['storyboard.propose'].run({
+    brief: 'A wordless generated film of an olive. No captions or text.',
+    scenes: [{ id: 's1', layout: 'hero', media_only: true }],
+  });
+  await wordless.tools['storyboard.edit'].run({ scene_id: 's1', patch: { copy: { headline: 'The Catch' }, narration: 'An olive rolls.' } });
+  assert.equal(wordless.getDraft().scenes[0].copy, undefined);
+  assert.equal(wordless.getDraft().scenes[0].narration, undefined);
+  assert.ok(!schema.validatePackage(wordless.getDraft()).semantic.some((finding: any) => finding.code === 'SEM_COPY_REQUIRED'));
+});
+
 test('PS14 a placeholder identity ref binds the real cast asset and produces a valid package', async () => {
   const { tools, getDraft } = mascotTools();
   await proposeMascot(tools);

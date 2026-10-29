@@ -216,7 +216,7 @@ export function createRenderRoutes(options = {}) {
   }
 
   function sendRouteError(response, error) {
-    const status = Number.isSafeInteger(error?.status) ? error.status : 500;
+    const status = Number.isSafeInteger(error?.status) ? error.status : error?.code === 'INVALID_PACKAGE' ? 400 : 500;
     return sendJson(response, status, {
       error: error?.message ?? 'render failed',
       ...(typeof error?.code === 'string' ? { code: error.code } : {}),
@@ -650,7 +650,7 @@ export function createRenderRoutes(options = {}) {
         intent = intentFor(body);
         editorInfo = editorFor(pkg, body);
         snapshot = deliverySnapshotFor({ pkg, packagePath }, body, intent, editorInfo.editor);
-        preflight = preflightDelivery(snapshot, { reviews: body.reviews });
+        preflight = preflightDelivery(snapshot, { reviews: body.reviews, mixAudio: body.mixAudio });
       } catch (error) {
         return sendRouteError(response, error);
       }
@@ -717,6 +717,7 @@ export function createRenderRoutes(options = {}) {
           'x-comfyrizz-frames': String(result.frames),
           'x-comfyrizz-delivery-fingerprint': snapshot.fingerprint,
           'x-comfyrizz-export-intent': intent,
+          ...(preflight.warnings.length ? { 'x-comfyrizz-delivery-warnings': preflight.warnings.map(item => item.code).join(',') } : {}),
           'x-comfyrizz-speech-sha256': snapshot.speechSha256,
           ...(revision == null ? {} : { 'x-comfyrizz-revision': String(revision) }),
           ...productionHeaders(admission),
@@ -763,7 +764,7 @@ export function createRenderRoutes(options = {}) {
         });
       }
       if (!body.sceneId) return sendJson(response, 400, { error: 'sceneId required' });
-      const assets = sceneAssetIds(target.pkg, body.sceneId, measuredOptionsFromDir(dirname(target.packagePath)));
+      const assets = sceneAssetIds(target.pkg, body.sceneId, measuredOptionsFromDir(dirname(target.packagePath), target.pkg));
       if (assets === null) return sendJson(response, 404, { error: `unknown scene ${body.sceneId}` });
       const output = join(rendersDir, `${renderId}.mp4`);
       const cacheDir = sceneCacheDir(target.pkg.id);
@@ -792,7 +793,7 @@ export function createRenderRoutes(options = {}) {
         intent = intentFor(body);
         editorInfo = editorFor(target.pkg, body);
         snapshot = deliverySnapshotFor(target, body, intent, editorInfo.editor);
-        preflight = preflightDelivery(snapshot, { reviews: body.reviews });
+        preflight = preflightDelivery(snapshot, { reviews: body.reviews, mixAudio: body.mixAudio });
       } catch (error) {
         return sendRouteError(response, error);
       }
@@ -861,6 +862,7 @@ export function createRenderRoutes(options = {}) {
           'x-comfyrizz-full-reason': result.reason ?? '',
           'x-comfyrizz-delivery-fingerprint': snapshot.fingerprint,
           'x-comfyrizz-export-intent': intent,
+          ...(preflight.warnings.length ? { 'x-comfyrizz-delivery-warnings': preflight.warnings.map(item => item.code).join(',') } : {}),
           'x-comfyrizz-speech-sha256': snapshot.speechSha256,
           ...(target.revision == null ? {} : { 'x-comfyrizz-revision': String(target.revision) }),
           ...productionHeaders(admission),
@@ -936,7 +938,7 @@ export function createRenderRoutes(options = {}) {
         intent = intentFor(body);
         editorInfo = editorFor(target.pkg, body);
         snapshot = deliverySnapshotFor(target, body, intent, editorInfo.editor);
-        preflight = preflightDelivery(snapshot, { reviews: body.reviews });
+        preflight = preflightDelivery(snapshot, { reviews: body.reviews, mixAudio: body.mixAudio });
       } catch (error) {
         return sendRouteError(response, error);
       }
@@ -1033,6 +1035,7 @@ export function createRenderRoutes(options = {}) {
           'x-comfyrizz-frames': String(result.frames),
           'x-comfyrizz-delivery-fingerprint': snapshot.fingerprint,
           'x-comfyrizz-export-intent': intent,
+          ...(preflight.warnings.length ? { 'x-comfyrizz-delivery-warnings': preflight.warnings.map(item => item.code).join(',') } : {}),
           'x-comfyrizz-speech-sha256': snapshot.speechSha256,
           ...(target.revision == null ? {} : { 'x-comfyrizz-revision': String(target.revision) }),
           ...productionHeaders(admission),

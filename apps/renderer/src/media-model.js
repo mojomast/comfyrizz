@@ -43,6 +43,25 @@ export function isMediaKind(kind) {
 }
 
 /**
+ * Playback length used by MediaFill. Upload probes commonly provide
+ * durationSeconds without a frame count; that measured duration must win over
+ * the legacy 97/24 fallback. Explicit frames retain the original frames/fps path.
+ * @param {Asset} asset
+ * @returns {number}
+ */
+export function mediaPlaybackDurationSeconds(asset) {
+  const media = asset?.media;
+  const sourceFps = typeof media?.fps === 'number' && Number.isFinite(media.fps) && media.fps > 0 ? media.fps : 24;
+  if (typeof media?.frames === 'number' && Number.isFinite(media.frames) && media.frames >= 0) {
+    return media.frames / sourceFps;
+  }
+  if (typeof media?.durationSeconds === 'number' && Number.isFinite(media.durationSeconds) && media.durationSeconds > 0) {
+    return media.durationSeconds;
+  }
+  return 97 / 24;
+}
+
+/**
  * A media asset can only be drawn once it is ready and has a file. Pending GPU
  * slots keep the scene's procedural fallback instead of loading an empty path.
  * @param {Asset} [asset]

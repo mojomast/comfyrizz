@@ -3,6 +3,7 @@
 // ffmpeg-generated fixture clips produced at test time; no binaries are committed.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import { seedMockContribution } from './helpers/comfy-contribution.mjs';
 import { execFileSync } from 'node:child_process';
 import { createServer, request as httpRequest } from 'node:http';
 import { createHash } from 'node:crypto';
@@ -97,7 +98,7 @@ test('RL10d: export renders a package of generated MP4 takes', { skip: skipReaso
   };
 
   const app = createApp({ root: repo, token: TOKEN, runtimeDir: runtime });
-  app.store.seed(pkg);
+  seedMockContribution(app.store, pkg);
 
   const server = createServer(app.handler);
   await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));

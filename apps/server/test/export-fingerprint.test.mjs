@@ -9,6 +9,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createExporter, exportRenderFingerprint } from '../src/export.mjs';
 import { compileTimeline } from '../../../packages/planner/dist/src/index.js';
+import { collectMockContribution } from './helpers/comfy-contribution.mjs';
 
 const repo = new URL('../../..', import.meta.url).pathname;
 const seed = JSON.parse(readFileSync(join(repo, 'examples', 'launch-demo', 'package.json'), 'utf8'));
@@ -27,6 +28,7 @@ function workspace(t) {
 }
 
 function save(work, pkg) {
+  collectMockContribution(pkg, work.packageDir);
   writeFileSync(work.packagePath, `${JSON.stringify(pkg, null, 2)}\n`);
   return work.packagePath;
 }

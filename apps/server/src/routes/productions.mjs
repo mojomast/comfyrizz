@@ -298,6 +298,16 @@ export function createProductionRoutes(options = {}) {
     return contextFor(request);
   }
 
+  function requirePackageRevision(packageId, revision) {
+    if (revision === undefined) return;
+    if (!Number.isSafeInteger(revision) || revision < 1 || typeof packageId !== 'string' || !packageId) {
+      throw new RouteError('INVALID_REVISION', 'a package id and positive package revision are required', 400);
+    }
+    if (typeof readPackage !== 'function') throw new RouteError('PACKAGE_STORE_UNAVAILABLE', 'the package store is not configured', 500);
+    const pkg = readPackage(packageId);
+    if (!pkg || pkg.revision !== revision) throw new RouteError('REVISION_CONFLICT', 'The reviewed package changed; review the current proposal before approving.', 409);
+  }
+
   function assertCommandPathEnvelope(id, envelope) {
     if (!isPlainObject(envelope)) return envelope;
     if (envelope.kind === 'production.create') {
@@ -342,6 +352,7 @@ export function createProductionRoutes(options = {}) {
   async function handleCreate(request, response) {
     const envelope = assertCreateEnvelope(await readJsonBody(request));
     const context = await commandContext(request);
+    requirePackageRevision(envelope?.payload?.packageId, envelope?.expected?.packageRevision);
     const result = await handler.execute(envelope, context);
     sendJson(response, result.duplicate ? 200 : 201, result);
   }
@@ -393,6 +404,9 @@ export function createProductionRoutes(options = {}) {
     if (body.chip !== undefined && (typeof body.chip !== 'string' || body.chip.length > 200)) {
       throw new RouteError('INVALID_CHIP', 'chip must be a short string', 400);
     }
+    if (body.expectedPackageRevision !== undefined && (!Number.isSafeInteger(body.expectedPackageRevision) || body.expectedPackageRevision < 1)) {
+      throw new RouteError('INVALID_REVISION', 'expectedPackageRevision must be a positive integer', 400);
+    }
     return body;
   }
 
@@ -416,6 +430,7 @@ export function createProductionRoutes(options = {}) {
       throw new RouteError('PACKAGE_REQUIRED', 'the production package could not be read', 400);
     }
     if (!pkg) throw new RouteError('NOT_FOUND', 'package does not exist', 404);
+    requirePackageRevision(production.packageId, body.expectedPackageRevision);
 
     const described = planFromPackage({
       pkg,
@@ -430,6 +445,7 @@ export function createProductionRoutes(options = {}) {
     const planId = `plan_${randomUUID().replaceAll('-', '')}`;
     const commandId = `cmd_easy_${randomUUID().replaceAll('-', '')}`;
     const context = await commandContext(request);
+    requirePackageRevision(production.packageId, body.expectedPackageRevision);
     const result = await actions.propose({
       productionId: id,
       body: {
@@ -531,6 +547,9 @@ export function createProductionRoutes(options = {}) {
   async function handleCommand(request, response, id) {
     const envelope = assertCommandPathEnvelope(id, await readJsonBody(request));
     const context = await commandContext(request);
+    if (envelope?.kind === 'plan.approve' && envelope?.expected?.packageRevision !== undefined) {
+      requirePackageRevision(store.read(id)?.packageId, envelope.expected.packageRevision);
+    }
     const result = await handler.execute(envelope, context);
     sendJson(response, 200, result);
   }
@@ -626,6 +645,7 @@ export function createProductionRoutes(options = {}) {
     }
     const body = await readJsonBody(request);
     const context = await contextFor(request);
+    if (body?.expected?.packageRevision !== undefined) requirePackageRevision(store.read(id)?.packageId, body.expected.packageRevision);
     const result = await actions.dispatch({ productionId: id, body, context });
     sendJson(response, 202, result);
   }

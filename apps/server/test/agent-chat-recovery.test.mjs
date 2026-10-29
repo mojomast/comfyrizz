@@ -19,7 +19,7 @@ const PLAN = {
   stylePreset: 'cinematic-dark',
   scenes: [{
     id: 's_title', layout: 'title', headline: 'Recover, then continue', sub: 'A chat recovery test',
-    narration: 'Recover, then continue.', seconds: 4, visual: 'A procedural gradient',
+    narration: 'Recover, then continue.', seconds: 4, visual: 'An editorial computing plate', mediaType: 'image',
   }],
 };
 

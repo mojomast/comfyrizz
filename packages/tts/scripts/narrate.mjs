@@ -163,6 +163,9 @@ const audioCheck = spawnSync(
   ['-v', 'error', '-show_entries', 'stream=codec_name,sample_rate,channels,duration', '-of', 'json', normPath],
   { encoding: 'utf8' },
 );
+if (audioCheck.status !== 0) {
+  throw new Error(`narration ffprobe failed: ${audioCheck.error?.message || audioCheck.stderr?.trim() || `exit ${audioCheck.status}${audioCheck.signal ? ` (signal ${audioCheck.signal})` : ''}`}`);
+}
 const stream = JSON.parse(audioCheck.stdout).streams?.[0] ?? {};
 const report = {
   timelineHash: timeline.hash,
@@ -187,5 +190,6 @@ const report = {
 };
 writeFileSync(join(exampleDir, 'narration-report.json'), `${JSON.stringify(report, null, 2)}\n`);
 process.stdout.write(`${JSON.stringify(report, null, 2)}\n`);
-if (Object.values(report.checks).some(value => !value)) throw new Error('narration checks failed');
+const failedChecks = Object.entries(report.checks).filter(([, passed]) => !passed).map(([name]) => name);
+if (failedChecks.length) throw new Error(`narration checks failed: ${failedChecks.join(', ')} (timeline ${timelineSeconds}s, audio ${stream.duration ?? 'unknown'}s)`);
 process.stdout.write('narrated timeline ok\n');

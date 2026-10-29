@@ -6,7 +6,6 @@
 // same plan again. Every test uses the fake `colab` executable; nothing here talks to Google Colab or
 // the network.
 import assert from "node:assert/strict";
-import { createHash } from "node:crypto";
 import {
   existsSync,
   mkdirSync,
@@ -22,12 +21,10 @@ import test from "node:test";
 import { createColabBackend } from "../src/colab-backend.mjs";
 import { planJobs } from "../../jobs/src/index.mjs";
 import { installFakeColab, makeCli, readLog } from "./helpers.mjs";
+import { KLEIN_SHA, mockCapture, mockOutput, assertCollectedReceipt } from "./mock-generation.mjs";
 
 const REPO = resolve(fileURLToPath(new URL(".", import.meta.url)), "..", "..", "..");
 const LAUNCH_DEMO = join(REPO, "examples", "launch-demo", "package.json");
-const SHA = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
-
-const sha256 = (text) => createHash("sha256").update(text).digest("hex");
 
 /** A valid package with one pending generated still. */
 function fixture(assetId = "a_ip10_still") {
@@ -40,13 +37,14 @@ function fixture(assetId = "a_ip10_still") {
     gen: {
       generator: "flux3-klein",
       workflow: "workflows/flux3_klein_t2i.api.json",
-      workflow_sha256: SHA,
+      workflow_sha256: KLEIN_SHA,
       model: "flux-3-image-klein",
       caption: "A wide abstract nebula for the recovery test.",
       inputs: { prompt: "A wide abstract nebula.", width: 960, height: 544, seed: 11, steps: 16 },
     },
     model_license: { id: "LicenseRef-FLUX.3-Image-Klein" },
   };
+  pkg.scenes[0].background = { asset: assetId, fit: "cover" };
   return pkg;
 }
 
@@ -65,7 +63,7 @@ function manualManifest(doc, job, content, { complete = true, jobsHash = doc.has
         job_id: "job_ip10",
         attempt_id: "att_ip10_01",
         outputs: complete
-          ? [{ file: job.output, relative: job.output, sha256: sha256(content), bytes: Buffer.byteLength(content) }]
+          ? [mockOutput(job, content)]
           : [],
       },
     ],
@@ -90,6 +88,8 @@ function stageCollected(ws, content, options = {}) {
   const target = join(outDir, ...ws.job.output.split("/"));
   mkdirSync(dirname(target), { recursive: true });
   writeFileSync(target, content);
+  const capture = mockCapture(ws.job);
+  writeFileSync(join(outDir, capture.relative), capture.content);
   const manifest = manualManifest(ws.doc, ws.job, content, options);
   writeFileSync(join(outDir, "manifest.json"), JSON.stringify(manifest));
   return { outDir, target, manifest };
@@ -99,6 +99,7 @@ test("a restarted backend recovers collected output without calling Google Colab
   const ws = workspace();
   const content = "IP10-COLLECTED-BYTES";
   const manifest = manualManifest(ws.doc, ws.job, content);
+  const capture = mockCapture(ws.job);
   const fake = installFakeColab(ws.work, {
     state: {
       uploadCreatesDirs: true,
@@ -107,7 +108,8 @@ test("a restarted backend recovers collected output without calling Google Colab
           output: JSON.stringify({ v: 1, event: "job_done", job: ws.job.id }),
           files: [
             { path: "/content/comfyrizz/out/manifest.json", content: JSON.stringify(manifest) },
-            { path: `/content/comfyrizz/out/${ws.job.output}`, content },
+             { path: `/content/comfyrizz/out/${ws.job.output}`, content },
+             { path: `/content/comfyrizz/out/${capture.relative}`, content: capture.content },
           ],
         },
       },
@@ -141,6 +143,8 @@ test("a restarted backend recovers collected output without calling Google Colab
   assert.deepEqual(second.batchesRun, [], "nothing was submitted");
   assert.equal(second.manifest.complete, true);
   assert.equal(second.manifest.jobsHash, ws.doc.hash);
+  assert.deepEqual(second.manifest.jobs, first.manifest.jobs, "recovery retains job/attempt/output evidence");
+  assert.equal(readFileSync(join(ws.scratch, "out", capture.relative), "utf8"), capture.content);
   assert.equal(second.collect.recovered, true);
   assert.equal(second.collect.verified, true, JSON.stringify(second.collect.problems));
   assert.equal(second.collect.local, join(ws.scratch, "out"));
@@ -185,6 +189,7 @@ test("runPackage applies recovered output without allocating a session or upload
   assert.equal(result.verification.dir, staged.outDir, "verification must use the scratch that was recovered");
   assert.equal(result.applied.length, 1);
   assert.equal(result.package.assets.a_ip10_still.status, "ready");
+  assertCollectedReceipt(result, "a_ip10_still");
   assert.equal(result.up.state, "recovered");
   assert.equal(result.bootstrap.skipped, true, "a recovered run does not bootstrap a VM it did not start");
   assert.equal(result.health.recovered, true, "a recovered run does not health-check a VM it did not start");
@@ -225,9 +230,17 @@ test("recovery refuses a missing, incomplete, stale or tampered scratch output",
   assert.equal(notComplete.recovered, false);
   assert.match(notComplete.reason, /not complete|pending/i);
 
+  incomplete.jobs[0].status = "failed";
+  incomplete.counts = { failed: 1 };
+  writeFileSync(join(outDir, "manifest.json"), JSON.stringify(incomplete));
+  const failed = await recover();
+  assert.equal(failed.recovered, false);
+  assert.match(failed.reason, /not complete|failed/i);
+
   stageCollected(ws, content, { jobsHash: "f".repeat(64) });
   const stale = await recover();
   assert.equal(stale.recovered, false);
   assert.equal(stale.stale, true);
   assert.match(stale.reason, /different/i);
+  assert.deepEqual(readLog(fake.logPath), [], "negative recovery checks never allocate or resubmit");
 });

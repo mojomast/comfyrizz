@@ -9,6 +9,7 @@ import { inlineGeneratedAssets, narrationOptions, missingMediaFiles, preparePubl
 import { collectMediaDims } from '../src/media-dims.js';
 import { materializeCompositions } from './composition-worker.mjs';
 import { resolveBrowserExecutable } from './browser-executable.mjs';
+import { assertModelContribution } from '../../../packages/jobs/src/model-contribution.mjs';
 
 // Resolve the exact renderer/bundler versions used by the pinned CLI.
 const require = createRequire(import.meta.resolve('@remotion/cli/package.json'));
@@ -21,6 +22,7 @@ export async function renderPipeline(packagePath, output, { signal, onEvent = ()
   const validation = validatePackage(pkg);
   if (!validation.valid) throw new Error('Render package failed validation');
   let timeline = compileTimeline(pkg, narrationOptions(packageDir));
+  assertModelContribution({ pkg, packageDir, timeline });
   if (pkg.voice?.enabled && timeline.provisional) throw new Error('Narration timing is still provisional');
   const materialized = await materializeCompositions({ pkg, packageDir, timeline, signal, onEvent });
   pkg = materialized.pkg;

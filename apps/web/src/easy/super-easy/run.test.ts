@@ -3,10 +3,57 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createEasyStore } from '../store.ts';
 import { runSuperEasy } from './run.ts';
+import { mountSuperEasy } from './mount.ts';
+import { renderSuperEasyProposal } from './proposal.ts';
+import { createSuperEasySession } from './session.ts';
 
 const PRODUCTION_ID = 'prod_0123456789abcdef01234567';
 const PLAN_HASH = 'c'.repeat(64);
 const PROMPT = 'A friendly robot who learns to bake bread';
+
+test('revision error keeps the pinned package and allows an edited request through the mounted UI before approval', async () => {
+  const pkg = { id: 'pkg_1', revision: 42, scenes: [{ id: 's1', layout: 'title', copy: { headline: 'Original' } }], assets: {} };
+  const original = structuredClone(pkg);
+  const { api, host, store, calls } = harness({ builtPackage: pkg });
+  const build = api.buildVideo;
+  let attempt = 0;
+  api.buildVideo = async input => {
+    if (!input.proposalRevision) return build(input);
+    calls.push({ kind: 'revision', input });
+    if (++attempt === 1) throw new Error('Invalid revised package: Scene s1 (/scenes/0/copy/headline): layout title allows 48 characters for headline (got 62)');
+    return { package: { ...pkg, revision: 43, scenes: [{ ...pkg.scenes[0], copy: { headline: 'Short headline' } }] }, live: true, timeline: { scenes: [] } };
+  };
+  const session = createSuperEasySession({ api, host, store, go() {}, watch: () => () => {} });
+  const listeners = new Map();
+  const field = { value: '' };
+  const root = { innerHTML: '', dataset: {}, addEventListener(type, fn) { listeners.set(type, fn); }, removeEventListener() {}, querySelector(selector) { return selector === '#super-easy-proposal-change' ? field : null; } };
+  let pending;
+  const mounted = mountSuperEasy({ root, state: () => store.get(), onMoreControl() {}, proposal: () => session.proposal(), failure: () => session.failure(), onReviseProposal(note) { pending = session.reviseProposal(note); } });
+  await session.generate({ prompt: PROMPT, compute: 'cpu', proposalOnly: true });
+  const submit = value => { field.value = value; listeners.get('submit')({ target: { closest: selector => selector === '[data-super-easy-revise-proposal]' ? {} : null }, preventDefault() {} }); return pending; };
+  const note = 'Change s1 headline to a very long headline';
+  await submit(note);
+  mounted.render();
+  assert.match(root.innerHTML, /Scene s1 .*layout title allows 48 characters/);
+  assert.match(root.innerHTML, /Edit your revision request/);
+  assert.match(root.innerHTML, /Change s1 headline to a very long headline/);
+  assert.doesNotMatch(root.innerHTML, /data-super-easy-retry/);
+  assert.deepEqual(host.getPackage(), original);
+  assert.equal(store.get().idea.text, PROMPT);
+  assert.equal(await session.approveProposal(), null);
+  const corrected = await submit('Change s1 headline to Short headline');
+  assert.equal(corrected.ok, true, JSON.stringify(corrected));
+  assert.equal(session.proposal().reviewedPackageRevision, 43);
+  assert.equal(session.proposal().revisionNotes.length, 1);
+  assert.deepEqual(calls.filter(c => c.kind === 'revision').map(c => c.input.proposalRevision), [
+    { packageId: 'pkg_1', baseRevision: 42, note },
+    { packageId: 'pkg_1', baseRevision: 42, note: 'Change s1 headline to Short headline' },
+  ]);
+  assert.equal(calls.some(c => c.kind === 'production'), false);
+  await session.approveProposal();
+  assert.equal(calls.find(c => c.kind === 'production').input.expectedPackageRevision, 43);
+  mounted.destroy();
+});
 
 function memoryStorage() {
   const map = new Map();
@@ -209,6 +256,67 @@ function harness(options = {}) {
 function kinds(calls) {
   return calls.map((call) => call.kind);
 }
+
+test('CPU approval generates local narration before opening the review preview', async () => {
+  const pkg = { id: 'pkg_1', revision: 2, voice: { enabled: true, engine: 'kokoro' }, scenes: [{ id: 's1', narration: 'A line.' }], assets: {} };
+  const { api, host, calls, store } = harness({ builtPackage: pkg });
+  api.generateLocalNarration = async input => {
+    calls.push({ kind: 'narration', input });
+    return { package: { ...pkg, revision: 3, scenes: [{ ...pkg.scenes[0], narration_asset: 'a_narration' }], assets: { a_narration: { kind: 'audio', status: 'ready', file: 'audio/generated/id/narration.norm.wav' } } }, timeline: { durationInFrames: 90 }, revision: 3 };
+  };
+  const result = await runSuperEasy({ prompt: PROMPT, compute: 'cpu' }, { api, host, store, go: step => calls.push({ kind: 'go', step }) });
+  assert.equal(result.ok, true);
+  assert.ok(kinds(calls).indexOf('narration') > calls.findIndex(call => call.command?.kind === 'plan.approve'));
+  assert.ok(kinds(calls).indexOf('narration') < kinds(calls).indexOf('refresh'));
+  assert.equal(host.getPackage().assets.a_narration.status, 'ready');
+  assert.equal(calls.some(call => call.kind === 'run' || call.kind === 'dispatch'), false);
+});
+
+test('measured overrun produces a story-preserving revision request, not a repeated generation', async () => {
+  const pkg = { id: 'pkg_1', revision: 2, title: 'The Red-Headed League', voice: { enabled: true, engine: 'kokoro' }, scenes: [{ id: 's1', narration: 'A pawnbroker is hired for his hair.', copy: { headline: 'A strange offer' }, visual: 'Newspaper' }], assets: {} };
+  const { api, host, store } = harness({ builtPackage: pkg });
+  api.generateLocalNarration = async () => { throw Object.assign(new Error('Measured 73.3 seconds.'), { code: 'NARRATION_TOO_LONG', details: { measuredSeconds: 73.3, authoredSeconds: 45, scenes: [{ sceneId: 's1', measuredSeconds: 8, availableSeconds: 4.5, words: 7, targetWords: 3 }] } }); };
+  const result = await runSuperEasy({ prompt: PROMPT, compute: 'cpu', lengthS: 45 }, { api, host, store, go() {} });
+  assert.equal(result.ok, false);
+  assert.equal(result.retryable, false);
+  assert.match(result.narrationRevision, /73\.3s/);
+  assert.match(result.narrationRevision, /A pawnbroker is hired for his hair/);
+  assert.match(result.narrationRevision, /scene order/);
+  assert.match(result.narrationRevision, /targetWords/);
+});
+
+test('exact measured overflow carries frame slots to the scoped review request', async () => {
+  const pkg = { id: 'pkg_1', revision: 2, title: 'Story', voice: { enabled: true, engine: 'kokoro' }, scenes: [{ id: 's1', narration: 'A short story.' }], assets: {} };
+  const { api, host, store } = harness({ builtPackage: pkg });
+  api.generateLocalNarration = async () => { throw Object.assign(new Error('Does not fit'), { code: 'NARRATION_TOO_LONG', details: {
+    fps: 30, minimumFrames: 1520, targetFrames: 1350, excessFrames: 170, measuredSeconds: 1520 / 30, authoredSeconds: 45,
+    scenes: [{ sceneId: 's1', fromFrame: 0, sceneFrames: 82, transitionOutFrames: 0, measuredFrames: 100, availableFrames: 82, excessFrames: 18, measuredSeconds: 100 / 30, availableSeconds: 82 / 30, words: 3, targetWords: 2 }],
+  } }); };
+  const result = await runSuperEasy({ prompt: PROMPT, compute: 'cpu', lengthS: 45 }, { api, host, store, go() {} });
+  assert.equal(result.ok, false);
+  assert.match(result.narrationRevision, /minimum 1520 frames against 1350/);
+  assert.match(result.narrationRevision, /"fromFrame":0/);
+  assert.match(result.narrationRevision, /"excessFrames":18/);
+  assert.match(result.narrationRevision, /human review/);
+});
+
+test('failed proposal revision cannot surface the previous package as a fresh plan', async () => {
+  const { api, host, calls, store } = harness({ builtPackage: { id: 'pkg_1', revision: 42, scenes: [] } });
+  const input = { prompt: PROMPT, compute: 'cpu', proposalOnly: true, videoType: 'action-scene', motionModel: 'ltx', conversationId: 'chat_1', attachmentSignature: 'reference-v1' };
+  assert.equal((await runSuperEasy(input, { api, host, store, go() {} })).ok, true);
+  api.buildVideo = async () => { calls.push({ kind: 'failed-build' }); throw new Error('generated-film plan is incomplete: unknown asset "s1"'); };
+  const result = await runSuperEasy({ ...input, basePrompt: PROMPT, revisionNotes: ['Change the ending'] }, { api, host, store, go() {} });
+  assert.equal(result.ok, false);
+  assert.equal(result.code, 'PLAN_FAILED');
+  assert.match(result.message, /unknown asset/);
+  assert.equal(store.get().videoType, 'action-scene');
+  assert.equal(store.get().motionModel, 'ltx');
+  assert.equal(store.get().chatId, 'chat_1');
+  assert.equal(store.get().attachmentSignature, 'reference-v1');
+  assert.equal(store.get().idea.text, PROMPT);
+  assert.equal(calls.filter(call => call.kind === 'failed-build').length, 1);
+  assert.equal(calls.filter(call => ['production', 'dispatch', 'run'].includes(call.kind)).length, 0);
+});
 
 test('idea to plan to Draft to approve then the CPU path, with fake calls only', async () => {
   const previousFetch = globalThis.fetch;
@@ -537,6 +645,8 @@ test('a final-plan failure stops before approval or dispatch', async () => {
 test('the selected duration reaches the store and brief unless the prompt types its own duration', async () => {
   for (const options of [
     { prompt: PROMPT, lengthS: 60, expected: 'Length: about 60 seconds.' },
+    { prompt: PROMPT, lengthS: 12, expected: 'Length: exactly 12 seconds;' },
+    { prompt: PROMPT, lengthS: 40, expected: 'Length: exactly 40 seconds;' },
     { prompt: 'A 15-second bakery teaser with a warm ending', lengthS: 90, expected: null },
   ]) {
     const { api, host, calls, store } = harness();
@@ -551,8 +661,169 @@ test('the selected duration reaches the store and brief unless the prompt types 
   }
 });
 
-test('creative proposals can be revised for free and approved without rebuilding the package', async () => {
+test('Super Easy custom input reaches the planning API for title and data story', async () => {
+  for (const [videoType, seconds] of [['title-reveal', 12], ['data-story', 40], [null, 40]]) {
+    const { api, host, calls, store } = harness();
+    store.patch({ videoType });
+    const listeners = new Map();
+    const prompt = { value: PROMPT, focus() {} };
+    const preset = { checked: true, value: '30' };
+    const custom = { value: String(seconds), setAttribute() {}, removeAttribute() {}, focus() {},
+      closest: selector => selector === '[data-super-easy-custom-length]' ? custom : null };
+    const root = {
+      innerHTML: '', dataset: {},
+      addEventListener(type, fn) { listeners.set(type, fn); },
+      removeEventListener() {},
+      querySelector(selector) {
+        if (selector === '#super-easy-prompt') return prompt;
+        if (selector === '[data-super-easy-custom-length]') return custom;
+        if (selector === '[data-super-easy-length]:checked') return preset.checked ? preset : null;
+        return null;
+      },
+    };
+    let pending;
+    const handle = mountSuperEasy({ root, state: () => store.get(), onMoreControl() {},
+      onLengthChange(lengthS) { store.patch({ idea: { ...store.get().idea, lengthS } }); },
+      onGenerate(input) { pending = runSuperEasy({ ...input, proposalOnly: true }, { api, host, store, go() {} }); },
+    });
+    listeners.get('input')({ target: custom });
+    listeners.get('submit')({ target: { closest: selector => selector === '[data-super-easy-form]' ? {} : null }, preventDefault() {} });
+    assert.equal((await pending).ok, true);
+    const payload = calls.find(call => call.kind === 'build').input;
+    assert.match(payload.brief, new RegExp(`Length: exactly ${seconds} seconds;`));
+    assert.equal(payload.videoType ?? null, videoType);
+    handle.destroy();
+    store.flush();
+  }
+});
+
+test('video type, song trim, exact LRC and attachment identity reach planning and unchanged approval reuses the package', async () => {
   const { api, host, calls, store } = harness();
+  const raw = '[00:08.00]<00:08.00>Exact <00:08.50>lyric words\r\n[00:10.00]Second line';
+  const input = {
+    prompt: PROMPT,
+    compute: 'cpu',
+    videoType: 'music-video',
+    songTrim: { startSeconds: 7, endSeconds: 30 },
+    lyricsStyle: 'reel',
+    lyricsLrc: raw,
+    conversationId: 'chat_context123',
+    attachmentSignature: 'ctx_12345678_1',
+    attachmentRevision: 3,
+  };
+  const proposed = await runSuperEasy({ ...input, proposalOnly: true }, { api, host, store, go: () => {} });
+  assert.equal(proposed.ok, true);
+  const build = calls.find(call => call.kind === 'build').input;
+  assert.equal(build.videoType, 'music-video');
+  assert.deepEqual(build.songTrim, { startSeconds: 7, endSeconds: 30 });
+  assert.equal(build.lyricsStyle, 'reel');
+  assert.equal(build.lyricsLrc, raw);
+  assert.doesNotMatch(build.brief, /Exact|lyric words|Second line/u);
+  assert.equal(build.conversationId, 'chat_context123');
+  assert.equal(build.attachmentSignature, 'ctx_12345678_1');
+  assert.equal(Object.hasOwn(build, 'attachmentRevision'), false);
+  assert.equal(store.get().videoType, 'music-video');
+  assert.deepEqual(store.get().songTrim, { startSeconds: 7, endSeconds: 30 });
+  assert.equal(store.get().lyricsStyle, 'reel');
+  assert.equal(store.get().lyricsLrc, raw);
+  assert.equal(store.get().chatId, 'chat_context123');
+  assert.equal(store.get().attachmentSignature, 'ctx_12345678_1');
+  assert.equal(store.get().attachmentRevision, 3);
+
+  const approved = await runSuperEasy({ ...input, proposalOnly: false }, { api, host, store, go: () => {} });
+  assert.equal(approved.ok, true);
+  assert.equal(calls.filter(call => call.kind === 'build').length, 1, 'unchanged approval must not rebuild');
+  store.flush();
+});
+
+test('malformed or plain LRC blocks a Music Video run before provider or API work, even when style is Off', async () => {
+  for (const lyricsLrc of ['[00:no]Malformed timestamp', 'Plain lyrics without timestamps']) {
+    const { api, host, calls, store } = harness();
+    const result = await runSuperEasy({
+      prompt: PROMPT,
+      compute: 'cpu',
+      videoType: 'music-video',
+      lyricsStyle: 'off',
+      lyricsLrc,
+      proposalOnly: true,
+    }, { api, host, store, go: () => {} });
+    assert.equal(result.ok, false);
+    if (result.ok) return;
+    assert.equal(result.code, 'INVALID_LYRICS');
+    assert.match(result.message, /Line 1:/u);
+    assert.deepEqual(calls, [], 'parsing precedes AI selection, planning, upload and generation');
+  }
+});
+
+test('changing lyric style or raw LRC before approval rebuilds for review and never approves the old package', async () => {
+  const { api, host, calls, store } = harness();
+  const input = {
+    prompt: PROMPT,
+    compute: 'cpu',
+    videoType: 'music-video',
+    lyricsStyle: 'off',
+    lyricsLrc: '[00:01.00]Original line',
+  };
+  const proposed = await runSuperEasy({ ...input, proposalOnly: true }, { api, host, store, go: () => {} });
+  assert.equal(proposed.ok, true);
+  assert.equal(store.get().plan.status, 'building');
+  assert.notEqual(store.get().builtPackageInputsHash, null);
+
+  const changed = '[00:02.00]<00:02.00>Changed <00:02.50>line';
+  store.patch({ lyricsStyle: 'reel', lyricsLrc: changed });
+  const rebuilt = await runSuperEasy({ ...input, proposalOnly: false }, { api, host, store, go: () => {} });
+  assert.equal(rebuilt.ok, true);
+  assert.ok(rebuilt.proposal, 'the new lyric inputs require a fresh review');
+  const builds = calls.filter(call => call.kind === 'build');
+  assert.equal(builds.length, 2);
+  assert.equal(builds.at(-1).input.lyricsStyle, 'reel');
+  assert.equal(builds.at(-1).input.lyricsLrc, changed);
+  assert.equal(store.get().lyricsStyle, 'reel', 'stale approval input cannot restore the old style');
+  assert.equal(store.get().lyricsLrc, changed);
+  assert.equal(store.get().plan.status, 'building');
+  assert.equal(calls.some(call => call.kind === 'production'), false);
+  assert.equal(calls.some(call => call.kind === 'command' && call.command.kind === 'plan.approve'), false);
+  assert.equal(calls.some(call => ['dispatch', 'run', 'local-render'].includes(call.kind)), false);
+});
+
+test('an attachment completing before approval rebuilds for review and never approves the old package', async () => {
+  const { api, host, calls, store } = harness();
+  const input = {
+    prompt: PROMPT,
+    compute: 'cpu',
+    conversationId: 'chat_context123',
+    attachmentSignature: 'ctx_12345678_1',
+    attachmentRevision: 3,
+  };
+  const proposed = await runSuperEasy({ ...input, proposalOnly: true }, { api, host, store, go: () => {} });
+  assert.equal(proposed.ok, true);
+  assert.equal(store.get().plan.status, 'building');
+
+  store.patch({ attachmentSignature: 'ctx_abcdef90_2', attachmentRevision: 4 });
+  const rebuilt = await runSuperEasy({ ...input, proposalOnly: false }, { api, host, store, go: () => {} });
+
+  assert.equal(rebuilt.ok, true);
+  assert.ok(rebuilt.proposal, 'the changed inputs require review of a new proposal');
+  assert.equal(calls.filter(call => call.kind === 'build').length, 2);
+  assert.equal(calls.filter(call => call.kind === 'build').at(-1).input.attachmentSignature, 'ctx_abcdef90_2');
+  assert.equal(store.get().attachmentSignature, 'ctx_abcdef90_2', 'stale approval input cannot restore the old signature');
+  assert.equal(store.get().attachmentRevision, 4);
+  assert.equal(store.get().plan.status, 'building');
+  assert.equal(calls.some(call => call.kind === 'production'), false);
+  assert.equal(calls.some(call => call.kind === 'command' && call.command.kind === 'plan.approve'), false);
+  assert.equal(calls.some(call => ['dispatch', 'run', 'local-render'].includes(call.kind)), false);
+  store.flush();
+});
+
+test('creative proposals can be revised for free and approved without rebuilding the package', async () => {
+  const original = { id: 'pkg_1', revision: 42, scenes: [{ id: 's1', narration: 'A robot bakes.' }] };
+  const { api, host, calls, store } = harness({ builtPackage: original });
+  const build = api.buildVideo;
+  api.buildVideo = async input => {
+    const response = await build(input);
+    if (input.proposalRevision) response.package = { ...original, revision: 43, scenes: [{ id: 's1', narration: 'A robot joyfully bakes.' }] };
+    return response;
+  };
   const first = await runSuperEasy({ prompt: PROMPT, compute: 'cpu', proposalOnly: true }, { api, host, store, go: () => {} });
   assert.equal(first.ok, true);
   assert.ok(first.proposal);
@@ -563,11 +834,75 @@ test('creative proposals can be revised for free and approved without rebuilding
   assert.equal(revised.ok, true);
   assert.deepEqual(revised.proposal.revisionNotes, ['Make it more playful']);
   assert.match(calls.filter(call => call.kind === 'build').at(-1).input.brief, /Make it more playful/u);
+  assert.deepEqual(calls.filter(call => call.kind === 'build').at(-1).input.proposalRevision, { packageId: 'pkg_1', baseRevision: 42, note: 'Make it more playful' });
+  assert.match(renderSuperEasyProposal(revised.proposal), /Before: A robot bakes/);
+  assert.match(renderSuperEasyProposal(revised.proposal), /After: A robot joyfully bakes/);
+  assert.equal(revised.proposal.reviewedPackageRevision, 43);
   assert.equal(calls.some(call => call.kind === 'production'), false);
 
-  const approved = await runSuperEasy({ prompt: PROMPT, compute: 'cpu', proposalOnly: false, basePrompt: PROMPT, revisionNotes: ['Make it more playful'] }, { api, host, store, go: () => {} });
+  const approved = await runSuperEasy({ prompt: PROMPT, compute: 'cpu', proposalOnly: false, basePrompt: PROMPT, revisionNotes: ['Make it more playful'], reviewedPackageRevision: 43 }, { api, host, store, go: () => {} });
   assert.equal(approved.ok, true);
   assert.equal(calls.filter(call => call.kind === 'build').length, 2, 'approval resumes the existing package');
   assert.equal(calls.some(call => call.kind === 'production'), true);
   store.flush();
+});
+
+test('45-second narration-only proposal edits the pinned package and requires review before approval', async () => {
+  const original = { id: 'pkg_1', revision: 42, title: 'League', format: { fps: 30 }, duration: { mode: 'target', targetFrames: 1350, exact: true }, scenes: [{ id: 's1', narration: 'He digs thirty feet toward the vault.', preferredFrames: 1350 }], assets: {} };
+  const { api, host, calls, store } = harness({ builtPackage: original });
+  const build = api.buildVideo;
+  api.buildVideo = async input => {
+    const response = await build(input);
+    if (input.narrationRevision) response.package = { ...original, revision: 43, scenes: [{ ...original.scenes[0], narration: 'He digs toward the bank.' }] };
+    return response;
+  };
+  const base = { prompt: PROMPT, compute: 'cpu', lengthS: 45, proposalOnly: true };
+  assert.equal((await runSuperEasy(base, { api, host, store, go() {} })).ok, true);
+  const note = 'Shorten narration to fit comfortably within each shot, allowing for transition overlaps. Preserve the exact 45-second total and the source story.';
+  const revised = await runSuperEasy({ ...base, basePrompt: PROMPT, revisionNotes: [note] }, { api, host, store, go() {} });
+  assert.equal(revised.ok, true);
+  assert.deepEqual(calls.filter(call => call.kind === 'build').at(-1).input.narrationRevision, { packageId: 'pkg_1', baseRevision: 42, note });
+  assert.equal(calls.some(call => call.kind === 'production' || call.command?.kind === 'plan.approve'), false);
+  assert.match(renderSuperEasyProposal(revised.proposal), /Factual accuracy is not automatically verified/);
+  assert.match(renderSuperEasyProposal(revised.proposal), /He digs toward the bank/);
+  assert.equal(revised.proposal.reviewedPackageRevision, 43);
+  const approved = await runSuperEasy({ ...base, proposalOnly: false, basePrompt: PROMPT, revisionNotes: [note], reviewedPackageRevision: revised.proposal.reviewedPackageRevision }, { api, host, store, go() {} });
+  assert.equal(approved.ok, true);
+  assert.equal(calls.filter(call => call.kind === 'build').length, 2);
+  assert.ok(calls.some(call => call.kind === 'production'));
+  assert.equal(calls.find(call => call.kind === 'production').input.expectedPackageRevision, 43);
+  assert.ok(calls.filter(call => call.kind === 'plan').every(call => call.body.expectedPackageRevision === 43));
+  assert.equal(calls.find(call => call.command?.kind === 'plan.approve').command.expected.packageRevision, 43);
+  store.flush();
+});
+
+test('narration-only revision fails closed when attachment or package inputs have changed', async () => {
+  const pkg = { id: 'pkg_1', revision: 42, scenes: [{ id: 's1', narration: 'A story.' }], assets: {} };
+  const { api, host, calls, store } = harness({ builtPackage: pkg });
+  const base = { prompt: PROMPT, compute: 'cpu', proposalOnly: true };
+  assert.equal((await runSuperEasy(base, { api, host, store, go() {} })).ok, true);
+  store.patch({ attachmentRevision: store.get().attachmentRevision + 1 });
+  const result = await runSuperEasy({ ...base, basePrompt: PROMPT, revisionNotes: ['Shorten narration to fit comfortably within each shot, allowing for transition overlaps. Preserve the exact 45-second total and the source story.'] }, { api, host, store, go() {} });
+  assert.equal(result.ok, false);
+  assert.match(result.message, /changed/);
+  assert.equal(calls.filter(call => call.kind === 'build').length, 1);
+  store.flush();
+});
+
+test('focused proposal revision rejects changed sources or a different reviewed package revision', async () => {
+  for (const change of ['attachment', 'revision']) {
+    const pkg = { id: 'pkg_1', revision: 42, scenes: [{ id: 's1', narration: 'A story.' }], assets: {} };
+    const { api, host, calls, store } = harness({ builtPackage: pkg });
+    const base = { prompt: PROMPT, compute: 'cpu', proposalOnly: true };
+    const first = await runSuperEasy(base, { api, host, store, go() {} });
+    assert.equal(first.ok, true);
+    if (change === 'attachment') store.patch({ attachmentRevision: store.get().attachmentRevision + 1 });
+    else pkg.revision = 43;
+    const result = await runSuperEasy({ ...base, basePrompt: PROMPT, revisionNotes: ['Correct the wording'], reviewedPackageRevision: 42 }, { api, host, store, go() {} });
+    assert.equal(result.ok, false);
+    assert.match(result.message, /changed/);
+    assert.equal(calls.filter(call => call.kind === 'build').length, 1);
+    assert.equal(calls.some(call => ['production', 'dispatch', 'run'].includes(call.kind)), false);
+    store.flush();
+  }
 });

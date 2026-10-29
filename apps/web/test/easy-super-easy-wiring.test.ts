@@ -21,6 +21,7 @@ export async function load(url, context, next) {
 
 const { mountEasyStudio } = await import('../src/easy/mount.ts');
 const { createSuperEasySession } = await import('../src/easy/super-easy/session.ts');
+const { defaultEasyState, planInputsHash } = await import('../src/easy/store.ts');
 
 const PRODUCTION_ID = 'prod_0123456789abcdef01234567';
 const PLAN_HASH = 'c'.repeat(64);
@@ -72,6 +73,9 @@ class FakeWindow {
   dispatch(type, event = {}) {
     for (const listener of Array.from(this.listeners.get(type) ?? [])) listener(event);
   }
+
+  setInterval() { return 1; }
+  clearInterval() {}
 }
 
 class FakeDocument {
@@ -83,6 +87,10 @@ class FakeDocument {
 
   getElementById() {
     return null;
+  }
+
+  createElement() {
+    return { setAttribute() {}, replaceChildren() {}, append() {}, remove() {} };
   }
 }
 
@@ -139,6 +147,14 @@ class FakeRoot {
     for (const listener of Array.from(this.listeners.get('change') ?? [])) listener({ target });
   }
 
+  attach(files) {
+    const target = {
+      files,
+      closest: (selector) => (selector === '[data-super-easy-context-files]' ? target : null),
+    };
+    for (const listener of Array.from(this.listeners.get('change') ?? [])) listener({ target });
+  }
+
   revise(note) {
     this.proposalChange.value = note;
     const target = { closest: (selector) => (selector === '[data-super-easy-revise-proposal]' ? {} : null) };
@@ -184,6 +200,7 @@ function planEvent(sequence, index) {
 function createBackend(options = {}) {
   const calls = [];
   let revision = 3;
+  let packageRevision = 0;
   let iteration = null;
   const planEvents = [];
   let releaseBuild = null;
@@ -191,6 +208,14 @@ function createBackend(options = {}) {
     ? new Promise((resolve) => {
         releaseBuild = resolve;
       })
+    : null;
+  let releaseConversation = null;
+  let conversationGate = options.holdConversation
+    ? new Promise((resolve) => { releaseConversation = resolve; })
+    : null;
+  let releaseUpload = null;
+  const uploadGate = options.holdUpload
+    ? new Promise((resolve) => { releaseUpload = resolve; })
     : null;
 
   function snapshot() {
@@ -225,13 +250,37 @@ function createBackend(options = {}) {
     const method = String(init.method ?? 'GET').toUpperCase();
     const path = new URL(String(input), 'http://fake.local').pathname;
 
+    if (path === '/api/conversations' && method === 'POST') {
+      calls.push({ kind: 'conversation' });
+      const generation = calls.filter(call => call.kind === 'conversation').length;
+      if (generation === 1 && conversationGate) await conversationGate;
+      return json({ chatId: generation === 1 ? 'chat_oldproject' : 'chat_newproject' });
+    }
+    if (/^\/api\/chat\/[^/]+\/references$/u.test(path) && method === 'POST') {
+      calls.push({ kind: 'upload', path, filename: decodeURIComponent(init.headers?.['x-filename'] ?? '') });
+      if (uploadGate) await uploadGate;
+      return json({
+        reference: {
+          id: `ref_${calls.filter(call => call.kind === 'upload').length}`,
+          kind: 'image',
+          label: decodeURIComponent(init.headers?.['x-filename'] ?? 'upload'),
+          usage: 'reference',
+          rightsAsserted: true,
+        },
+      });
+    }
     if (path === '/api/agent' && method === 'POST') {
-      calls.push({ kind: 'build', body: JSON.parse(String(init.body ?? '{}')) });
+      const body = JSON.parse(String(init.body ?? '{}'));
+      calls.push({ kind: 'build', body });
       if (buildGate) await buildGate;
-      return json({ package: { id: 'pkg_1' }, live: true });
+      if (body.proposalRevision && (body.proposalRevision.packageId !== 'pkg_1' || body.proposalRevision.baseRevision !== packageRevision)) {
+        return json({ error: { code: 'STALE_PACKAGE', message: 'The project changed.' } }, 409);
+      }
+      packageRevision += 1;
+      return json({ package: { id: 'pkg_1', revision: packageRevision }, live: true });
     }
     if (path === '/api/productions' && method === 'POST') {
-      calls.push({ kind: 'production' });
+      calls.push({ kind: 'production', body: JSON.parse(String(init.body ?? '{}')) });
       return json({ productionId: PRODUCTION_ID, production: { id: PRODUCTION_ID, revision } });
     }
     if (/^\/api\/productions\/[^/]+\/easy-plan$/u.test(path) && method === 'POST') {
@@ -295,6 +344,13 @@ function createBackend(options = {}) {
     calls,
     releaseBuild() {
       releaseBuild?.();
+    },
+    releaseConversation() {
+      conversationGate = null;
+      releaseConversation?.();
+    },
+    releaseUpload() {
+      releaseUpload?.();
     },
     recoverPlan() {
       options.failPlan = false;
@@ -360,15 +416,16 @@ function finalWatchState() {
   return state;
 }
 
-function mountShell(backend) {
+function mountShell(backend, options = {}) {
   const previousStorage = globalThis.localStorage;
   globalThis.localStorage = memoryStorage();
   const document = new FakeDocument();
+  document.defaultView.location.search = options.search ?? '';
   const root = new FakeRoot(document);
   let watchOptions = null;
   let stopCalls = 0;
   let createCalls = 0;
-  let currentPackage = null;
+  let currentPackage = options.package ?? null;
 
   const host = {
     apiFetch: backend.apiFetch,
@@ -415,6 +472,9 @@ function mountShell(backend) {
     watch: () => watchOptions,
     stopCalls: () => stopCalls,
     createCalls: () => createCalls,
+    savedState() {
+      return JSON.parse(globalThis.localStorage.getItem('comfyrizz.easy.new'));
+    },
     navigate() {
       document.defaultView.location.search = '';
       document.defaultView.dispatch('popstate', {});
@@ -425,6 +485,36 @@ function mountShell(backend) {
     },
   };
 }
+
+test('a fresh Easy shell opens the saved measured failure and offers a scoped narration revision', async () => {
+  const pkg = { id: 'pkg_1', revision: 1, title: 'Story', scenes: [{ id: 's1', narration: 'The original narration.' }] };
+  const state = defaultEasyState();
+  Object.assign(state, { packageId: pkg.id, productionId: PRODUCTION_ID, chatId: 'chat_original', videoType: 'data-story', attachmentSignature: 'source-pin', attachmentRevision: 1 });
+  state.idea.text = PROMPT;
+  state.builtPackageInputsHash = planInputsHash(state);
+  state.planHash = state.builtPackageInputsHash;
+  state.plan.status = 'ready';
+  const backend = createBackend();
+  const fetchBase = backend.apiFetch;
+  backend.apiFetch = async (url, init) => String(url).endsWith('/narration-fit') ? json({
+    code: 'NARRATION_TOO_LONG', packageId: pkg.id, packageRevision: 1,
+    details: { measuredSeconds: 31, authoredSeconds: 30, scenes: [{ sceneId: 's1', measuredSeconds: 4, availableSeconds: 3, targetWords: 2 }] },
+    inputs: { state, input: { prompt: PROMPT, basePrompt: PROMPT, revisionNotes: [], conversationId: state.chatId } },
+  }) : fetchBase(url, init);
+  const shell = mountShell(backend, { search: `?package=pkg_1&production=${PRODUCTION_ID}`, package: pkg });
+  try {
+    await waitFor(() => shell.root.innerHTML.includes('data-super-easy-revise-narration'));
+    assert.match(shell.root.innerHTML, /Measured duration: 31 seconds/);
+    shell.root.click('[data-super-easy-revise-narration]');
+    await waitFor(() => backend.calls.some(call => call.kind === 'build'));
+    const request = backend.calls.find(call => call.kind === 'build').body;
+    assert.equal(request.narrationRevision.packageId, pkg.id);
+    assert.equal(request.narrationRevision.baseRevision, 1);
+    assert.equal(request.narrationRevision.recoveryProductionId, PRODUCTION_ID);
+    assert.equal(request.conversationId, 'chat_original');
+    assert.equal(backend.calls.some(call => call.kind === 'command'), false);
+  } finally { shell.dispose(); shell.restore(); }
+});
 
 async function approveProposal(shell) {
   await waitFor(() => shell.root.innerHTML.includes('data-super-easy-approve-proposal'));
@@ -455,7 +545,7 @@ test('Generate in the real Easy shell starts one Draft session on This computer'
     assert.equal(backend.calls.some((call) => call.kind === 'clips' && call.packageId === PRODUCTION_ID), false);
     const plans = backend.calls.filter((call) => call.kind === 'plan');
     assert.ok(plans.length >= 2);
-    for (const call of plans) assert.deepEqual(call.body, { level: 'draft', compute: 'cpu' });
+    for (const call of plans) assert.deepEqual(call.body, { level: 'draft', compute: 'cpu', expectedPackageRevision: 1 });
 
     const commands = backend.calls.filter((call) => call.kind === 'command').map((call) => call.command);
     const iterationSet = commands.find((command) => command.kind === 'iteration.set');
@@ -497,6 +587,9 @@ test('the selected duration persists through proposal revision and approval brie
       assert.doesNotMatch(call.body.brief, /Length: about 30 seconds\./u);
     }
     assert.match(builds[1].body.brief, /Make the ending more playful/u);
+    assert.deepEqual(builds[1].body.proposalRevision, { packageId: 'pkg_1', baseRevision: 1, note: 'Make the ending more playful' });
+    assert.equal(backend.calls.find(call => call.kind === 'production')?.body?.expected?.packageRevision, 2);
+    assert.ok(backend.calls.filter(call => call.kind === 'plan').every(call => call.body.expectedPackageRevision === 2));
   } finally {
     shell.dispose();
     shell.restore();
@@ -552,6 +645,42 @@ test('a second Generate while one runs does not start a second session', async (
     await waitFor(() => shell.watch() !== null);
     assert.equal(shell.createCalls(), 1);
   } finally {
+    shell.dispose();
+    shell.restore();
+  }
+});
+
+test('deferred conversation and upload completions stay out of Start New projects', async () => {
+  const backend = createBackend({ holdConversation: true, holdUpload: true });
+  const shell = mountShell(backend);
+  try {
+    await waitFor(() => shell.root.dataset.superEasyView === 'home');
+    shell.root.attach([{ name: 'old.png', type: 'image/png', size: 100 }]);
+    await waitFor(() => backend.calls.filter(call => call.kind === 'conversation').length === 1);
+
+    shell.root.click('[data-super-easy-make-another]');
+    shell.root.attach([{ name: 'new.png', type: 'image/png', size: 100 }]);
+    await waitFor(() => backend.calls.filter(call => call.kind === 'conversation').length === 2);
+
+    backend.releaseConversation();
+    await waitFor(() => backend.calls.filter(call => call.kind === 'upload').length === 1);
+    assert.equal(backend.calls.find(call => call.kind === 'upload').filename, 'new.png');
+    assert.equal(backend.calls.some(call => call.kind === 'upload' && call.filename === 'old.png'), false);
+
+    shell.root.click('[data-super-easy-make-another]');
+    backend.releaseUpload();
+    await new Promise(resolve => setImmediate(resolve));
+    await new Promise(resolve => setImmediate(resolve));
+
+    const fresh = shell.savedState();
+    assert.equal(fresh.chatId, null);
+    assert.equal(fresh.attachmentSignature, null);
+    assert.equal(fresh.attachmentRevision, 0);
+    assert.equal(backend.calls.filter(call => call.kind === 'upload').length, 1);
+    assert.equal(backend.calls.some(call => call.kind === 'build'), false);
+  } finally {
+    backend.releaseConversation();
+    backend.releaseUpload();
     shell.dispose();
     shell.restore();
   }

@@ -18,6 +18,7 @@ export interface PackageFormat {
 export interface PackageDuration {
   mode: 'target' | 'flexible';
   targetFrames?: number;
+  exact?: boolean;
 }
 
 export interface PackageCopy {
@@ -114,6 +115,8 @@ export interface Scene {
   variant?: string;
   preferredFrames?: number;
   copy?: PackageCopy;
+  /** Title-only headline size, 24–512 composition pixels; absent keeps layout defaults. */
+  headline_size?: number;
   data?: SceneData | null;
   background?: SceneBackground | null;
   foreground?: SceneForeground[];
@@ -129,6 +132,10 @@ export interface Scene {
   /** H17: the ltx25-a2v clip generated for this scene (falls back to the package portrait). */
   presenter_asset?: string;
   locked?: boolean;
+  audio_trim?: unknown;
+  narration_duration_frames?: number;
+  drawing?: unknown;
+  media?: Array<{ asset?: string }>;
 }
 
 export interface AssetGen {

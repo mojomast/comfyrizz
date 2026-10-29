@@ -12,13 +12,14 @@ import type { MediaDimsMap } from './media';
 import type { InlineAsset } from './components';
 import type { MediaSidecar } from './media';
 import { PackageComposition, SafeAudio } from './composition';
+import { compositionDurationInFrames } from './audio-mix-model.js';
 
 const pkg = pkgJson as unknown as PackageV1;
 const timeline = timelineJson as unknown as Timeline;
 const narratedPkg = narratedPkgJson as unknown as PackageV1;
 const narratedTimeline = narratedTimelineJson as unknown as Timeline;
 
-type DemoProps = { pkg: PackageV1; timeline: Timeline; scenes?: Scene[]; generatedAssets?: Record<string, InlineAsset>; media?: MediaSidecar; missingMedia?: string[]; mediaDims?: MediaDimsMap; mixAudio?: boolean };
+type DemoProps = { pkg: PackageV1; timeline: Timeline; scenes?: Scene[]; generatedAssets?: Record<string, InlineAsset>; media?: MediaSidecar; missingMedia?: string[]; mediaDims?: MediaDimsMap; mixAudio?: boolean; reducedMotion?: boolean };
 
 function LaunchDemo(props: Partial<DemoProps>) {
   return (
@@ -47,7 +48,7 @@ function NarratedDemo() {
  * The export path used by renderPackage and the server. Same resolved narration,
  * captions and mix as the web Player. No preview mediaSources: files stay on staticFile.
  */
-function PackageDemo({ pkg: demoPkg, timeline: demoTimeline, scenes, generatedAssets, media, missingMedia, mediaDims, mixAudio = true }: Partial<DemoProps>) {
+function PackageDemo({ pkg: demoPkg, timeline: demoTimeline, scenes, generatedAssets, media, missingMedia, mediaDims, mixAudio = true, reducedMotion = false }: Partial<DemoProps>) {
   return (
     <PackageComposition
       pkg={demoPkg ?? pkg}
@@ -58,6 +59,7 @@ function PackageDemo({ pkg: demoPkg, timeline: demoTimeline, scenes, generatedAs
       missingMedia={missingMedia}
       mediaDims={mediaDims}
       mixAudio={mixAudio}
+      reducedMotion={reducedMotion}
     />
   );
 }
@@ -78,7 +80,7 @@ const previews = (['title', 'hero', 'stat', 'chart', 'list'] as const).map(layou
 const packageMetadata: CalculateMetadataFunction<DemoProps> = ({ props }) => {
   const timeline = props.timeline;
   return {
-    durationInFrames: timeline.durationInFrames,
+    durationInFrames: compositionDurationInFrames(props.pkg, timeline),
     fps: timeline.fps,
     width: timeline.width,
     height: timeline.height,

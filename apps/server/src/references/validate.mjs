@@ -11,7 +11,11 @@ const MB = 1024 * 1024;
 
 export const MAX_IMAGE_BYTES = 20 * MB;
 export const MAX_VIDEO_BYTES = 200 * MB;
+export const MAX_AUDIO_BYTES = 100 * MB;
 export const MAX_VIDEO_DURATION_SEC = 60;
+export const MAX_AUDIO_DURATION_SEC = 300;
+export const MAX_AUDIO_DURATION_SECONDS = MAX_AUDIO_DURATION_SEC;
+export const MAX_AUDIO_SECONDS = MAX_AUDIO_DURATION_SEC;
 export const MAX_VIDEO_DURATION_SECONDS = MAX_VIDEO_DURATION_SEC;
 export const MAX_VIDEO_SECONDS = MAX_VIDEO_DURATION_SEC;
 export const MAX_REFERENCES = 24;
@@ -25,14 +29,21 @@ export const MAX_TOTAL_BYTES_PER_CONVERSATION = MAX_TOTAL_BYTES;
 export const LIMITS = Object.freeze({
   imageBytes: MAX_IMAGE_BYTES,
   videoBytes: MAX_VIDEO_BYTES,
+  audioBytes: MAX_AUDIO_BYTES,
   videoDurationSec: MAX_VIDEO_DURATION_SEC,
+  audioDurationSec: MAX_AUDIO_DURATION_SEC,
+  audioDurationSeconds: MAX_AUDIO_DURATION_SEC,
+  audioSeconds: MAX_AUDIO_DURATION_SEC,
   videoDurationSeconds: MAX_VIDEO_DURATION_SEC,
   videoSeconds: MAX_VIDEO_DURATION_SEC,
   referencesPerConversation: MAX_REFERENCES,
   totalBytes: MAX_TOTAL_BYTES,
   maxImageBytes: MAX_IMAGE_BYTES,
   maxVideoBytes: MAX_VIDEO_BYTES,
+  maxAudioBytes: MAX_AUDIO_BYTES,
   maxVideoDurationSec: MAX_VIDEO_DURATION_SEC,
+  maxAudioDurationSec: MAX_AUDIO_DURATION_SEC,
+  maxAudioDurationSeconds: MAX_AUDIO_DURATION_SEC,
   maxVideoDurationSeconds: MAX_VIDEO_DURATION_SEC,
   maxReferences: MAX_REFERENCES,
   maxRefs: MAX_REFERENCES,
@@ -42,6 +53,11 @@ export const LIMITS = Object.freeze({
     maxBytes: MAX_VIDEO_BYTES,
     maxDurationSec: MAX_VIDEO_DURATION_SEC,
     maxDurationSeconds: MAX_VIDEO_DURATION_SEC,
+  }),
+  audios: Object.freeze({
+    maxBytes: MAX_AUDIO_BYTES,
+    maxDurationSec: MAX_AUDIO_DURATION_SEC,
+    maxDurationSeconds: MAX_AUDIO_DURATION_SEC,
   }),
 });
 
@@ -53,6 +69,8 @@ const TYPES = Object.freeze({
   'video/mp4': Object.freeze({ kind: 'video', ext: 'mp4' }),
   'video/quicktime': Object.freeze({ kind: 'video', ext: 'mov' }),
   'video/webm': Object.freeze({ kind: 'video', ext: 'webm' }),
+  'audio/wav': Object.freeze({ kind: 'audio', ext: 'wav' }),
+  'audio/mpeg': Object.freeze({ kind: 'audio', ext: 'mp3' }),
 });
 
 const EXT_TO_MIME = Object.freeze({
@@ -67,6 +85,9 @@ const EXT_TO_MIME = Object.freeze({
   mov: 'video/quicktime',
   qt: 'video/quicktime',
   webm: 'video/webm',
+  wav: 'audio/wav',
+  wave: 'audio/wav',
+  mp3: 'audio/mpeg',
 });
 
 const MIME_ALIASES = Object.freeze({
@@ -74,6 +95,13 @@ const MIME_ALIASES = Object.freeze({
   'image/pjpeg': 'image/jpeg',
   'image/x-png': 'image/png',
   'video/x-m4v': 'video/mp4',
+  'audio/x-wav': 'audio/wav',
+  'audio/wave': 'audio/wav',
+  'audio/vnd.wave': 'audio/wav',
+  'audio/mp3': 'audio/mpeg',
+  'audio/x-mp3': 'audio/mpeg',
+  'audio/mpeg3': 'audio/mpeg',
+  'audio/x-mpeg': 'audio/mpeg',
 });
 
 const HTML_EXTENSIONS = new Set(['html', 'htm', 'xhtml', 'shtml']);
@@ -108,6 +136,23 @@ function ascii(bytes, start, end) {
   return bytes.subarray(start, end).toString('latin1');
 }
 
+function hasId3Header(bytes) {
+  if (bytes.length < 10 || ascii(bytes, 0, 3) !== 'ID3') return false;
+  if (bytes[3] === 0xff || bytes[4] === 0xff) return false;
+  // ID3 sizes are four seven-bit bytes; high bits indicate a spoofed header.
+  return bytes.subarray(6, 10).every(byte => (byte & 0x80) === 0);
+}
+
+function hasMp3FrameSignature(bytes) {
+  if (bytes.length < 4 || bytes[0] !== 0xff || (bytes[1] & 0xe0) !== 0xe0) return false;
+  const version = (bytes[1] >> 3) & 0x03;
+  const layer = (bytes[1] >> 1) & 0x03;
+  const bitrate = (bytes[2] >> 4) & 0x0f;
+  const sampleRate = (bytes[2] >> 2) & 0x03;
+  // MPEG audio Layer III only; reserved version/rate and invalid bitrate fail.
+  return version !== 1 && layer === 1 && bitrate !== 15 && sampleRate !== 3;
+}
+
 function sniffBinary(bytes) {
   if (bytes.length >= PNG_SIGNATURE.length && bytes.subarray(0, 8).equals(PNG_SIGNATURE)) {
     return 'image/png';
@@ -121,6 +166,12 @@ function sniffBinary(bytes) {
   }
   if (bytes.length >= 12 && ascii(bytes, 0, 4) === 'RIFF' && ascii(bytes, 8, 12) === 'WEBP') {
     return 'image/webp';
+  }
+  if (bytes.length >= 12 && ascii(bytes, 0, 4) === 'RIFF' && ascii(bytes, 8, 12) === 'WAVE') {
+    return 'audio/wav';
+  }
+  if (hasId3Header(bytes) || hasMp3FrameSignature(bytes)) {
+    return 'audio/mpeg';
   }
   if (bytes.length >= 8 && ascii(bytes, 4, 8) === 'ftyp') {
     const brand = bytes.length >= 12 ? ascii(bytes, 8, 12).trim().toLowerCase() : '';
@@ -188,7 +239,9 @@ function formatBytes(bytes) {
 }
 
 function limitFor(kind) {
-  return kind === 'image' ? MAX_IMAGE_BYTES : MAX_VIDEO_BYTES;
+  if (kind === 'image') return MAX_IMAGE_BYTES;
+  if (kind === 'audio') return MAX_AUDIO_BYTES;
+  return MAX_VIDEO_BYTES;
 }
 
 function warningsFor(mime, filename, declaredMime) {
@@ -216,7 +269,7 @@ function warningsFor(mime, filename, declaredMime) {
  * Validate raw upload bytes.
  *
  * @param {{bytes?: Buffer|Uint8Array|ArrayBuffer|string, filename?: string, declaredMime?: string}} input
- * @returns {{ok: true, kind: 'image'|'video', mime: string, ext: string,
+ * @returns {{ok: true, kind: 'image'|'video'|'audio', mime: string, ext: string,
  *   warnings?: Array<{code: string, message: string}>, warning?: {code: string, message: string},
  *   warningCode?: string, code?: string} |
  *   {ok: false, code: 'EMPTY'|'TOO_LARGE'|'UNSUPPORTED_TYPE'|'SVG_USE_BRAND', message: string}}
@@ -267,7 +320,7 @@ export function validateUpload({ bytes, filename, declaredMime } = {}) {
   if (looksLikeHtml(text) || HTML_EXTENSIONS.has(ext) || HTML_MIMES.has(declared)) {
     return fail(
       'UNSUPPORTED_TYPE',
-      'HTML files are not accepted; supported types are PNG, JPEG, WEBP, GIF, MP4/MOV and WEBM',
+      'HTML files are not accepted; supported types are PNG, JPEG, WEBP, GIF, MP4/MOV, WEBM, WAV and MP3',
     );
   }
   if (ext === 'svg' || declared === 'image/svg+xml') {
@@ -279,7 +332,7 @@ export function validateUpload({ bytes, filename, declaredMime } = {}) {
 
   return fail(
     'UNSUPPORTED_TYPE',
-    'unsupported file type; supported types are PNG, JPEG, WEBP, GIF, MP4/MOV and WEBM',
+    'unsupported file type; supported types are PNG, JPEG, WEBP, GIF, MP4/MOV, WEBM, WAV and MP3',
   );
 }
 

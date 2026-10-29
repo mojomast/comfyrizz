@@ -19,13 +19,14 @@ import { createHash } from 'node:crypto';
 import { tmpdir } from 'node:os';
 import { extname, join } from 'node:path';
 import {
+  MAX_AUDIO_BYTES,
   MAX_IMAGE_BYTES,
   MAX_REFERENCES,
   MAX_TOTAL_BYTES,
   MAX_VIDEO_BYTES,
   validateUpload,
 } from './validate.mjs';
-import { probeImage, probeVideo } from './probe.mjs';
+import { probeAudio, probeImage, probeVideo } from './probe.mjs';
 import { DEFAULT_KEYFRAME_COUNT, extractFrames, thumbArgs } from './frames.mjs';
 import { CHAT_ID_PATTERN, REF_ID_PATTERN, createReferenceStore } from './store.mjs';
 import { serveStaticFile } from '../static-file.mjs';
@@ -46,6 +47,8 @@ const MIME_BY_EXTENSION = Object.freeze({
   '.mp4': 'video/mp4',
   '.mov': 'video/quicktime',
   '.webm': 'video/webm',
+  '.wav': 'audio/wav',
+  '.mp3': 'audio/mpeg',
 });
 
 const CONTROL_CHARS = /[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/g;
@@ -69,7 +72,7 @@ function statusForCode(code) {
   if (code === 'TOO_LARGE' || code === 'TOO_LONG' || code === 'TOO_MANY_REFERENCES' || code === 'TOTAL_TOO_LARGE') {
     return 413;
   }
-  if (code === 'UNSUPPORTED_TYPE' || code === 'SVG_USE_BRAND' || code === 'NO_VIDEO_STREAM') return 415;
+  if (code === 'UNSUPPORTED_TYPE' || code === 'SVG_USE_BRAND' || code === 'NO_VIDEO_STREAM' || code === 'NO_AUDIO_STREAM') return 415;
   if (code === 'NOT_FOUND') return 404;
   return 400;
 }
@@ -93,11 +96,14 @@ function normalizeMime(value) {
 function isUploadMime(mime) {
   return mime.startsWith('image/')
     || mime.startsWith('video/')
+    || mime.startsWith('audio/')
     || mime === 'application/octet-stream';
 }
 
 function uploadLimitFor(mime) {
-  return mime.startsWith('image/') ? MAX_IMAGE_BYTES : MAX_VIDEO_BYTES;
+  if (mime.startsWith('image/')) return MAX_IMAGE_BYTES;
+  if (mime.startsWith('audio/')) return MAX_AUDIO_BYTES;
+  return MAX_VIDEO_BYTES;
 }
 
 function safeDecode(value) {
@@ -248,6 +254,7 @@ export function createReferenceRoutes(options = {}) {
   const events = options.events;
   const fs = { ...nodeFs, ...(options.fs && typeof options.fs === 'object' ? options.fs : {}) };
   const probeVideoImpl = typeof options.probeVideo === 'function' ? options.probeVideo : probeVideo;
+  const probeAudioImpl = typeof options.probeAudio === 'function' ? options.probeAudio : probeAudio;
   const extractFramesImpl = typeof options.extractFrames === 'function' ? options.extractFrames : extractFrames;
 
   async function storeFor(chatId) {
@@ -416,7 +423,7 @@ export function createReferenceRoutes(options = {}) {
         } catch {
           // A thumbnail is a convenience; the original is still usable.
         }
-      } else {
+      } else if (validated.kind === 'video') {
         let probed;
         try {
           probed = await probeVideoImpl(source, { exec });
@@ -429,6 +436,8 @@ export function createReferenceRoutes(options = {}) {
         meta.height = probed.height;
         meta.durationSec = probed.durationSec;
         if (probed.fps !== undefined && probed.fps !== null) meta.fps = probed.fps;
+        if (probed.frames !== undefined && probed.frames !== null) meta.frameCount = probed.frames;
+        if (probed.audio !== undefined && probed.audio !== null) meta.audio = probed.audio;
 
         let frames = [];
         try {
@@ -451,6 +460,19 @@ export function createReferenceRoutes(options = {}) {
             // no poster thumbnail; frames are still available
           }
         }
+      } else if (validated.kind === 'audio') {
+        let probed;
+        try {
+          probed = await probeAudioImpl(source, { exec });
+        } catch (error) {
+          const code = typeof error?.code === 'string' ? error.code : 'PROBE_FAILED';
+          sendError(response, statusForCode(code), code, error?.message ?? 'could not probe the audio');
+          return true;
+        }
+        meta.durationSec = probed.durationSec;
+        meta.codec = probed.codec;
+        meta.sampleRate = probed.sampleRate;
+        meta.channels = probed.channels;
       }
 
       let record;
@@ -468,6 +490,7 @@ export function createReferenceRoutes(options = {}) {
         refId: record.id,
         kind: record.kind,
         role: record.role,
+        usage: record.usage,
         bytes: record.bytes,
       });
       sendJson(response, 201, {

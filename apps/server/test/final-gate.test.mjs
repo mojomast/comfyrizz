@@ -11,6 +11,7 @@
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import { seedMockContribution } from './helpers/comfy-contribution.mjs';
 import { createHash } from 'node:crypto';
 import { createServer } from 'node:http';
 import { dirname, join } from 'node:path';
@@ -69,7 +70,7 @@ function seedPackage(app, pkg) {
       if (variant) variant.sha256 = createHash('sha256').update(bytes).digest('hex');
     }
   }
-  app.store.seed(pkg);
+  seedMockContribution(app.store, pkg);
   return dir;
 }
 
@@ -198,7 +199,7 @@ test('IP54: a written override opens every enumerated route through the same gat
   const store = new PackageStore(join(runtimeDir, 'packages'));
   mkdirSync(join(runtimeDir, 'renders'), { recursive: true });
   const pkg = fixturePackage();
-  store.seed(pkg);
+  seedMockContribution(store, pkg);
   const events = { entries: [], publish(event) { this.entries.push(event); } };
   const gates = [];
   const calls = [];

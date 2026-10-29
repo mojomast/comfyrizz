@@ -1,5 +1,7 @@
 # Hackathon submission status
 
+**Current 2026-10-29 deadline triage:** see [Super Easy 24-hour reliability plan](SUPER_EASY_24H_PLAN.md) for the current keep/cut candidates, reduced prompts, live-test criteria and remaining blockers. The dated verification and four-route campaign below are historical; they do not establish current end-to-end mode readiness. The newer eight-film campaign has its own 60-credit ledger and must not be combined with the older 40-credit campaign described below.
+
 Updated 2026-10-27 on `feat/hackathon-submission` / draft PR #53.
 
 ## Implemented

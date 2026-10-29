@@ -27,8 +27,17 @@ test('stepIndex', () => {
 
 test('rule 1: short idea returns idea', () => {
   const s = state({ ideaText: 'short' });
-  const facts = { hasPackage: true, planApproved: true, actionsActive: false, allShotsKept: true, exportCurrent: true };
+  const facts = { hasPackage: false, planApproved: false, actionsActive: false, allShotsKept: false, exportCurrent: false };
   assert.equal(deriveStep(s, facts), 'idea');
+});
+
+test('an approved existing project resumes its actual stage without the original idea', () => {
+  const s = state({ ideaText: '' });
+  const facts = { hasPackage: true, planApproved: true, actionsActive: false, allShotsKept: true, exportCurrent: true };
+  assert.equal(deriveStep(s, facts), 'export');
+  assert.equal(deriveStep(s, { ...facts, exportCurrent: false }), 'review');
+  assert.equal(deriveStep(s, { ...facts, actionsActive: true }), 'generate');
+  assert.equal(deriveStep(state({ ideaText: '', planStatus: 'stale' }), facts), 'plan');
 });
 
 test('rule 2: no package, questions done returns characters', () => {

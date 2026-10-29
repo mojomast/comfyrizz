@@ -1,0 +1,19 @@
+{
+  "name": "@comfyrizz/pi-title-runner",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Opt-in experimental Pi orchestration for native Title packages",
+  "engines": { "node": ">=22.19.0" },
+  "scripts": {
+    "build": "node --check src/runner.mjs && node --check src/pi-adapter.mjs && node --check src/cli.mjs && node --check src/title-measurement.mjs && node --check src/cpu-render.mjs && node --check src/render-worker.mjs && node --check src/export-audit.mjs",
+    "test": "node --test test/*.test.mjs",
+    "run": "node src/cli.mjs"
+  },
+  "dependencies": {
+    "@comfyrizz/agent": "workspace:*",
+    "@comfyrizz/llm": "workspace:*",
+    "@earendil-works/pi-agent-core": "1.4.0",
+    "@earendil-works/pi-ai": "1.4.0"
+  }
+}

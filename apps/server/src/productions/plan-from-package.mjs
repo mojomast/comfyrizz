@@ -55,7 +55,7 @@ function gpuAssetsForScene(pkg, scene) {
   return found;
 }
 
-function hashFor(sceneId, assets) {
+export function hashFor(sceneId, assets) {
   return createHash('sha256')
     .update(canonicalJson({
       sceneId,
@@ -127,6 +127,7 @@ export function planFromPackage(input = {}) {
   }
 
   const only = Array.isArray(input.onlyShotIds) ? new Set(input.onlyShotIds) : null;
+  const onlyAssets = Array.isArray(input.onlyAssetIds) ? new Set(input.onlyAssetIds) : null;
   const scenes = Array.isArray(pkg?.scenes) ? pkg.scenes : [];
   const ratePerHour = rateForGpu('G4', { env: {} }).ratePerHour;
   const chip = typeof input.chip === 'string' && input.chip !== '' ? input.chip : null;
@@ -136,7 +137,7 @@ export function planFromPackage(input = {}) {
   for (const scene of scenes) {
     if (!isPlainObject(scene) || typeof scene.id !== 'string' || scene.id === '') continue;
     if (only && !only.has(scene.id)) continue;
-    const assets = gpuAssetsForScene(pkg, scene);
+    const assets = gpuAssetsForScene(pkg, scene).filter(asset => !onlyAssets || onlyAssets.has(asset.assetId));
     if (assets.length === 0) continue;
     const takes = takesFor(level, scene.id);
     const effectiveInputHash = hashFor(scene.id, assets);

@@ -8,7 +8,7 @@ import { verifyPreparedCompositions } from '../../renderer/scripts/composition-w
 const [task, workDir, runDir] = process.argv.slice(2);
 const pkg = JSON.parse(readFileSync(join(workDir, 'package.json')));
 if (task === 'normalize') {
-  const result = normalizeMixLoudness(join(runDir, 'video.mp4'));
+  const result = normalizeMixLoudness(join(runDir, 'video.mp4'), { pkg });
   writeFileSync(join(runDir, 'loudness.json'), JSON.stringify(result));
 } else if (task === 'export') {
   const rendered = JSON.parse(readFileSync(join(runDir, 'render.json')));

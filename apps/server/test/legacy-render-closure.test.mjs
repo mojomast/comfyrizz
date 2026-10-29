@@ -10,6 +10,7 @@
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import { collectMockContribution } from './helpers/comfy-contribution.mjs';
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -139,6 +140,7 @@ function makeRoutes(t, { production = null, renderGate, requireReadiness = false
   // The fixture's only scene carries a transition out; a one-scene package must
   // not, and this test is about the routes rather than that timeline rule.
   if (Array.isArray(pkg.scenes) && pkg.scenes.length === 1) delete pkg.scenes[0].transitionOut;
+  collectMockContribution(pkg, store.dir);
   store.write(pkg);
   const takeStore = createTakeStore({ runtimeDir: space.runtimeDir, packageDir: space.packagesDir });
   const events = { entries: [], publish(event) { this.entries.push(event); } };

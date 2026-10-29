@@ -152,6 +152,20 @@ function slowPost({ port, path, body, delayMs = 60 }) {
   });
 }
 
+test('missing narrated audio blocks final render and labels draft warnings', async t => {
+  const h = await setup(t);
+  const pkg = structuredClone(seed);
+  pkg.voice = { enabled: true, engine: 'kokoro', voice: 'af_heart', language: 'en-us', speed: 1 };
+  pkg.scenes[0].narration = 'A planned narration.';
+  const final = await post({ ...h, path: '/api/render', body: { package: pkg, override: { reason: REASON } } });
+  assert.equal(final.status, 409, final.text);
+  assert.equal(final.json.code, 'NARRATION_PENDING');
+  const draft = await post({ ...h, path: '/api/render', body: { package: pkg, intent: 'draft', override: { reason: REASON } } });
+  assert.equal(draft.status, 200, draft.text);
+  assert.equal(draft.headers['x-comfyrizz-export-intent'], 'draft');
+  assert.match(draft.headers['x-comfyrizz-delivery-warnings'], /NARRATION_PENDING/);
+});
+
 test('RL06: two parallel requests with a slow body -> exactly one 409', async t => {
   const gate = deferred();
   const h = await setup(t, {

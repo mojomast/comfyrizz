@@ -1,7 +1,9 @@
 export const MAX_VIDEO_DURATION_SEC = 60;
+export const MAX_AUDIO_DURATION_SEC = 300;
 export const PROBE_TIMEOUT_MS = 10_000;
 
-const FFPROBE_ENTRIES = 'stream=width,height,r_frame_rate,nb_frames:format=duration';
+const FFPROBE_ENTRIES = 'stream=codec_type,width,height,r_frame_rate,avg_frame_rate,nb_frames:format=duration';
+const FFPROBE_AUDIO_ENTRIES = 'stream=codec_name,sample_rate,channels,duration:format=duration';
 
 class ProbeError extends Error {
   constructor(code, message, details) {
@@ -178,6 +180,27 @@ function dimension(value) {
   return Number.isFinite(number) && number > 0 ? number : null;
 }
 
+function frameCount(value) {
+  const number = Number(value);
+  return Number.isSafeInteger(number) && number > 0 ? number : null;
+}
+
+function probeText(value) {
+  return typeof value === 'string' && value.trim() !== '' ? value.trim() : null;
+}
+
+function positiveInteger(value) {
+  const number = Number(value);
+  return Number.isSafeInteger(number) && number > 0 ? number : null;
+}
+
+function requiredDuration(data, stream, kind) {
+  const durationSec = parseSeconds(data.format?.duration) ?? parseSeconds(stream.duration);
+  if (durationSec === null) fail('UNKNOWN_DURATION', `${kind} duration is unknown or is not finite`);
+  if (durationSec <= 0) fail('INVALID_DURATION', `${kind} duration must be greater than 0`, { durationSec });
+  return durationSec;
+}
+
 /**
  * Probe the first video stream with ffprobe. The command and every option are
  * passed as an argument array; the file path is exactly one argument.
@@ -186,7 +209,58 @@ export async function probeVideo(file, { exec, timeoutMs = PROBE_TIMEOUT_MS } = 
   if (typeof exec !== 'function') fail('NO_EXEC', 'probeVideo requires an injected exec function');
   if (typeof file !== 'string' || file.length === 0) fail('INVALID_FILE', 'video file must be a non-empty path string');
 
-  const args = ['-v', 'error', '-select_streams', 'v:0', '-show_entries', FFPROBE_ENTRIES, '-of', 'json', file];
+  const args = ['-v', 'error', '-show_entries', FFPROBE_ENTRIES, '-of', 'json', file];
+  let result;
+  let execError;
+  try {
+    result = await exec('ffprobe', args, { timeoutMs });
+  } catch (error) {
+    execError = error;
+    result = { stdout: error?.stdout };
+  }
+
+  const stdout = stdoutOf(result);
+  const data = stdout === undefined ? undefined : parseProbeJson(stdout);
+  if (!data) {
+    const error = new ProbeError('PROBE_FAILED', 'ffprobe did not return readable JSON');
+    if (execError) error.cause = execError;
+    throw error;
+  }
+
+  const streams = Array.isArray(data.streams) ? data.streams : [];
+  const stream = streams.find(candidate => candidate?.codec_type === 'video')
+    ?? streams.find(candidate => candidate?.codec_type === undefined && (candidate?.width !== undefined || candidate?.height !== undefined));
+  if (!stream) fail('NO_VIDEO_STREAM', 'the file has no video stream');
+  const hasStreamTypes = streams.some(candidate => typeof candidate?.codec_type === 'string');
+  const audio = hasStreamTypes
+    ? streams.some(candidate => candidate?.codec_type === 'audio') ? 'present' : 'none'
+    : undefined;
+
+  const durationSec = requiredDuration(data, stream, 'video');
+  if (durationSec > MAX_VIDEO_DURATION_SEC) {
+    fail('TOO_LONG', `video duration ${durationSec}s exceeds the ${MAX_VIDEO_DURATION_SEC}s limit`, { durationSec });
+  }
+
+  const frames = frameCount(stream.nb_frames);
+  return {
+    width: dimension(stream.width),
+    height: dimension(stream.height),
+    durationSec,
+    fps: parseRatio(stream.r_frame_rate) ?? parseRatio(stream.avg_frame_rate),
+    ...(audio === undefined ? {} : { audio }),
+    ...(frames === null ? {} : { frames }),
+  };
+}
+
+/**
+ * Probe the first audio stream with ffprobe. Paths are passed verbatim as one
+ * argument and the injected exec implementation supplies the actual timeout.
+ */
+export async function probeAudio(file, { exec, timeoutMs = PROBE_TIMEOUT_MS } = {}) {
+  if (typeof exec !== 'function') fail('NO_EXEC', 'probeAudio requires an injected exec function');
+  if (typeof file !== 'string' || file.length === 0) fail('INVALID_FILE', 'audio file must be a non-empty path string');
+
+  const args = ['-v', 'error', '-select_streams', 'a:0', '-show_entries', FFPROBE_AUDIO_ENTRIES, '-of', 'json', file];
   let result;
   let execError;
   try {
@@ -205,18 +279,18 @@ export async function probeVideo(file, { exec, timeoutMs = PROBE_TIMEOUT_MS } = 
   }
 
   const stream = Array.isArray(data.streams) ? data.streams[0] : undefined;
-  if (!stream) fail('NO_VIDEO_STREAM', 'the file has no video stream');
+  if (!stream) fail('NO_AUDIO_STREAM', 'the file has no audio stream');
 
-  const durationSec = parseSeconds(data.format?.duration) ?? parseSeconds(stream.duration);
-  if (durationSec !== null && durationSec > MAX_VIDEO_DURATION_SEC) {
-    fail('TOO_LONG', `video duration ${durationSec}s exceeds the ${MAX_VIDEO_DURATION_SEC}s limit`, { durationSec });
+  const durationSec = requiredDuration(data, stream, 'audio');
+  if (durationSec > MAX_AUDIO_DURATION_SEC) {
+    fail('TOO_LONG', `audio duration ${durationSec}s exceeds the ${MAX_AUDIO_DURATION_SEC}s limit`, { durationSec });
   }
 
   return {
-    width: dimension(stream.width),
-    height: dimension(stream.height),
     durationSec,
-    fps: parseRatio(stream.r_frame_rate) ?? parseRatio(stream.avg_frame_rate),
+    codec: probeText(stream.codec_name),
+    sampleRate: positiveInteger(stream.sample_rate),
+    channels: positiveInteger(stream.channels),
   };
 }
 

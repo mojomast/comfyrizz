@@ -6,7 +6,12 @@ import { dirname, join } from 'node:path';
 import { Readable, Writable } from 'node:stream';
 import { createReferenceRoutes } from '../../src/references/routes.mjs';
 import { createReferenceStore } from '../../src/references/store.mjs';
-import { MAX_IMAGE_BYTES } from '../../src/references/validate.mjs';
+import {
+  MAX_AUDIO_BYTES,
+  MAX_IMAGE_BYTES,
+  MAX_REFERENCES,
+  MAX_TOTAL_BYTES,
+} from '../../src/references/validate.mjs';
 
 const MB = 1024 * 1024;
 const CHAT_ID = 'chat_abcdefgh';
@@ -18,6 +23,23 @@ const PNG = Buffer.from(
 );
 const JPEG = Buffer.from([0xff, 0xd8, 0xff, 0xe0, 0x00, 0x10, 0x4a, 0x46, 0x49, 0x46, 0xff, 0xd9]);
 const MP4 = Buffer.from('00000018667479706d70343200000000', 'hex');
+const MP3 = Buffer.concat([Buffer.from([0xff, 0xfb, 0x90, 0x64]), Buffer.alloc(413)]);
+const WAV = (() => {
+  const bytes = Buffer.alloc(52);
+  bytes.write('RIFF', 0, 'ascii');
+  bytes.writeUInt32LE(bytes.length - 8, 4);
+  bytes.write('WAVEfmt ', 8, 'ascii');
+  bytes.writeUInt32LE(16, 16);
+  bytes.writeUInt16LE(1, 20);
+  bytes.writeUInt16LE(2, 22);
+  bytes.writeUInt32LE(44100, 24);
+  bytes.writeUInt32LE(176400, 28);
+  bytes.writeUInt16LE(4, 32);
+  bytes.writeUInt16LE(16, 34);
+  bytes.write('data', 36, 'ascii');
+  bytes.writeUInt32LE(8, 40);
+  return bytes;
+})();
 
 function pngVariant(suffix) {
   return Buffer.concat([PNG, Buffer.from(String(suffix), 'utf8')]);
@@ -126,6 +148,26 @@ function harness(t, { exec } = {}) {
   return { root, chatDir, events, routes };
 }
 
+test('image editorial scopes round-trip through the API and invalid scope changes fail', async t => {
+  const { routes } = harness(t);
+  const upload = await invoke(routes, { method: 'POST', headers: uploadHeaders(), body: PNG });
+  const id = upload.json().id;
+  const patch = body => invoke(routes, {
+    method: 'PATCH', path: `${CHAT_PATH}/${id}`,
+    headers: { 'content-type': 'application/json' }, body: JSON.stringify(body),
+  });
+  const selected = await patch({ usage: 'editorial', editorialScope: 'music-video' });
+  assert.equal(selected.status, 200);
+  assert.equal(selected.json().editorialScope, 'music-video');
+  const listed = await invoke(routes);
+  assert.equal(listed.json().references[0].editorialScope, 'music-video');
+  assert.equal((await patch({ editorialScope: 'custom' })).status, 400);
+  assert.equal((await patch({ usage: 'editorial', editorialScope: 'invalid' })).status, 400);
+  assert.equal((await invoke(routes)).json().references[0].editorialScope, 'music-video');
+  assert.equal((await patch({ usage: 'reference' })).status, 200);
+  assert.equal((await invoke(routes)).json().references[0].editorialScope, undefined);
+});
+
 test('upload -> list -> patch -> delete round trip', async t => {
   const { routes, events, chatDir } = harness(t);
 
@@ -140,6 +182,8 @@ test('upload -> list -> patch -> delete round trip', async t => {
   assert.equal(reference.kind, 'image');
   assert.equal(reference.mime, 'image/png');
   assert.equal(reference.role, 'other');
+  assert.equal(reference.usage, 'reference');
+  assert.equal(reference.rightsAsserted, true);
   assert.equal(reference.label, 'grain texture.png');
   assert.equal(reference.width, 1);
   assert.equal(reference.height, 1);
@@ -162,11 +206,12 @@ test('upload -> list -> patch -> delete round trip', async t => {
     method: 'PATCH',
     path: `${CHAT_PATH}/${reference.id}`,
     headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({ role: 'style', note: '  use the warm grain  ', label: 'Grain' }),
+    body: JSON.stringify({ role: 'style', usage: 'editorial', note: '  use the warm grain  ', label: 'Grain' }),
   });
   assert.equal(patched.status, 200);
   const updated = patched.json();
   assert.equal(updated.role, 'style');
+  assert.equal(updated.usage, 'editorial');
   assert.equal(updated.note, 'use the warm grain');
   assert.equal(updated.label, 'Grain');
   assert.equal(updated.revision, 2);
@@ -396,6 +441,174 @@ test('video upload probes metadata, extracts frames and serves range reads', asy
   assert.equal(ranged.headers['x-content-type-options'], 'nosniff');
   assert.equal(ranged.headers['content-range'], `bytes 0-3/${MP4.length}`);
   assert.equal(ranged.body.length, 4);
+});
+
+test('audio upload probes a song, skips ffmpeg derivatives and serves audio ranges', async t => {
+  const calls = [];
+  const exec = async (command, args, options) => {
+    calls.push({ command, args, options });
+    if (command !== 'ffprobe') throw new Error(`audio must not invoke ${command}`);
+    return {
+      stdout: JSON.stringify({
+        streams: [{ codec_name: 'pcm_s16le', sample_rate: '44100', channels: 2 }],
+        format: { duration: '185.25' },
+      }),
+    };
+  };
+  const { routes, events, chatDir } = harness(t, { exec });
+
+  const created = await invoke(routes, {
+    method: 'POST',
+    headers: uploadHeaders({
+      'content-type': 'audio/mpeg',
+      'x-filename': encodeURIComponent('../theme.mp3'),
+    }),
+    body: WAV,
+  });
+  assert.equal(created.status, 201, created.body.toString());
+  const reference = created.json();
+  assert.equal(reference.kind, 'audio');
+  assert.equal(reference.mime, 'audio/wav');
+  assert.equal(reference.ext, 'wav');
+  assert.equal(reference.file, `${reference.id}.wav`);
+  assert.equal(reference.label, 'theme.mp3');
+  assert.equal(reference.role, 'other');
+  assert.equal(reference.usage, 'reference');
+  assert.equal(reference.rightsAsserted, true);
+  assert.equal(reference.durationSec, 185.25);
+  assert.equal(reference.codec, 'pcm_s16le');
+  assert.equal(reference.sampleRate, 44100);
+  assert.equal(reference.channels, 2);
+  assert.equal('width' in reference, false);
+  assert.equal('height' in reference, false);
+  assert.deepEqual(reference.frames, []);
+  assert.equal(created.json().warnings.length, 2);
+  assert.deepEqual(readFileSync(join(chatDir, 'files', reference.file)), WAV);
+  assert.equal(existsSync(join(chatDir, 'thumbs', `${reference.id}.jpg`)), false);
+  assert.equal(existsSync(join(chatDir, 'frames', reference.id)), false);
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0].command, 'ffprobe');
+  assert.ok(calls[0].args.includes('a:0'));
+  assert.equal(calls[0].args.at(-1).endsWith('.wav'), true);
+  assert.ok(calls.every(call => call.command === 'ffprobe'), 'no video keyframes or fake thumbnails');
+
+  const duplicate = await invoke(routes, {
+    method: 'POST',
+    headers: uploadHeaders({ 'content-type': 'audio/wav', 'x-filename': 'copy.wav' }),
+    body: WAV,
+  });
+  assert.equal(duplicate.status, 200);
+  assert.equal(duplicate.json().id, reference.id);
+  assert.equal(calls.length, 1, 'dedupe happens before another probe');
+
+  const head = await invoke(routes, { method: 'HEAD', path: `${CHAT_PATH}/${reference.id}/file` });
+  assert.equal(head.status, 200);
+  assert.equal(head.headers['content-type'], 'audio/wav');
+  assert.equal(head.headers['content-length'], WAV.length);
+  assert.equal(head.body.length, 0);
+
+  const ranged = await invoke(routes, {
+    method: 'GET',
+    path: `${CHAT_PATH}/${reference.id}/file`,
+    headers: { range: 'bytes=4-11' },
+  });
+  assert.equal(ranged.status, 206);
+  assert.equal(ranged.headers['content-type'], 'audio/wav');
+  assert.equal(ranged.headers['content-range'], `bytes 4-11/${WAV.length}`);
+  assert.deepEqual(ranged.body, WAV.subarray(4, 12));
+
+  const thumb = await invoke(routes, { path: `${CHAT_PATH}/${reference.id}/thumb` });
+  assert.equal(thumb.status, 404);
+
+  const patched = await invoke(routes, {
+    method: 'PATCH',
+    path: `${CHAT_PATH}/${reference.id}`,
+    body: JSON.stringify({ role: 'song', usage: 'editorial', note: 'Use as the main theme.' }),
+  });
+  assert.equal(patched.status, 200);
+  assert.equal(patched.json().role, 'song');
+  assert.equal(patched.json().usage, 'editorial');
+  assert.equal(events.filter(event => event.type === 'reference.added').length, 1);
+});
+
+test('audio routes reject unknown or excessive durations without storing a record', async t => {
+  for (const [duration, status, code] of [['N/A', 400, 'UNKNOWN_DURATION'], ['300.01', 413, 'TOO_LONG']]) {
+    const { routes } = harness(t, {
+      exec: async () => ({
+        stdout: JSON.stringify({
+          streams: [{ codec_name: 'mp3', sample_rate: '48000', channels: 2 }],
+          format: { duration },
+        }),
+      }),
+    });
+    const response = await invoke(routes, {
+      method: 'POST',
+      headers: uploadHeaders({ 'content-type': 'audio/mpeg', 'x-filename': 'song.mp3' }),
+      body: MP3,
+    });
+    assert.equal(response.status, status);
+    assert.equal(response.json().code, code);
+    const list = await invoke(routes);
+    assert.deepEqual(list.json().references, []);
+  }
+});
+
+test('video upload also rejects unknown duration before keyframe extraction', async t => {
+  const calls = [];
+  const { routes } = harness(t, {
+    exec: async (command, args) => {
+      calls.push({ command, args });
+      return {
+        stdout: JSON.stringify({
+          streams: [{ width: 64, height: 48, r_frame_rate: '30/1' }],
+          format: { duration: 'N/A' },
+        }),
+      };
+    },
+  });
+  const response = await invoke(routes, {
+    method: 'POST',
+    headers: uploadHeaders({ 'content-type': 'video/mp4', 'x-filename': 'unknown.mp4' }),
+    body: MP4,
+  });
+  assert.equal(response.status, 400);
+  assert.equal(response.json().code, 'UNKNOWN_DURATION');
+  assert.ok(calls.every(call => call.command === 'ffprobe'));
+  assert.deepEqual((await invoke(routes)).json().references, []);
+});
+
+test('audio streaming cap and existing library count/total caps remain enforced', async t => {
+  const { routes } = harness(t);
+  const oversized = await invoke(routes, {
+    method: 'POST',
+    headers: uploadHeaders({
+      'content-type': 'audio/mpeg',
+      'content-length': MAX_AUDIO_BYTES + 1,
+      'x-filename': 'huge.mp3',
+    }),
+    body: MP3,
+  });
+  assert.equal(oversized.status, 413);
+  assert.equal(oversized.json().code, 'TOO_LARGE');
+
+  for (const [references, code] of [
+    [Array.from({ length: MAX_REFERENCES }, () => ({ bytes: 1 })), 'TOO_MANY_REFERENCES'],
+    [[{ bytes: MAX_TOTAL_BYTES }], 'TOTAL_TOO_LARGE'],
+  ]) {
+    const cappedRoutes = createReferenceRoutes({
+      store: () => ({
+        list: () => references,
+        add: () => { throw new Error('capped upload must not reach store.add'); },
+      }),
+    });
+    const response = await invoke(cappedRoutes, {
+      method: 'POST',
+      headers: uploadHeaders({ 'content-type': 'audio/mpeg', 'x-filename': 'song.mp3' }),
+      body: MP3,
+    });
+    assert.equal(response.status, 413);
+    assert.equal(response.json().code, code);
+  }
 });
 
 test('sniffing wins over the declared type and the extension is never a path', async t => {

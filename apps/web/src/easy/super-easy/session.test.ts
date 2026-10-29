@@ -13,6 +13,27 @@ import { createSuperEasySession } from './session.ts';
 
 const PRODUCTION_ID = 'prod_0123456789abcdef01234567';
 
+test('production watch uses the authenticated transport supplied by the host', async () => {
+  const requests = [];
+  let resolveRequest;
+  const requested = new Promise(resolve => { resolveRequest = resolve; });
+  const fetchImpl = async (url, init) => {
+    requests.push({ url, method: init.method });
+    resolveRequest();
+    return new Response(JSON.stringify({ production: { id: PRODUCTION_ID, revision: 1 }, revision: 1, lastSequence: 0 }), {
+      status: 200, headers: { 'content-type': 'application/json' },
+    });
+  };
+  const session = createSuperEasySession({
+    api: {}, host: {}, store: fakeStore(), go() {}, fetchImpl,
+    run: async () => ({ ok: true, productionId: PRODUCTION_ID, snapshot: {}, cpu: { ok: true, step: 'review', previewReady: true } }),
+  });
+  await session.generate({ prompt: 'A sufficiently long prompt' });
+  await requested;
+  assert.deepEqual(requests, [{ url: `/api/productions/${PRODUCTION_ID}`, method: 'GET' }]);
+  session.stop();
+});
+
 function fakeStore() {
   const state = {
     generate: { status: 'idle' },
@@ -31,6 +52,58 @@ function fakeStore() {
     },
   };
 }
+
+test('measured narration repair goes to a new proposal for reapproval', async () => {
+  const calls = [];
+  const store = fakeStore();
+  const session = createSuperEasySession({ api: {}, host: {}, store, go() {}, run: async input => {
+    calls.push(input);
+    if (calls.length === 1) return { ok: false, code: 'CPU_FAILED', stage: 'run', message: 'Narration is too long', retryable: false, narrationRevision: 'Keep the story; shorten s1 toward 8 words.' };
+    return { ok: true, proposal: { basePrompt: input.basePrompt, revisionNotes: input.revisionNotes }, snapshot: null };
+  } });
+  await session.generate({ prompt: 'A 45 second historical explainer', compute: 'cpu', lengthS: 45, proposalOnly: false });
+  assert.match(session.progressHtml(), /Revise narration for this length/);
+  assert.equal(await session.retry(), null);
+  await session.reviseNarration();
+  assert.equal(calls[1].proposalOnly, true);
+  assert.equal(calls[1].narrationOnly, true);
+  assert.equal(calls[1].basePrompt, 'A 45 second historical explainer');
+  assert.match(calls[1].revisionNotes[0], /shorten s1/);
+  assert.ok(session.proposal());
+});
+
+test('a reviewed narration revision carries its package revision into approval', async () => {
+  const calls = [];
+  const session = createSuperEasySession({ api: {}, host: {}, store: fakeStore(), go() {}, watch: () => () => {}, run: async input => {
+    calls.push(input);
+    if (input.proposalOnly) return { ok: true, proposal: { basePrompt: input.basePrompt ?? input.prompt, revisionNotes: input.revisionNotes ?? [], reviewedPackageRevision: 43 }, snapshot: null };
+    return { ok: true, productionId: PRODUCTION_ID, snapshot: {}, cpu: { ok: true, step: 'review' } };
+  } });
+  await session.generate({ prompt: 'A 45 second explainer', proposalOnly: true });
+  await session.approveProposal();
+  assert.equal(calls[1].reviewedPackageRevision, 43);
+  assert.equal(calls[1].proposalOnly, false);
+});
+
+test('repeated measured overruns each stop at a fresh review before approval', async () => {
+  const calls = [];
+  const session = createSuperEasySession({ api: {}, host: {}, store: fakeStore(), go() {}, run: async input => {
+    calls.push(input);
+    if (input.proposalOnly) return { ok: true, proposal: { basePrompt: input.basePrompt, revisionNotes: input.revisionNotes, reviewedPackageRevision: calls.length }, snapshot: null };
+    return { ok: false, code: 'CPU_FAILED', stage: 'run', message: 'Too long', retryable: false, narrationRevision: `measured overrun ${calls.length}` };
+  } });
+  await session.generate({ prompt: 'A 45 second story', proposalOnly: false });
+  await session.reviseNarration();
+  assert.equal(calls.length, 2);
+  assert.ok(session.proposal());
+  await session.approveProposal();
+  await session.reviseNarration();
+  assert.equal(calls.length, 4);
+  assert.equal(calls[3].narrationOnly, true);
+  assert.equal(calls[3].proposalOnly, true);
+  assert.match(calls[3].revisionNotes.at(-1), /measured overrun 3/);
+  assert.ok(session.proposal());
+});
 
 function partialSnapshot() {
   return {
@@ -157,6 +230,18 @@ function harness(options = {}) {
   };
 }
 
+test('uncertain paid approval and run failures cannot replay a paid job', async () => {
+  for (const stage of ['approval', 'run']) {
+    const h = harness({ runResult: { ok: false, code: 'RUN_FAILED', stage, message: 'connection lost' } });
+    const result = await h.session.generate({ prompt: 'A carefully planned action scene', compute: 'colab', setupConfirmed: true });
+    assert.equal(result.retryable, false);
+    assert.match(result.message, /existing production in Studio/);
+    assert.doesNotMatch(h.session.progressHtml(), /data-super-easy-retry/);
+    assert.equal(await h.session.retry(), null);
+    assert.equal(h.calls.filter(call => call.kind === 'run').length, 1);
+  }
+});
+
 test('Generate runs the one prompt, then watches that production', async () => {
   const h = harness();
 
@@ -174,9 +259,10 @@ test('Generate runs the one prompt, then watches that production', async () => {
   assert.match(h.session.progressHtml(), /data-super-easy-progress/u);
 });
 
-test('duration survives proposal revisions and approval in the same session input', async () => {
+test('duration, video type, song trim, exact LRC and attachment identity survive proposal revisions and approval', async () => {
   const store = fakeStore();
   const inputs = [];
+  const raw = '[00:05.00]<00:05.00>Exact <00:05.50>lyrics\r\n[00:07.00]Next line';
   const session = createSuperEasySession({
     async run(input) {
       inputs.push(input);
@@ -205,15 +291,134 @@ test('duration survives proposal revisions and approval in the same session inpu
     go() {},
   });
 
-  await session.generate({ prompt: 'A friendly robot who bakes bread', compute: 'cpu', lengthS: 60, proposalOnly: true });
+  await session.generate({
+    prompt: 'A friendly robot who bakes bread',
+    compute: 'cpu',
+    lengthS: 60,
+    videoType: 'music-video',
+    songTrim: { startSeconds: 4, endSeconds: 45 },
+    lyricsStyle: 'reel',
+    lyricsLrc: raw,
+    conversationId: 'chat_context123',
+    attachmentSignature: 'ctx_12345678_2',
+    attachmentRevision: 7,
+    proposalOnly: true,
+  });
   await session.reviseProposal('Make the ending playful');
   await session.approveProposal();
 
   assert.equal(inputs.length, 3);
   assert.deepEqual(inputs.map(input => input.lengthS), [60, 60, 60]);
+  assert.deepEqual(inputs.map(input => input.videoType), ['music-video', 'music-video', 'music-video']);
+  assert.deepEqual(inputs.map(input => input.songTrim), [{ startSeconds: 4, endSeconds: 45 }, { startSeconds: 4, endSeconds: 45 }, { startSeconds: 4, endSeconds: 45 }]);
+  assert.deepEqual(inputs.map(input => input.lyricsStyle), ['reel', 'reel', 'reel']);
+  assert.deepEqual(inputs.map(input => input.lyricsLrc), [raw, raw, raw]);
+  assert.deepEqual(inputs.map(input => input.conversationId), ['chat_context123', 'chat_context123', 'chat_context123']);
+  assert.deepEqual(inputs.map(input => input.attachmentSignature), ['ctx_12345678_2', 'ctx_12345678_2', 'ctx_12345678_2']);
+  assert.deepEqual(inputs.map(input => input.attachmentRevision), [7, 7, 7]);
   assert.deepEqual(inputs[1].revisionNotes, ['Make the ending playful']);
   assert.deepEqual(inputs[2].revisionNotes, ['Make the ending playful']);
   assert.equal(inputs[2].proposalOnly, false);
+});
+
+test('approval uses current store inputs instead of restoring stale cached attachments or trim', async () => {
+  const store = fakeStore();
+  Object.assign(store.state, {
+    idea: { lengthS: 60 },
+    compute: 'cpu',
+    motionModel: 'auto',
+    videoType: 'music-video',
+    songTrim: { startSeconds: 4, endSeconds: 45 },
+    lyricsStyle: 'caption',
+    lyricsLrc: '[00:01.00]Old lyric draft',
+    chatId: 'chat_oldproject',
+    attachmentSignature: 'ctx_old_1',
+    attachmentRevision: 1,
+  });
+  const inputs = [];
+  const session = createSuperEasySession({
+    async run(input) {
+      inputs.push(input);
+      if (input.proposalOnly) {
+        return { ok: true, proposal: { basePrompt: input.prompt, revisionNotes: [] }, snapshot: null };
+      }
+      return {
+        ok: true,
+        productionId: PRODUCTION_ID,
+        draftCommand: { kind: 'iteration.set' },
+        snapshot: { plan: { status: 'done' } },
+        cpu: { ok: true, step: 'review' },
+      };
+    },
+    watch: () => () => {},
+    api: {}, host: {}, store, go() {},
+  });
+  await session.generate({
+    prompt: 'Use the current supplied media',
+    compute: 'cpu',
+    lengthS: 60,
+    videoType: 'music-video',
+    songTrim: { startSeconds: 4, endSeconds: 45 },
+    conversationId: 'chat_oldproject',
+    attachmentSignature: 'ctx_old_1',
+    attachmentRevision: 1,
+    proposalOnly: true,
+  });
+  store.patch({
+    idea: { lengthS: 30 },
+    videoType: 'product-walkthrough',
+    songTrim: null,
+    lyricsStyle: 'reel',
+    lyricsLrc: '[00:02.00]Current lyric draft',
+    chatId: 'chat_newproject',
+    attachmentSignature: 'ctx_new_2',
+    attachmentRevision: 2,
+  });
+  await session.approveProposal();
+
+  assert.equal(inputs.length, 2);
+  assert.equal(inputs[1].lengthS, 30);
+  assert.equal(inputs[1].videoType, 'product-walkthrough');
+  assert.equal(inputs[1].songTrim, null);
+  assert.equal(inputs[1].lyricsStyle, 'reel');
+  assert.equal(inputs[1].lyricsLrc, '[00:02.00]Current lyric draft');
+  assert.equal(inputs[1].conversationId, 'chat_newproject');
+  assert.equal(inputs[1].attachmentSignature, 'ctx_new_2');
+  assert.equal(inputs[1].attachmentRevision, 2);
+});
+
+test('retry carries the current store lyric style and exact raw LRC', async () => {
+  const store = fakeStore();
+  Object.assign(store.state, { videoType: 'music-video', lyricsStyle: 'off', lyricsLrc: '' });
+  const inputs = [];
+  const session = createSuperEasySession({
+    async run(input) {
+      inputs.push(input);
+      if (inputs.length === 1) return { ok: false, code: 'PLAN_FAILED', stage: 'plan', message: 'Try again' };
+      return {
+        ok: true,
+        productionId: PRODUCTION_ID,
+        draftCommand: { kind: 'iteration.set' },
+        snapshot: { plan: { status: 'done' } },
+        cpu: { ok: true, step: 'review' },
+      };
+    },
+    watch: () => () => {},
+    api: {}, host: {}, store, go() {},
+  });
+  await session.generate({
+    prompt: 'A friendly robot who bakes bread',
+    compute: 'cpu',
+    videoType: 'music-video',
+    lyricsStyle: 'caption',
+    lyricsLrc: '[00:01.00]First draft',
+  });
+  const current = '[00:02.00]<00:02.00>Current <00:02.50>draft';
+  store.patch({ lyricsStyle: 'reel', lyricsLrc: current });
+  await session.retry();
+  assert.equal(inputs.length, 2);
+  assert.equal(inputs[1].lyricsStyle, 'reel');
+  assert.equal(inputs[1].lyricsLrc, current);
 });
 
 test('watch callbacks move the stages and fill the gallery', async () => {
@@ -428,17 +633,26 @@ test('a planning failure is visible on the progress screen and can be retried', 
     ok: false,
     code: 'PLAN_FAILED',
     stage: 'plan',
-    message: 'The plan could not be written.',
+    message: 'http_429: ttft_admission_refused after 26 s',
   };
   const h = harness({ runResult: failure });
 
-  await h.session.generate({ prompt: 'A friendly robot who bakes bread', compute: 'cpu', lengthS: 90 });
+  await h.session.generate({
+    prompt: 'A friendly robot who bakes bread',
+    compute: 'cpu',
+    lengthS: 90,
+    videoType: 'music-video',
+    songTrim: { startSeconds: 8, endSeconds: 60 },
+    conversationId: 'chat_context123',
+    attachmentSignature: 'ctx_12345678_1',
+    attachmentRevision: 2,
+  });
 
   assert.equal(h.session.status(), 'error');
   assert.equal(h.errors.length, 1);
   const html = h.session.progressHtml();
   assert.match(html, /data-super-easy-error/u);
-  assert.match(html, /The plan could not be written\./u);
+  assert.match(html, /http_429: ttft_admission_refused after 26 s/u);
   assert.match(html, /data-super-easy-retry/u);
   assert.match(html, /data-super-easy-more-control/u);
   assert.match(html, /data-super-easy-open-editor/u);
@@ -449,6 +663,11 @@ test('a planning failure is visible on the progress screen and can be retried', 
   const retries = h.calls.filter((call) => call.kind === 'run');
   assert.equal(retries.length, before + 1);
   assert.deepEqual(retries.map(call => call.input.lengthS), [90, 90]);
+  assert.deepEqual(retries.map(call => call.input.videoType), ['music-video', 'music-video']);
+  assert.deepEqual(retries.map(call => call.input.songTrim), [{ startSeconds: 8, endSeconds: 60 }, { startSeconds: 8, endSeconds: 60 }]);
+  assert.deepEqual(retries.map(call => call.input.conversationId), ['chat_context123', 'chat_context123']);
+  assert.deepEqual(retries.map(call => call.input.attachmentSignature), ['ctx_12345678_1', 'ctx_12345678_1']);
+  assert.deepEqual(retries.map(call => call.input.attachmentRevision), [2, 2]);
   assert.equal(h.session.status(), 'error');
 });
 

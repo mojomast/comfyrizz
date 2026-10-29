@@ -1,11 +1,15 @@
 import type { MotionModel } from './super-easy/setup.ts';
+import type { VideoType } from './super-easy/video-types.ts';
 
 export type StepId = 'idea' | 'characters' | 'level' | 'plan' | 'generate' | 'review' | 'export';
 export type Level = 'draft' | 'balanced' | 'director' | 'custom';
 export type Compute = 'cpu' | 'colab';
 export type Look = 'clay' | 'glass' | 'editorial-flat' | 'isometric-tech' | 'paper-cut' | 'cinematic-dark';
 
-export interface EasyIdea { text: string; lengthS: 15 | 30 | 60 | 90; aspect: '16:9' | '9:16' | '1:1'; look: Look; sound: boolean }
+export interface EasyIdea { text: string; lengthS: number; aspect: '16:9' | '9:16' | '1:1'; look: Look; sound: boolean }
+/** Optional song range, in seconds. */
+export interface SongTrim { startSeconds: number; endSeconds: number }
+export type LyricsStyle = 'off' | 'caption' | 'reel';
 export interface EasyQuestion { id: string; field: string; prompt: string; options: string[]; decide: string }
 export interface EasyCastMember { castId: string; characterId: string; name: string; role: string; voiceId: string | null; voiceLabel: string | null; imageUrl: string | null }
 
@@ -25,8 +29,20 @@ export interface EasyState {
   levelTouched: boolean;
   compute: Compute;
   motionModel?: MotionModel;
+  /** Null is Custom, the backward-compatible prompt-only planning path. */
+  videoType: VideoType | null;
+  /** Null lets the Music Video planner use song start 0 and the requested duration. */
+  songTrim: SongTrim | null;
+  /** Music Video lyric presentation; raw LRC stays separate from the creative brief. */
+  lyricsStyle: LyricsStyle;
+  lyricsLrc: string;
+  /** Server-owned context identity and a small content signature, never media/text. */
+  attachmentSignature: string | null;
+  attachmentRevision: number;
   spendCap: number | null;
   planHash: string | null;
+  /** Exact inputs used for the last successfully adopted package; legacy states leave this null. */
+  builtPackageInputsHash: string | null;
   plan: { status: 'none' | 'writing' | 'building' | 'proposing' | 'ready' | 'stale' | 'error'; error: string | null; errorAt: 'agent' | 'production' | 'proposal' | null; wordsChanged: boolean };
   generate: { status: 'idle' | 'running' | 'stopping' | 'done' | 'stopped' | 'error' };
   review: { shotId: string | null };
@@ -71,7 +87,7 @@ export interface EasyHost {
   takesApi: Pick<import('../takes/api.ts').TakesApi, 'getTakes' | 'select' | 'verdict'>;
   adoptBuiltPackage(body: any): void;
   /** A production-owned package needs its production id to render. */
-  renderMp4(options?: { productionId?: string | null }): Promise<{ blob: Blob; revision: number; renderId?: string }>;
+  renderMp4(options?: { productionId?: string | null; persistedRevision?: number }): Promise<{ blob: Blob; revision: number; renderId?: string }>;
   seekToScene(sceneId: string): void;
   previewTake(clipId: string, takeId: string | null): Promise<void>;
   refreshClips(): Promise<void>;

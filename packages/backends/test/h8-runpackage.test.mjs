@@ -38,6 +38,9 @@ function fixture() {
     },
     model_license: { id: "LicenseRef-FLUX.3-Image-Klein" },
   };
+  // The planner intentionally excludes orphan assets from paid work. Place the
+  // fixture still in a scene so this lifecycle test exercises a real job.
+  pkg.scenes[0].background = { asset: 'a_h8_still', fit: 'cover' };
   return pkg;
 }
 
@@ -92,6 +95,16 @@ function stubBackend({ healthOk = true, failRun = null, failTeardown = false } =
 function workdir() {
   return mkdtempSync(join(tmpdir(), "comfyrizz-h8-"));
 }
+
+test("a changed approved job is refused before backend allocation", async () => {
+  const backend = stubBackend();
+  const pkg = fixture();
+  const preview = await runPackage(backend, pkg, { workDir: workdir(), dryRun: true, assets: ['a_h8_still'] });
+  backend.calls.length = 0;
+  pkg.assets.a_h8_still.gen.inputs.prompt = "Changed after approval";
+  await assert.rejects(runPackage(backend, pkg, { workDir: workdir(), assets: ['a_h8_still'], expectedJobs: preview.jobsDoc.jobs }), /changed after approval/);
+  assert.deepEqual(backend.calls, []);
+});
 
 test("runPackage takes a package through every step and returns the run record", async () => {
   const work = workdir();

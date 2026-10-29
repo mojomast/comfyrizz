@@ -8,7 +8,7 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { createServer } from 'node:http';
 import { createHash } from 'node:crypto';
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -18,6 +18,8 @@ import { createProviderSettings } from '../src/provider-settings.mjs';
 import { createBudgetLedger } from '../src/productions/ledger.mjs';
 import { TAKES_SCHEMA } from '../src/takes/model.mjs';
 import { buildCorrection } from '../src/takes/correction.mjs';
+import { ITERATION_PRESETS } from '../src/productions/iteration.mjs';
+import { createProductionStore } from '../src/productions/store.mjs';
 
 const TOKEN = 'ip26-chat-wiring-token';
 const KEY = 'ip26-chat-test-secret';
@@ -62,6 +64,7 @@ async function startModel(t) {
     }
     response.setHeader('content-type', 'text/event-stream');
     sse(response, { choices: [{ delta: { content: 'The correction is queued for production review.' } }] });
+    sse(response, { choices: [{ delta: {}, finish_reason: 'stop' }] });
     response.end('data: [DONE]\n\n');
   });
   await new Promise(done => server.listen(0, '127.0.0.1', done));
@@ -90,7 +93,7 @@ function fakeColab() {
           id: `${ASSET_ID}.plate`, asset: ASSET_ID, kind: 'plate', generator: 'ltx25',
           workflow: 'workflows/ltx25_i2v.api.json', workflowSha256: '1'.repeat(64),
           model: 'ltx-2.5-22b-distilled', backend: 'colab:G4',
-          inputs: { seed: 7, prompt: CORRECTION }, dims: { width: 1024, height: 576 }, fps: 24, frames: 97,
+          inputs: clone(pkg.assets[ASSET_ID].gen.inputs), dims: { width: 1024, height: 576 }, fps: 24, frames: 97,
         }],
       };
       const estimate = { gpuMinutes: 1, overheadMinutes: 0, ratePerHour: 8.9 };
@@ -229,24 +232,64 @@ async function approvedPlanHash(app, pkg) {
 
 test('an unbound package still regenerates through the legacy run controller and lands a take', { timeout: 30_000 }, async t => {
   const { app, api, pkg, takeId } = await setup(t);
-  await approvedPlanHash(app, pkg);
 
   const response = await chatTurn(api, 'turn-unbound-2601');
   assert.equal(response.status, 200, JSON.stringify(response.body));
   const proposal = response.body.conversation.clipProposals.find(item => item.id === 'cp_correct_ip26');
-  assert.equal(proposal.status, 'confirmed');
-  assert.ok(proposal.runId, 'the correction started a run');
-  assert.ok(app.runs.get(proposal.runId), 'the run controller owns the run');
+  assert.equal(proposal.status, 'approval_required');
+  assert.ok(proposal.planHash);
+  assert.equal(app.runs.status().activeRunId, null, 'preparation does not start generation');
 
-  const finished = await app.runs.wait(proposal.runId);
+  const authorized = await api('/api/agent/chat', {
+    conversationId: CONVERSATION,
+    baseRevision: response.body.conversation.revision,
+    turnId: 'turn-unbound-authorize-2601',
+    action: 'authorizeClipProposals',
+    confirmClipProposals: [proposal.id],
+    provider: 'custom', model: 'stub-model',
+    message: 'Authorize this reviewed generation.',
+  });
+  assert.equal(authorized.status, 200, JSON.stringify(authorized.body));
+  const started = authorized.body.conversation.clipProposals.find(item => item.id === proposal.id);
+  assert.equal(started.status, 'confirmed', JSON.stringify(started));
+  assert.ok(started.runId, 'the explicit authorization started a run');
+  assert.ok(app.runs.get(started.runId), 'the run controller owns the run');
+
+  const finished = await app.runs.wait(started.runId);
   assert.equal(finished.status, 'done');
 
   const doc = app.takeStore.read(pkg.id);
   const takes = doc.clips[ASSET_ID].takes;
   assert.equal(takes.length, 2, 'the new take is in the take store');
   assert.notEqual(takes.at(-1).takeId, takeId);
-  assert.ok(app.events.entries.some(event => event.type === 'clip.job' && event.runId === proposal.runId));
-  assert.ok(app.events.entries.some(event => event.type === 'clip.take.landed' && event.runId === proposal.runId));
+  assert.ok(existsSync(join(app.store.dir, pkg.id, takes.at(-1).file)), 'the fake output is persisted on disk');
+  assert.ok(app.store.read(pkg.id).revision > pkg.revision, 'take selection advances the saved project revision');
+  assert.ok(app.events.entries.some(event => event.type === 'clip.job' && event.runId === started.runId));
+  assert.ok(app.events.entries.some(event => event.type === 'clip.take.landed' && event.runId === started.runId));
+});
+
+test('a changed correction requires a new approval and never starts the reviewed run', { timeout: 30_000 }, async t => {
+  const { app, api, pkg } = await setup(t);
+  const prepared = await chatTurn(api, 'turn-stale-prepare');
+  assert.equal(prepared.status, 200, JSON.stringify(prepared.body));
+  const proposal = prepared.body.conversation.clipProposals.find(item => item.id === 'cp_correct_ip26');
+  assert.equal(proposal.status, 'approval_required');
+  const current = app.store.read(pkg.id);
+  current.assets[ASSET_ID].gen.inputs.prompt = 'An independently changed prompt';
+  app.store.save(pkg.id, current, current.revision);
+  const authorized = await api('/api/agent/chat', {
+    conversationId: CONVERSATION, baseRevision: prepared.body.conversation.revision,
+    turnId: 'turn-stale-authorize', action: 'authorizeClipProposals',
+    confirmClipProposals: [proposal.id], provider: 'custom', model: 'stub-model',
+    message: 'Authorize the reviewed generation.',
+  });
+  assert.equal(authorized.status, 200, JSON.stringify(authorized.body));
+  const revised = authorized.body.conversation.clipProposals.find(item => item.id === proposal.id);
+  assert.equal(revised.status, 'approval_required');
+  assert.notEqual(revised.planHash, proposal.planHash);
+  assert.match(revised.lastError, /plan changed/);
+  assert.equal(app.runs.status().activeRunId, null);
+  assert.equal(app.takeStore.read(pkg.id).clips[ASSET_ID].takes.length, 1);
 });
 
 test('a production-bound correction creates a trusted plan but never starts from chat', { timeout: 30_000 }, async t => {
@@ -301,4 +344,208 @@ test('a production-bound correction creates a trusted plan but never starts from
   const legacy = app.runs.approve(planHash);
   assert.equal(legacy.approved, true, 'the legacy hash approval existed, and still cannot authorise a bound run');
   assert.equal(app.runs.status().activeRunId, null);
+});
+
+test('approved production chat correction dispatches one scoped fake job and persists a new take', { timeout: 30_000 }, async t => {
+  const baseBackend = fakeColab();
+  const calls = [];
+  const backend = { ...baseBackend, async runPackage(pkg, opts) {
+    calls.push({ dryRun: opts.dryRun === true, assets: opts.assets, includeReady: opts.includeReady });
+    return baseBackend.runPackage(pkg, opts);
+  } };
+  const { app, api, pkg } = await setup(t, { backend });
+  const created = await api('/api/productions', {
+    commandId: 'cmd_corr_create', idempotencyKey: 'cmd_corr_create', kind: 'production.create',
+    payload: { conversationId: CONVERSATION, packageId: pkg.id, intent: 'active' },
+  });
+  assert.equal(created.status, 201, JSON.stringify(created.body));
+  const id = created.body.productionId;
+  const iteration = await api(`/api/productions/${id}/commands`, {
+    commandId: 'cmd_corr_level', idempotencyKey: 'cmd_corr_level', kind: 'iteration.set',
+    expected: { productionRevision: created.body.revision }, payload: { policy: ITERATION_PRESETS.draft },
+  });
+  assert.equal(iteration.status, 200, JSON.stringify(iteration.body));
+  const prepared = await chatTurn(api, 'turn-prod-prepare');
+  assert.equal(prepared.status, 200, JSON.stringify(prepared.body));
+  const proposal = prepared.body.conversation.clipProposals.find(item => item.id === 'cp_correct_ip26');
+  assert.equal(proposal.status, 'plan_ready', JSON.stringify(proposal));
+  assert.deepEqual(app.store.read(pkg.id), pkg, 'preparing a correction leaves the current project untouched');
+  const snapshot = await api(`/api/productions/${id}`);
+  const slot = proposal.estimate.actions[0];
+  assert.deepEqual(slot.assetIds, [ASSET_ID]);
+  assert.equal(slot.executor, 'chat-correction-take');
+  const dispatch = revision => api(`/api/productions/${id}/actions`, {
+    commandId: 'cmd_corr_dispatch', idempotencyKey: 'cmd_corr_dispatch',
+    expected: { productionRevision: revision },
+    payload: { planId: proposal.planId, planRevision: 0, actionId: slot.id },
+  });
+  const unapproved = await dispatch(snapshot.body.revision);
+  assert.equal(unapproved.status, 409, JSON.stringify(unapproved.body));
+  assert.equal(calls.filter(call => !call.dryRun).length, 0);
+  const cap = await api(`/api/productions/${id}/spend-cap`, {
+    commandId: 'cmd_corr_cap', idempotencyKey: 'cmd_corr_cap', ceiling: slot.upperBound,
+    expected: { productionRevision: snapshot.body.revision },
+  });
+  assert.equal(cap.status, 200, JSON.stringify(cap.body));
+  const approval = await api(`/api/productions/${id}/commands`, {
+    commandId: 'cmd_corr_approve', idempotencyKey: 'cmd_corr_approve', kind: 'plan.approve',
+    expected: { productionRevision: cap.body.revision },
+    payload: { planId: proposal.planId, planHash: proposal.planHash },
+  });
+  assert.equal(approval.status, 200, JSON.stringify(approval.body));
+  const accepted = await dispatch(approval.body.revision);
+  assert.equal(accepted.status, 202, JSON.stringify(accepted.body));
+  let runId;
+  for (let i = 0; i < 200 && !runId; i++) {
+    runId = app.runs.status().runs.find(run => run.backendId === 'colab')?.runId;
+    if (!runId) await new Promise(resolve => setTimeout(resolve, 20));
+  }
+  assert.ok(runId, 'the production outbox dispatched the take runner');
+  const finished = await app.runs.wait(runId);
+  assert.equal(finished.status, 'done', JSON.stringify(finished));
+  const takes = app.takeStore.read(pkg.id).clips[ASSET_ID].takes;
+  assert.equal(takes.length, 2);
+  assert.ok(existsSync(join(app.store.dir, pkg.id, takes.at(-1).file)));
+  assert.ok(app.store.read(pkg.id).revision > pkg.revision);
+  assert.deepEqual(calls.filter(call => !call.dryRun), [{ dryRun: false, assets: [ASSET_ID], includeReady: true }]);
+  const replay = await dispatch(approval.body.revision);
+  assert.ok([200, 202].includes(replay.status), JSON.stringify(replay.body));
+  assert.equal(calls.filter(call => !call.dryRun).length, 1, 'replaying dispatch cannot allocate twice');
+  const events = await api(`/api/productions/${id}/events`);
+  assert.ok(events.body.events.some(event => event.type === 'action.state_changed' && event.data.id === slot.id && event.data.state === 'completed'));
+});
+
+test('production correction rejects a tampered collected file instead of completing', { timeout: 30_000 }, async t => {
+  const baseBackend = fakeColab();
+  const backend = { ...baseBackend, async runPackage(pkg, opts) {
+    const result = await baseBackend.runPackage(pkg, opts);
+    if (!opts.dryRun) writeFileSync(join(opts.outDir, 'assets', `${ASSET_ID}.mp4`), 'tampered');
+    return result;
+  } };
+  const { app, api, pkg } = await setup(t, { backend });
+  const created = await api('/api/productions', {
+    commandId: 'cmd_bad_create', idempotencyKey: 'cmd_bad_create', kind: 'production.create',
+    payload: { conversationId: CONVERSATION, packageId: pkg.id, intent: 'active' },
+  });
+  const id = created.body.productionId;
+  const iteration = await api(`/api/productions/${id}/commands`, {
+    commandId: 'cmd_bad_level', idempotencyKey: 'cmd_bad_level', kind: 'iteration.set',
+    expected: { productionRevision: created.body.revision }, payload: { policy: ITERATION_PRESETS.draft },
+  });
+  assert.equal(iteration.status, 200, JSON.stringify(iteration.body));
+  const prepared = await chatTurn(api, 'turn-bad-prepare');
+  const proposal = prepared.body.conversation.clipProposals.find(item => item.id === 'cp_correct_ip26');
+  assert.equal(proposal.status, 'plan_ready', JSON.stringify(proposal));
+  const slot = proposal.estimate.actions[0];
+  const snapshot = await api(`/api/productions/${id}`);
+  const cap = await api(`/api/productions/${id}/spend-cap`, {
+    commandId: 'cmd_bad_cap', idempotencyKey: 'cmd_bad_cap', ceiling: slot.upperBound,
+    expected: { productionRevision: snapshot.body.revision },
+  });
+  const approval = await api(`/api/productions/${id}/commands`, {
+    commandId: 'cmd_bad_approve', idempotencyKey: 'cmd_bad_approve', kind: 'plan.approve',
+    expected: { productionRevision: cap.body.revision }, payload: { planId: proposal.planId, planHash: proposal.planHash },
+  });
+  assert.equal(approval.status, 200, JSON.stringify(approval.body));
+  const dispatched = await api(`/api/productions/${id}/actions`, {
+    commandId: 'cmd_bad_dispatch', idempotencyKey: 'cmd_bad_dispatch',
+    expected: { productionRevision: approval.body.revision },
+    payload: { planId: proposal.planId, planRevision: 0, actionId: slot.id },
+  });
+  assert.equal(dispatched.status, 202, JSON.stringify(dispatched.body));
+  let runId;
+  for (let i = 0; i < 200 && !runId; i++) {
+    runId = app.runs.status().runs[0]?.runId;
+    if (!runId) await new Promise(resolve => setTimeout(resolve, 20));
+  }
+  assert.ok(runId);
+  const finished = await app.runs.wait(runId);
+  assert.equal(finished.status, 'failed');
+  assert.equal(app.takeStore.read(pkg.id).clips[ASSET_ID].takes.length, 1);
+  const events = await api(`/api/productions/${id}/events`);
+  assert.ok(events.body.events.some(event => event.type === 'action.state_changed' && event.data.id === slot.id && event.data.state === 'failed'));
+});
+
+test('a production correction keeps an owner edit made while generation is running', { timeout: 30_000 }, async t => {
+  let release, entered;
+  const blocked = new Promise(resolve => { release = resolve; });
+  const started = new Promise(resolve => { entered = resolve; });
+  const baseBackend = fakeColab();
+  const backend = { ...baseBackend, async runPackage(pkg, opts) {
+    if (!opts.dryRun) { entered(); await blocked; }
+    return baseBackend.runPackage(pkg, opts);
+  } };
+  t.after(() => release());
+  const { app, api, pkg, takeId } = await setup(t, { backend });
+  const created = await api('/api/productions', {
+    commandId: 'cmd_edit_create', idempotencyKey: 'cmd_edit_create', kind: 'production.create',
+    payload: { conversationId: CONVERSATION, packageId: pkg.id, intent: 'active' },
+  });
+  const id = created.body.productionId;
+  const iteration = await api(`/api/productions/${id}/commands`, {
+    commandId: 'cmd_edit_level', idempotencyKey: 'cmd_edit_level', kind: 'iteration.set',
+    expected: { productionRevision: created.body.revision }, payload: { policy: ITERATION_PRESETS.draft },
+  });
+  assert.equal(iteration.status, 200);
+  const prepared = await chatTurn(api, 'turn-edit-prepare');
+  const proposal = prepared.body.conversation.clipProposals.find(item => item.id === 'cp_correct_ip26');
+  assert.equal(proposal.status, 'plan_ready', JSON.stringify(proposal));
+  const slot = proposal.estimate.actions[0];
+  const snapshot = await api(`/api/productions/${id}`);
+  const cap = await api(`/api/productions/${id}/spend-cap`, {
+    commandId: 'cmd_edit_cap', idempotencyKey: 'cmd_edit_cap', ceiling: slot.upperBound,
+    expected: { productionRevision: snapshot.body.revision },
+  });
+  const approval = await api(`/api/productions/${id}/commands`, {
+    commandId: 'cmd_edit_approve', idempotencyKey: 'cmd_edit_approve', kind: 'plan.approve',
+    expected: { productionRevision: cap.body.revision }, payload: { planId: proposal.planId, planHash: proposal.planHash },
+  });
+  const dispatched = await api(`/api/productions/${id}/actions`, {
+    commandId: 'cmd_edit_dispatch', idempotencyKey: 'cmd_edit_dispatch',
+    expected: { productionRevision: approval.body.revision },
+    payload: { planId: proposal.planId, planRevision: 0, actionId: slot.id },
+  });
+  assert.equal(dispatched.status, 202, JSON.stringify(dispatched.body));
+  await started;
+  const current = app.store.read(pkg.id);
+  current.assets[ASSET_ID].gen.inputs.prompt = 'Owner edit made while the fake run was active';
+  app.store.save(pkg.id, current, current.revision);
+  release();
+  const runId = app.runs.status().runs[0].runId;
+  assert.equal((await app.runs.wait(runId)).status, 'done');
+  assert.equal(app.store.read(pkg.id).assets[ASSET_ID].gen.inputs.prompt, 'Owner edit made while the fake run was active');
+  const clip = app.takeStore.read(pkg.id).clips[ASSET_ID];
+  assert.equal(clip.takes.length, 2);
+  assert.equal(clip.selected, takeId, 'the generated take remains a candidate');
+});
+
+test('HTTP shutdown check clears only a confirmed finished fake run', async t => {
+  const base = fakeColab();
+  let sessions = { sessions: [], empty: false };
+  const { api, pkg, runtimeDir } = await setup(t, { backend: { ...base, sessions: async () => sessions } });
+  const created = await api('/api/productions', {
+    commandId: 'cmd_rec_create', idempotencyKey: 'cmd_rec_create', kind: 'production.create',
+    payload: { conversationId: CONVERSATION, packageId: pkg.id, intent: 'active' },
+  });
+  const id = created.body.productionId;
+  const prepared = await chatTurn(api, 'turn-rec-prepare');
+  const proposal = prepared.body.conversation.clipProposals.find(item => item.id === 'cp_correct_ip26');
+  assert.equal(proposal.status, 'plan_ready', JSON.stringify(proposal));
+  const actionId = proposal.estimate.actions[0].id;
+  const runId = 'run_123456789abc';
+  const store = createProductionStore({ runtimeDir });
+  store.commit(id, { commandId: 'cmd_rec_seed', idempotencyKey: 'cmd_rec_seed', baseRevision: store.read(id).revision,
+    events: [{ type: 'action.state_changed', data: { id: actionId, planId: proposal.planId, planHash: proposal.planHash,
+      state: 'failed', runId } }] });
+  const dir = join(runtimeDir, 'runs', runId);
+  mkdirSync(dir, { recursive: true });
+  writeFileSync(join(dir, 'state.json'), JSON.stringify({ runId, productionId: id, packageId: pkg.id, actionId, finished: true, teardown: { state: 'stop_unconfirmed' } }));
+  assert.equal((await api('/api/correction-shutdown')).body.blocked, true);
+  const unknown = await api(`/api/correction-shutdown/${runId}/check`, {});
+  assert.equal(unknown.body.confirmed, false);
+  assert.equal((await api('/api/correction-shutdown')).body.blocked, true);
+  sessions = { sessions: [], empty: true };
+  const checked = await api(`/api/correction-shutdown/${runId}/check`, {});
+  assert.equal(checked.body.confirmed, true, JSON.stringify(checked.body));
+  assert.equal((await api('/api/correction-shutdown')).body.blocked, false);
 });

@@ -26,6 +26,7 @@ import { finalGate } from '../../src/takes/gate.mjs';
 import { ingestRun } from '../../src/takes/ingest.mjs';
 import { TAKES_SCHEMA, deriveClipState, genFingerprint } from '../../src/takes/model.mjs';
 import { createTakeRoutes } from '../../src/takes/routes.mjs';
+import { selectTake } from '../../src/takes/select.mjs';
 import { createTakeStore } from '../../src/takes/store.mjs';
 
 const FIXTURE_PATH = fileURLToPath(new URL('../../../../packages/schema/fixtures/valid/variants.json', import.meta.url));
@@ -239,6 +240,31 @@ test('UX10: the final gate uses the package reference index', () => {
     [{ clipId: CLIP, state: 'stale' }],
     'the gate must not approve a take whose reference bytes changed',
   );
+});
+
+test('selecting a resolved take preserves the authored request and reference-aware freshness', () => {
+  const pkg = referencePackage({ transitive: true });
+  const authored = clone(pkg.assets[ASSET_ID].gen);
+  authored.inputs.width = 1920;
+  authored.inputs.height = 1080;
+  pkg.assets[ASSET_ID].gen = clone(authored);
+  const take = fakeTake(pkg);
+  take.gen.inputs = { ...take.gen.inputs, image: 'assets/resolved.png', height: 1088, cutout: false };
+  take.gen.job_id = 'job-real';
+  const doc = takeDoc(pkg, take);
+  const selected = selectTake(pkg, doc, ASSET_ID, take.takeId);
+  assert.deepEqual(selected.assets[ASSET_ID].gen.inputs, authored.inputs);
+  assert.equal(selected.assets[ASSET_ID].gen.job_id, 'job-real');
+  assert.equal(take.gen.inputs.height, 1088, 'actual job inputs remain recorded');
+  assert.equal(finalGate(selected, doc, listClips(selected)).ok, true);
+  const edited = clone(selected);
+  edited.assets[ASSET_ID].gen.inputs.height = 1088;
+  assert.equal(deriveClipState({ takes: doc.clips[ASSET_ID], assetGen: edited.assets[ASSET_ID].gen, refs: edited }), 'stale');
+  const changedRef = clone(selected);
+  changedRef.assets[TRANSITIVE_ASSET].sha256 = digest('changed transitive');
+  assert.equal(deriveClipState({ takes: doc.clips[ASSET_ID], assetGen: changedRef.assets[ASSET_ID].gen, refs: changedRef }), 'stale');
+  const reselected = selectTake(edited, doc, ASSET_ID, take.takeId);
+  assert.equal(deriveClipState({ takes: doc.clips[ASSET_ID], assetGen: reselected.assets[ASSET_ID].gen, refs: reselected }), 'stale', 'reselection cannot erase edits');
 });
 
 test('UX10: clips and takes reads derive state with the package reference index', async (t) => {

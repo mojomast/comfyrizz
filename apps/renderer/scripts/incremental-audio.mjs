@@ -10,7 +10,7 @@
 import { existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { spawnSync } from 'node:child_process';
-import { dbToLinear, resolveAudioMix } from '../src/audio-mix-model.js';
+import { compositionDurationInFrames, dbToLinear, resolveAudioMix } from '../src/audio-mix-model.js';
 import { narrationAudio } from '../src/audio-model.js';
 import { MIX_LOUDNESS_TARGET, normalizeMixLoudness } from './mix-loudness.mjs';
 
@@ -34,7 +34,18 @@ export function planAudioBuses({ pkg, timeline, mixAudio = true }) {
   const mix = mixAudio ? resolveAudioMix(pkg, timeline) : { enabled: false, music: null, dialogue: [], ambience: [], sfx: [] };
   const buses = [];
   if (mix.music) {
-    buses.push({ kind: 'music', file: mix.music.file, gainDb: mix.music.gainDb, duck: mix.music.duck, loop: mix.music.loop, fadeIn: mix.music.fadeInSeconds ?? 0, fadeOut: mix.music.fadeOutSeconds ?? 0 });
+    buses.push({
+      kind: 'music',
+      file: mix.music.file,
+      gainDb: mix.music.gainDb,
+      duck: mix.music.duck,
+      loop: mix.music.loop,
+      fadeIn: mix.music.fadeInSeconds ?? 0,
+      fadeOut: mix.music.fadeOutSeconds ?? 0,
+      ...(typeof mix.music.durationInFrames === 'number' ? { seconds: mix.music.durationInFrames / fps } : {}),
+      ...(typeof mix.music.startSeconds === 'number' ? { startSeconds: mix.music.startSeconds } : {}),
+      ...(typeof mix.music.endSeconds === 'number' ? { endSeconds: mix.music.endSeconds } : {}),
+    });
   }
   // IP51D: native dialogue sits between the music bed and the ambience. Its
   // `duck` is disabled by the model, so the mux never sidechains it.
@@ -75,8 +86,9 @@ export function planAudioBuses({ pkg, timeline, mixAudio = true }) {
  */
 export function muxPackageAudio({ silentPath, outputPath, packageDir, pkg, timeline, onLog = () => {}, mixAudio = true }) {
   const fps = timeline?.fps ?? 30;
-  const durationSeconds = (timeline?.durationInFrames ?? 0) / Math.max(1, fps);
-  const narration = narrationAudio(pkg);
+  const durationSeconds = compositionDurationInFrames(pkg, timeline) / Math.max(1, fps);
+  const masterMusic = mixAudio && resolveAudioMix(pkg, timeline).music?.master === true;
+  const narration = masterMusic ? null : narrationAudio(pkg);
   const narrationPath = narration ? join(packageDir, narration.file) : null;
   const hasNarration = Boolean(narrationPath && existsSync(narrationPath));
   if (narrationPath && !hasNarration) onLog(`warning: media not in this clone: ${narration.file}; exporting silent`);
@@ -87,16 +99,6 @@ export function muxPackageAudio({ silentPath, outputPath, packageDir, pkg, timel
 
   if (!hasNarration && buses.length === 0) {
     return { audio: null, loudness: null };
-  }
-
-  // The music bed's fades live in the model; re-read them from the package.
-  // IP51P review fix-up: `mix` lives in planAudioBuses now; re-resolve the (pure) music bed here.
-  const music = mixAudio ? resolveAudioMix(pkg, timeline).music : null;
-  const fadeIn = music && typeof pkg.audio?.music?.fade_in_seconds === 'number' ? pkg.audio.music.fade_in_seconds : 0.5;
-  const fadeOut = music && typeof pkg.audio?.music?.fade_out_seconds === 'number' ? pkg.audio.music.fade_out_seconds : 1;
-  if (buses[0]?.kind === 'music') {
-    buses[0].fadeIn = fadeIn;
-    buses[0].fadeOut = fadeOut;
   }
 
   const inputs = ['-i', silentPath];
@@ -127,18 +129,18 @@ export function muxPackageAudio({ silentPath, outputPath, packageDir, pkg, timel
     inputIndex += 1;
     const raw = `b${busIndex}`;
     const parts = [`volume=${dbToLinear(bus.gainDb).toFixed(6)}`];
+    // Music and scene buses share exact source in/out semantics. Reset before
+    // fades/delays so second zero is the trimmed master's first sample.
+    if (typeof bus.startSeconds === 'number' || typeof bus.endSeconds === 'number') {
+      const start = Math.max(0, typeof bus.startSeconds === 'number' ? bus.startSeconds : 0);
+      const end = typeof bus.endSeconds === 'number' ? Math.max(start, bus.endSeconds) : start + bus.seconds;
+      parts.push(`atrim=start=${start}:end=${end}`, 'asetpts=PTS-STARTPTS');
+    }
     if (bus.kind === 'music') {
       if (bus.fadeIn > 0) parts.push(`afade=t=in:st=0:d=${bus.fadeIn}`);
       if (bus.fadeOut > 0) parts.push(`afade=t=out:st=${Math.max(0, durationSeconds - bus.fadeOut)}:d=${bus.fadeOut}`);
       parts.push(`atrim=0:${durationSeconds}`);
     } else {
-      // IP51P: seek into the source first, then reset its timestamps so the
-      // timeline delay below is measured from the trimmed window's first frame.
-      if (typeof bus.startSeconds === 'number' || typeof bus.endSeconds === 'number') {
-        const start = Math.max(0, typeof bus.startSeconds === 'number' ? bus.startSeconds : 0);
-        const end = typeof bus.endSeconds === 'number' ? Math.max(start, bus.endSeconds) : start + bus.seconds;
-        parts.push(`atrim=start=${start}:end=${end}`, 'asetpts=PTS-STARTPTS');
-      }
       parts.push(`adelay=${adelayMs(bus.from, fps)}:all=1`);
       parts.push(`atrim=0:${Math.max(0, (bus.from / fps) + bus.seconds)}`);
     }
@@ -171,7 +173,8 @@ export function muxPackageAudio({ silentPath, outputPath, packageDir, pkg, timel
   if (run.status !== 0) throw new Error(`audio mix failed: ${(run.stderr || '').slice(-800)}`);
   // Two-pass linear loudnorm, not the old inline one-pass: dynamic loudnorm pumps
   // the quiet stretches and undoes the sidechain duck (G6-11).
-  const normalised = normalizeMixLoudness(outputPath, { onLog });
-  onLog(`mixed ${mixLabels.length} audio source(s) and normalised to ${MIX_LOUDNESS_TARGET.integratedLufs} LUFS`);
-  return { audio: { sources: mixLabels.length, loudness: MIX_LOUDNESS_TARGET }, loudness: MIX_LOUDNESS_TARGET, normalised };
+  const normalised = normalizeMixLoudness(outputPath, { onLog, pkg: mixAudio ? pkg : null });
+  const loudness = normalised.applied ? MIX_LOUDNESS_TARGET : null;
+  onLog(`mixed ${mixLabels.length} audio source(s); ${normalised.applied ? `normalised to ${MIX_LOUDNESS_TARGET.integratedLufs} LUFS` : normalised.reason}`);
+  return { audio: { sources: mixLabels.length, loudness }, loudness, normalised };
 }

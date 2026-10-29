@@ -1,0 +1,11 @@
+{
+  "problems": ["CSV_WALL_MISSING: Scene s3 depicts a source-record wall but has no source-bound wall in that scene. Use storyboard.csv_tile_wall there; an SVG description is not the source data."],
+  "toolCall": {
+    "scene_id": "s3",
+    "kind": "pattern",
+    "intent": "Regular grid of identical dark graphite square tiles on near-black, subtle edge bevels, no accent color, restrained and mechanical",
+    "palette": ["#0b0b0d", "#1d1f22", "#2b2e33", "#f2ede4"],
+    "width": 1080,
+    "height": 1080
+  }
+}

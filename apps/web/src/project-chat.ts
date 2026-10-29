@@ -208,7 +208,7 @@ type RecoveryReply = ChatReply & {
   error?: string;
   recoveryConflict?: RecoveryConflict;
 };
-type TurnRequest = { conversationId: string; turnId: string; message: string; mode: 'plan' | 'express'; provider: string; model: string; baseRevision?: number; adoptPackageId?: string; action?: 'build' | 'authorizeClipProposals'; confirmAssignments?: string[]; confirmClipProposals?: string[]; confirmCastProposals?: string[]; rejectAssignments?: string[]; rejectCastProposals?: string[]; turnContext?: TurnContextChip[] };
+type TurnRequest = { conversationId: string; turnId: string; message: string; mode: 'plan' | 'express'; provider: string; model: string; baseRevision?: number; adoptPackageId?: string; expectedPackageId?: string; expectedPackageRevision?: number; action?: 'build' | 'authorizeClipProposals'; confirmAssignments?: string[]; confirmClipProposals?: string[]; confirmCastProposals?: string[]; rejectAssignments?: string[]; rejectCastProposals?: string[]; turnContext?: TurnContextChip[] };
 
 const esc = (value: unknown) => String(value ?? '').replace(/[&<>"']/g, char => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[char]!);
 const STORAGE_KEY = 'comfyrizz.project-chat';
@@ -520,6 +520,8 @@ export type CreateProjectChatOptions = {
   expectedPackageId?: string;
   /** Bind this chat's first new/unbound turn to an existing generated package. */
   adoptPackageId?: string;
+  /** Read at send time: Super Easy may have opened a package after this chat mounted. */
+  getEditContext?: () => { packageId: string; revision: number } | null;
   /** Server snapshots only: fired before the host applies a built package. */
   onConversationChange?: (conversation: Conversation) => void;
   /** Optional live turn telemetry; tests and offline embeds may omit it. */
@@ -566,6 +568,11 @@ function mountProjectChatController(options: ProjectChatControllerOptions) {
   let conflict = false;
   let recovery: RecoveryConflict | null = null;
   let recoveryHint = '';
+  let newVideoFromPackage: string | null = null;
+  function editContext() {
+    const context = options.getEditContext?.() ?? null;
+    return context?.packageId === newVideoFromPackage ? null : context;
+  }
   const dismissedContextChipIds = new Set<string>();
   const readTurnContext = options.getTurnContext ?? options.turnContext;
 
@@ -779,12 +786,17 @@ function mountProjectChatController(options: ProjectChatControllerOptions) {
     panel.querySelectorAll<HTMLButtonElement>('button').forEach(button => { button.disabled = busy; });
   }
 
-  function validateReplyPackage(reply: ChatReply): void {
-    if (!options.expectedPackageId) return;
+  function validateReplyPackage(reply: ChatReply, requestedPackageId?: string): void {
+    const current = editContext()?.packageId;
+    if (requestedPackageId && current && current !== requestedPackageId) {
+      throw new Error('The open project changed while the agent was working. Reload its conversation.');
+    }
+    const expected = requestedPackageId ?? current ?? options.expectedPackageId;
+    if (!expected) return;
     const conversationPackage = reply.conversation?.projectId;
     const responsePackage = reply.project?.package?.id;
-    if ((conversationPackage && conversationPackage !== options.expectedPackageId)
-      || (responsePackage && responsePackage !== options.expectedPackageId)) {
+    if ((conversationPackage && conversationPackage !== expected)
+      || (responsePackage && responsePackage !== expected)) {
       throw new Error('The linked conversation belongs to a different project.');
     }
   }
@@ -812,6 +824,7 @@ function mountProjectChatController(options: ProjectChatControllerOptions) {
 
   function reset(): void {
     if (busy) return;
+    newVideoFromPackage = options.getEditContext?.()?.packageId ?? null;
     conversationId = null;
     conversation = null;
     pending = null; errorText = ''; conflict = false; recovery = null; recoveryHint = '';
@@ -1112,9 +1125,14 @@ function mountProjectChatController(options: ProjectChatControllerOptions) {
     const turnContext = turnContextChips();
     options.append('user', text.trim());
     try {
+      const editing = editContext();
+      if (editing && conversation?.projectId && conversation.projectId !== editing.packageId) {
+        throw new Error('The conversation belongs to a different project. Open the current project’s conversation before editing.');
+      }
       const provider = await options.provider();
       pending = { conversationId: ensureConversationId(), turnId: randomUUID(), message: text, mode,
         provider: provider.provider, model: provider.model,
+        ...(editing ? { expectedPackageId: editing.packageId, expectedPackageRevision: editing.revision } : {}),
         ...(conversation ? { baseRevision: conversation.revision } : {}),
         ...(options.adoptPackageId && !conversation?.projectId ? { adoptPackageId: options.adoptPackageId } : {}),
         ...(action ? { action } : {}),
@@ -1239,6 +1257,7 @@ function mountProjectChatController(options: ProjectChatControllerOptions) {
         throw new Error(body.error ?? `HTTP ${response.status}`);
       }
       const reply = body as ChatReply;
+      validateReplyPackage(reply, request.expectedPackageId);
       pending = null;
       options.replace(reply.conversation.messages);
       adopt(reply, reply.built);

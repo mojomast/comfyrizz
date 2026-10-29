@@ -14,6 +14,7 @@
  * No network. Used by `render:example` and the per-scene re-render test.
  */
 import { createHash } from 'node:crypto';
+import { assertModelContribution } from '../../../packages/jobs/src/model-contribution.mjs';
 import { copyFileSync, existsSync, mkdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { spawnSync } from 'node:child_process';
@@ -28,11 +29,12 @@ import { muxPackageAudio } from './incremental-audio.mjs';
 import { narrationAudio, narrationWarning } from '../src/audio-model.js';
 import { collectMediaDims, dimMismatches } from '../src/media-dims.js';
 import { mergeScenes } from '../src/timeline-model.js';
+import { isMasterMusic, timelineWithMasterMusicDuration } from '../src/audio-mix-model.js';
 
 export { mergeScenes };
 
 /** Bump when a renderer change can alter rendered frames. */
-export const RENDERER_VERSION = 8;
+export const RENDERER_VERSION = 11;
 
 const BROWSER = resolveBrowserExecutable();
 
@@ -78,7 +80,7 @@ export function planSegments(pkg, timeline, { generatedAssets = {}, media, compo
     const scene = renderScenes[index];
     const next = renderScenes[index + 1];
     const start = scene.from;
-    const end = next ? next.from - 1 : timeline.durationInFrames - 1;
+    const end = Math.min(next ? next.from - 1 : timeline.durationInFrames - 1, timeline.durationInFrames - 1);
     const frames = end - start + 1;
     if (frames <= 0) continue;
     // A fade after this scene draws the next scene too, so it is part of this segment.
@@ -121,6 +123,19 @@ export function planSegments(pkg, timeline, { generatedAssets = {}, media, compo
       presenters,
       captions,
       media: mediaInputs,
+      // Trim/reactive turns the song into a picture input too. Legacy beds stay
+      // out of the visual cache key, as they were before master-song support.
+      masterMusic: isMasterMusic(pkg.audio?.music)
+        ? { music: pkg.audio.music, asset: pkg.assets?.[pkg.audio.music.asset] ?? null }
+        : null,
+      // Lyrics are a global, frame-driven picture input. Keep their canonical
+      // source seconds and trim in every segment key so an edit cannot reuse
+      // frames rendered against the old song clock or text.
+      lyrics: {
+        style: pkg.audio?.lyricsStyle ?? 'off',
+        cues: pkg.audio?.lyrics ?? [],
+        trim: pkg.audio?.music?.trim ?? null,
+      },
       missing: missingMedia.map(item => item.file),
       dims: mediaDims,
     };
@@ -149,6 +164,7 @@ export function renderPackageIncremental(packagePath, outputPath, options = {}) 
     throw new Error(`package invalid: ${detail}`);
   }
   const packageDir = dirname(packagePath);
+  if (options.intent !== 'draft') assertModelContribution({ pkg, packageDir });
   if (loadCompositionManifest(packageDir, pkg)) {
     const reason = 'compositions require a full render';
     onLog(`full render: ${reason}`);
@@ -169,7 +185,9 @@ export function renderPackageIncremental(packagePath, outputPath, options = {}) 
   // The committed timeline.json is the timing source of truth; only compile when
   // an example has not been compiled yet (e.g. an in-memory agent draft).
   const timelinePath = join(packageDir, 'timeline.json');
-  const timeline = existsSync(timelinePath) ? JSON.parse(readFileSync(timelinePath, 'utf8')) : compileTimeline(pkg);
+  const committedTimeline = existsSync(timelinePath) ? JSON.parse(readFileSync(timelinePath, 'utf8')) : compileTimeline(pkg);
+  const timeline = timelineWithMasterMusicDuration(pkg, committedTimeline);
+  if (options.intent !== 'draft') assertModelContribution({ pkg, packageDir, timeline });
   const generatedAssets = inlineGeneratedAssets(pkg, packageDir);
   const missingMedia = missingMediaFiles(pkg, packageDir);
   const mediaDims = collectMediaDims(pkg, packageDir);
@@ -205,7 +223,7 @@ export function renderPackageIncremental(packagePath, outputPath, options = {}) 
         `--props=${propsPath}`,
         `--public-dir=${publicDir}`,
         `--frames=${segment.start}-${segment.end}`,
-        `--browser-executable=${BROWSER}`,
+        ...(BROWSER ? [`--browser-executable=${BROWSER}`] : []),
         '--concurrency=2',
         '--log=error',
       ],
@@ -235,7 +253,7 @@ export function renderPackageIncremental(packagePath, outputPath, options = {}) 
     writeFileSync(listPath, `${segments.map(segment => `file '${join(cache, `${segment.key}.mp4`).replace(/'/g, "'\\''")}'`).join('\n')}\n`);
     const silentPath = join(cache, 'silent.mp4');
     rmSync(silentPath, { force: true });
-    const concat = spawnSync('ffmpeg', ['-y', '-hide_banner', '-nostats', '-f', 'concat', '-safe', '0', '-i', listPath, '-c', 'copy', silentPath], { encoding: 'utf8' });
+    const concat = spawnSync('ffmpeg', ['-y', '-hide_banner', '-nostats', '-f', 'concat', '-safe', '0', '-i', listPath, '-c:v', 'copy', '-an', silentPath], { encoding: 'utf8' });
     if (concat.status !== 0) throw new Error(`concat failed: ${concat.stderr}`);
   } finally {
     if (ownsPublicDir) rmSync(publicDir, { recursive: true, force: true });
@@ -267,8 +285,9 @@ export function renderPackageIncremental(packagePath, outputPath, options = {}) 
   }
 
   const frames = ffprobeFrames(outputPath);
-  if (frames !== timeline.durationInFrames) {
-    throw new Error(`incremental export has ${frames} frames, compiled timeline has ${timeline.durationInFrames}`);
+  const frameTolerance = isMasterMusic(pkg.audio?.music) ? 1 : 0;
+  if (Math.abs(frames - timeline.durationInFrames) > frameTolerance) {
+    throw new Error(`incremental export has ${frames} frames, trimmed master/timeline has ${timeline.durationInFrames} (tolerance ${frameTolerance})`);
   }
 
   return {
@@ -303,6 +322,7 @@ export async function renderPackageIncrementalAsync(packagePath, outputPath, opt
     throw new Error(`package invalid: ${detail}`);
   }
   const packageDir = dirname(packagePath);
+  if (options.intent !== 'draft') assertModelContribution({ pkg, packageDir });
   if (loadCompositionManifest(packageDir, pkg)) {
     const reason = 'compositions require a full render';
     onLog(`full render: ${reason}`);
@@ -321,7 +341,9 @@ export async function renderPackageIncrementalAsync(packagePath, outputPath, opt
     };
   }
   const timelinePath = join(packageDir, 'timeline.json');
-  const timeline = existsSync(timelinePath) ? JSON.parse(readFileSync(timelinePath, 'utf8')) : compileTimeline(pkg);
+  const committedTimeline = existsSync(timelinePath) ? JSON.parse(readFileSync(timelinePath, 'utf8')) : compileTimeline(pkg);
+  const timeline = timelineWithMasterMusicDuration(pkg, committedTimeline);
+  if (options.intent !== 'draft') assertModelContribution({ pkg, packageDir, timeline });
   const generatedAssets = inlineGeneratedAssets(pkg, packageDir);
   const missingMedia = missingMediaFiles(pkg, packageDir);
   const mediaDims = collectMediaDims(pkg, packageDir);
@@ -363,7 +385,7 @@ export async function renderPackageIncrementalAsync(packagePath, outputPath, opt
           `--props=${propsPath}`,
           `--public-dir=${publicDir}`,
           `--frames=${segment.start}-${segment.end}`,
-          `--browser-executable=${BROWSER}`,
+          ...(BROWSER ? [`--browser-executable=${BROWSER}`] : []),
           '--concurrency=2',
           '--log=error',
         ], { cwd: rendererDir, signal });
@@ -390,7 +412,7 @@ export async function renderPackageIncrementalAsync(packagePath, outputPath, opt
     const silentPath = join(cache, 'silent.mp4');
     rmSync(silentPath, { force: true });
     try {
-      await spawnCancellable('ffmpeg', ['-y', '-hide_banner', '-nostats', '-f', 'concat', '-safe', '0', '-i', listPath, '-c', 'copy', silentPath], { signal });
+      await spawnCancellable('ffmpeg', ['-y', '-hide_banner', '-nostats', '-f', 'concat', '-safe', '0', '-i', listPath, '-c:v', 'copy', '-an', silentPath], { signal });
     } catch (error) {
       if (error?.code === 'RENDER_CANCELLED') throw error;
       throw new Error(`concat failed: ${error?.stderr || error?.message}`);
@@ -425,8 +447,9 @@ export async function renderPackageIncrementalAsync(packagePath, outputPath, opt
   }
 
   const frames = ffprobeFrames(outputPath);
-  if (frames !== timeline.durationInFrames) {
-    throw new Error(`incremental export has ${frames} frames, compiled timeline has ${timeline.durationInFrames}`);
+  const frameTolerance = isMasterMusic(pkg.audio?.music) ? 1 : 0;
+  if (Math.abs(frames - timeline.durationInFrames) > frameTolerance) {
+    throw new Error(`incremental export has ${frames} frames, trimmed master/timeline has ${timeline.durationInFrames} (tolerance ${frameTolerance})`);
   }
   return {
     output: outputPath,

@@ -4,12 +4,17 @@ import { cpSync, mkdirSync, mkdtempSync, readFileSync, renameSync, rmSync, write
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { prepareRenderJob } from '../src/pipeline-colab-render.mjs';
+import { collectMockContribution } from './helpers/comfy-contribution.mjs';
 
 function fixture(t) {
   const workDir = mkdtempSync(join(tmpdir(), 'pipeline-colab-comp-'));
   t.after(() => rmSync(workDir, { recursive: true, force: true }));
   cpSync(new URL('../../../examples/composition-stories/', import.meta.url), workDir, { recursive: true });
-  return { workDir, pkg: JSON.parse(readFileSync(join(workDir, 'package.json'))) };
+  const pkg = JSON.parse(readFileSync(join(workDir, 'package.json')));
+  pkg.scenes.unshift({ id: 's_mock_plate', layout: 'title', copy: { headline: 'Editorial context' }, preferredFrames: 90 });
+  collectMockContribution(pkg, workDir);
+  writeFileSync(join(workDir, 'package.json'), JSON.stringify(pkg));
+  return { workDir, pkg };
 }
 
 test('composition source is uploaded for VM compilation and selects pinned dependencies', async t => {

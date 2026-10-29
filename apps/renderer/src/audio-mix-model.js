@@ -54,6 +54,70 @@ function readyAudio(asset) {
   return isObject(asset) && asset.kind === 'audio' && asset.status === 'ready' && typeof asset.file === 'string' && asset.file.length > 0;
 }
 
+/** The opt-in source window for a supplied master song. */
+export function normalizeMusicTrim(music) {
+  const trim = isObject(music?.trim) ? music.trim : null;
+  if (!trim) return null;
+  const { startSeconds, endSeconds } = trim;
+  if (
+    typeof startSeconds !== 'number' ||
+    typeof endSeconds !== 'number' ||
+    !Number.isFinite(startSeconds) ||
+    !Number.isFinite(endSeconds) ||
+    startSeconds < 0 ||
+    endSeconds <= startSeconds
+  ) {
+    return null;
+  }
+  return { startSeconds, endSeconds };
+}
+
+/** Amplitude-only presentation settings; deliberately no beat/lyric inference. */
+export function normalizeMusicReactive(music) {
+  const reactive = isObject(music?.reactive) ? music.reactive : null;
+  if (!reactive || (reactive.style !== 'waveform' && reactive.style !== 'bars')) return null;
+  return {
+    style: reactive.style,
+    intensity: typeof reactive.intensity === 'number' && Number.isFinite(reactive.intensity)
+      ? Math.max(0, Math.min(1, reactive.intensity))
+      : 0.7,
+  };
+}
+
+/** New music-video packages opt in; legacy music beds keep their old routing. */
+export function isMasterMusic(music) {
+  return Boolean(normalizeMusicTrim(music) || normalizeMusicReactive(music));
+}
+
+/** Same authoritative sole-master routing used by playback and export finishing. */
+export function hasMasterMusic(pkg) {
+  const music = pkg?.audio?.music;
+  return isMasterMusic(music) && readyAudio(pkg?.assets?.[music?.asset]);
+}
+
+function trimDurationInFrames(trim, fps) {
+  return Math.max(1, Math.round((trim.endSeconds - trim.startSeconds) * fps));
+}
+
+/**
+ * A trimmed master owns the export length as well as its source window. Round
+ * once here so Remotion metadata, gains and the incremental frame check agree.
+ */
+export function compositionDurationInFrames(pkg, timeline) {
+  const music = pkg?.audio?.music;
+  const trim = normalizeMusicTrim(music);
+  if (!trim || !readyAudio(pkg?.assets?.[music?.asset])) return Math.max(0, timeline?.durationInFrames ?? 0);
+  const fps = typeof timeline?.fps === 'number' && timeline.fps > 0 ? timeline.fps : 30;
+  return trimDurationInFrames(trim, fps);
+}
+
+/** Clip only the effective duration; committed scene timing remains untouched. */
+export function timelineWithMasterMusicDuration(pkg, timeline) {
+  const durationInFrames = compositionDurationInFrames(pkg, timeline);
+  if (!timeline || durationInFrames === timeline.durationInFrames) return timeline;
+  return { ...timeline, durationInFrames };
+}
+
 function readyPlateWithAudio(asset) {
   return (
     isObject(asset) &&
@@ -235,7 +299,7 @@ export function sfxFrame(timeline, sfx) {
  * @param {Timeline} timeline
  * @returns {{
  *   enabled: boolean,
- *   music: null | { assetId: string, file: string, gainDb: number, loop: boolean, duck: ReturnType<typeof normalizeDuck>, gains: number[] },
+ *   music: null | { assetId: string, file: string, gainDb: number, fadeInSeconds: number, fadeOutSeconds: number, loop: boolean, duck: ReturnType<typeof normalizeDuck>, gains: number[], master?: boolean, startSeconds?: number, endSeconds?: number, durationInFrames?: number, reactive?: { style: 'waveform' | 'bars', intensity: number } },
  *   dialogue: Array<{ assetId: string, file: string, sceneId: string, from: number, durationInFrames: number, gainDb: number, duck: ReturnType<typeof normalizeDuck>, gains: number[] }>,
  *   ambience: Array<{ assetId: string, file: string, sceneId: string, from: number, durationInFrames: number, gainDb: number, duck: ReturnType<typeof normalizeDuck>, gains: number[] }>,
  *   sfx: Array<{ assetId: string, file: string, sceneId: string, from: number, durationInFrames: number, gainDb: number }>,
@@ -253,25 +317,35 @@ export function resolveAudioMix(pkg, timeline) {
 
   if (isObject(audio.music) && readyAudio(assets[audio.music.asset])) {
     const music = audio.music;
-    const gainDb = typeof music.gain_db === 'number' ? music.gain_db : AUDIO_MIX_DEFAULTS.musicGainDb;
-    const fadeIn = typeof music.fade_in_seconds === 'number' ? music.fade_in_seconds : AUDIO_MIX_DEFAULTS.musicFadeInSeconds;
-    const fadeOut = typeof music.fade_out_seconds === 'number' ? music.fade_out_seconds : AUDIO_MIX_DEFAULTS.musicFadeOutSeconds;
-    const duck = normalizeDuck(music.duck);
-    const envelope = duckEnvelope(frames, fps, intervals, duck);
-    const fades = fadeEnvelope(frames, fps, fadeIn, fadeOut);
+    const trim = normalizeMusicTrim(music);
+    const reactive = normalizeMusicReactive(music);
+    const master = isMasterMusic(music);
+    const musicFrames = trim ? trimDurationInFrames(trim, fps) : frames;
+    const gainDb = typeof music.gain_db === 'number' ? music.gain_db : master ? 0 : AUDIO_MIX_DEFAULTS.musicGainDb;
+    const fadeIn = typeof music.fade_in_seconds === 'number' ? music.fade_in_seconds : master ? 0 : AUDIO_MIX_DEFAULTS.musicFadeInSeconds;
+    const fadeOut = typeof music.fade_out_seconds === 'number' ? music.fade_out_seconds : master ? 0 : AUDIO_MIX_DEFAULTS.musicFadeOutSeconds;
+    const duck = master ? normalizeDuck({ ...(isObject(music.duck) ? music.duck : {}), enabled: false }) : normalizeDuck(music.duck);
+    const envelope = duckEnvelope(musicFrames, fps, intervals, duck);
+    const fades = fadeEnvelope(musicFrames, fps, fadeIn, fadeOut);
     const base = dbToLinear(gainDb);
     mix.music = {
       assetId: music.asset,
       file: assets[music.asset].file,
       gainDb,
-      loop: music.loop !== false,
+      fadeInSeconds: fadeIn,
+      fadeOutSeconds: fadeOut,
+      loop: master ? false : music.loop !== false,
       duck,
       gains: envelope.map((gain, frame) => gain * fades[frame] * base),
+      ...(trim ? { startSeconds: trim.startSeconds, endSeconds: trim.endSeconds, durationInFrames: musicFrames } : {}),
+      ...(reactive ? { reactive } : {}),
+      ...(master ? { master: true } : {}),
     };
   }
 
+  const masterMusic = mix.music?.master === true;
   const dialogue = isObject(audio.dialogue) ? audio.dialogue : {};
-  if (dialogue.enabled !== false) {
+  if (!masterMusic && dialogue.enabled !== false) {
     const gainDb = typeof dialogue.gain_db === 'number' ? dialogue.gain_db : AUDIO_MIX_DEFAULTS.dialogueGainDb;
     const duck = normalizeDuck({ enabled: false });
     const base = dbToLinear(gainDb);
@@ -297,7 +371,7 @@ export function resolveAudioMix(pkg, timeline) {
     }
   }
 
-  if (isObject(audio.ambience) && audio.ambience.enabled !== false) {
+  if (!masterMusic && isObject(audio.ambience) && audio.ambience.enabled !== false) {
     const gainDb = typeof audio.ambience.gain_db === 'number' ? audio.ambience.gain_db : AUDIO_MIX_DEFAULTS.ambienceGainDb;
     const duck = normalizeDuck(audio.ambience.duck);
     const envelope = duckEnvelope(frames, fps, intervals, duck);
@@ -324,7 +398,7 @@ export function resolveAudioMix(pkg, timeline) {
     }
   }
 
-  for (const sfx of audio.sfx ?? []) {
+  for (const sfx of masterMusic ? [] : audio.sfx ?? []) {
     if (!isObject(sfx) || !readyAudio(assets[sfx.asset])) continue;
     const from = sfxFrame(timeline, sfx);
     if (from === null) continue;

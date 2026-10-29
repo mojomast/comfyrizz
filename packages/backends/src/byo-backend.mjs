@@ -222,7 +222,10 @@ export function createByoBackend({
       const outRoot = outDir || join(process.cwd(), "out");
       const manifestPath = join(outRoot, "manifest.json");
       const manifest = existsSync(manifestPath) ? JSON.parse(readFileSync(manifestPath, "utf8")) : null;
-      return { code, manifest, exitCodeDecidesNothing: true };
+      // The runner already downloaded into this local tree. Give runPackage the
+      // authoritative directory so it re-hashes outputs before apply/receipts,
+      // even when the caller supplied a different outDir.
+      return { code, manifest, collect: { local: outRoot }, exitCodeDecidesNothing: true };
     },
 
     async reconcile(runId) {

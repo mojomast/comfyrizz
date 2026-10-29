@@ -70,3 +70,23 @@ test('wordless no-music no-text intent never gains narration, a score or editori
   assert.equal(result.package.audio.ambience.gain_db, -8);
   assert.equal(result.package.scenes.every(scene => !scene.narration && !scene.copy), true);
 });
+
+test('full silence survives finishing and completion even with narration-cue wording', t => {
+  const { pkg, assetsDir } = fixture(t);
+  const original = structuredClone(pkg);
+  for (const constraint of ['Silent', 'No audio', 'Without sound']) {
+    const brief = `Create a 12-second generated film. ${constraint}. Narration-timed motion with cue_phrases. No captions.`;
+    const intent = classifyProductionIntent(brief);
+    const result = finalizeGeneratedFilmEditorial(pkg, { intent, brief, assetsDir });
+    assert.equal(intent.silent, true, constraint);
+    assert.equal(result.musicAdded || result.narrationEnabled || result.ambienceEnabled, false);
+    assert.deepEqual(result.package.audio, { ambience: { enabled: false } });
+    assert.equal(result.package.assets.a_h3.media.audio, 'muted');
+    assert.ok(result.package.scenes.every(scene => !scene.narration && !scene.narration_asset));
+    const problems = generatedFilmCompletionProblems(result.package, intent, 'h3', brief);
+    assert.ok(!problems.some(problem => /ambience bus|narration-timed|must mute/.test(problem)), problems.join('\n'));
+    result.package.assets.a_h3.media.audio = 'present';
+    assert.ok(generatedFilmCompletionProblems(result.package, intent, 'h3', brief).some(problem => /must mute/.test(problem)));
+  }
+  assert.deepEqual(pkg, original, 'finishing never mutates the approved input');
+});

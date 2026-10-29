@@ -152,11 +152,11 @@ test('fullPlanMarkup renders overview, every scene field, generation fields and 
   assert.match(html, /Collect-and-stop reserve:<\/strong> 1 units/);
   assert.match(html, /<dt>Kind<\/dt><dd>shot.generate<\/dd>/);
   assert.match(html, /<dt>Target<\/dt><dd>shot-1<\/dd>/);
-  assert.match(html, /<dt>Takes<\/dt><dd>3<\/dd>/);
+  assert.match(html, /<dt>Versions<\/dt><dd>3<\/dd>/);
   assert.match(html, /<dt>Upper bound<\/dt><dd>4<\/dd>/);
   assert.match(html, /<dt>Asset IDs<\/dt><dd>a_vid_1, a_img_2<\/dd>/);
   assert.match(html, /<summary>Full signed plan JSON <span>Read only<\/span><\/summary>/);
-  assert.match(html, /<summary>Full package JSON <span>Read only<\/span><\/summary>/);
+  assert.match(html, /<summary>Full project JSON <span>Read only<\/span><\/summary>/);
   assert.match(html, /data-full-plan-save>Save &amp; re-sign plan/);
   assert.doesNotMatch(html, /data-full-plan-repropose/);
   assert.match(html, /data-full-plan-cancel/);

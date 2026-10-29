@@ -61,7 +61,9 @@ function toolEvents(calls, reasoning = '') {
 /** The live shape: `role`/`title`, no `layout`, sometimes a bare string copy. */
 function scenesWithStringCopy(brief) {
   return defaultCpuScenes(brief).map(scene => ({
-    id: scene.id,
+    // The old chart scene is now a hero without data; keep its ID consistent
+    // with its role so layout inference doesn't treat it as a chart.
+    id: scene.id === 's_chart' && scene.layout === 'hero' ? 's_context' : scene.id,
     role: scene.layout,
     title: scene.copy?.headline ?? scene.id,
     ...(scene.data ? { data: scene.data } : {}),

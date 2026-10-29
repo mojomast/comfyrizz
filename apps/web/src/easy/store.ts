@@ -1,11 +1,12 @@
 import { NEW_PROJECT_CARRY, type ProjectSessionRef } from './session-contract.ts';
-import type { EasyState } from './types.ts';
+import type { EasyState, SongTrim } from './types.ts';
+import { isEasyDuration } from './duration.ts';
 
 const LOOKS = ['clay', 'glass', 'editorial-flat', 'isometric-tech', 'paper-cut', 'cinematic-dark'] as const;
 const LEVELS = ['draft', 'balanced', 'director', 'custom'] as const;
 const COMPUTES = ['cpu', 'colab'] as const;
+const VIDEO_TYPE_IDS = ['motion-explainer', 'sketch-build', 'data-story', 'product-walkthrough', 'title-reveal', 'action-scene', 'music-video'] as const;
 const ASPECTS = ['16:9', '9:16', '1:1'] as const;
-const LENGTHS = [15, 30, 60, 90] as const;
 const PLAN_STATUSES = ['none', 'writing', 'building', 'proposing', 'ready', 'stale', 'error'] as const;
 const GENERATE_STATUSES = ['idle', 'running', 'stopping', 'done', 'stopped', 'error'] as const;
 const ERROR_ATS = ['agent', 'production', 'proposal', null] as const;
@@ -55,8 +56,15 @@ export function defaultEasyState(): EasyState {
     levelTouched: false,
     compute: 'cpu',
     motionModel: 'auto',
+    videoType: null,
+    songTrim: null,
+    lyricsStyle: 'off',
+    lyricsLrc: '',
+    attachmentSignature: null,
+    attachmentRevision: 0,
     spendCap: 15,
     planHash: null,
+    builtPackageInputsHash: null,
     plan: defaultPlan(),
     generate: defaultGenerate(),
     review: defaultReview(),
@@ -69,7 +77,7 @@ function normalizeIdea(raw: unknown): EasyState['idea'] {
   if (!isRecord(raw)) return { ...d };
   return {
     text: typeof raw.text === 'string' ? raw.text : d.text,
-    lengthS: (LENGTHS as readonly number[]).includes(raw.lengthS as number) ? (raw.lengthS as 15 | 30 | 60 | 90) : d.lengthS,
+    lengthS: isEasyDuration(raw.lengthS) ? raw.lengthS : d.lengthS,
     aspect: (ASPECTS as readonly string[]).includes(raw.aspect as string) ? (raw.aspect as '16:9' | '9:16' | '1:1') : d.aspect,
     look: (LOOKS as readonly string[]).includes(raw.look as string) ? (raw.look as EasyState['idea']['look']) : d.look,
     sound: typeof raw.sound === 'boolean' ? raw.sound : d.sound,
@@ -107,6 +115,15 @@ function normalizeNarration(raw: unknown): EasyState['narration'] {
     on: typeof raw.on === 'boolean' ? raw.on : d.on,
     voiceId: raw.voiceId === null || typeof raw.voiceId === 'string' ? (raw.voiceId as string | null) : d.voiceId,
   };
+}
+
+function normalizeSongTrim(raw: unknown): SongTrim | null {
+  if (!isRecord(raw)) return null;
+  const startSeconds = raw.startSeconds;
+  const endSeconds = raw.endSeconds;
+  if (typeof startSeconds !== 'number' || !Number.isFinite(startSeconds) || startSeconds < 0) return null;
+  if (typeof endSeconds !== 'number' || !Number.isFinite(endSeconds) || endSeconds <= startSeconds) return null;
+  return { startSeconds, endSeconds };
 }
 
 function normalizePlan(raw: unknown): EasyState['plan'] {
@@ -165,8 +182,18 @@ export function normalizeEasyState(raw: unknown): EasyState {
   const level = (LEVELS as readonly string[]).includes(raw.level as string) ? (raw.level as EasyState['level']) : d.level;
   const levelTouched = typeof raw.levelTouched === 'boolean' ? raw.levelTouched : d.levelTouched;
   const compute = (COMPUTES as readonly string[]).includes(raw.compute as string) ? (raw.compute as EasyState['compute']) : d.compute;
+  const videoType = (VIDEO_TYPE_IDS as readonly string[]).includes(raw.videoType as string) ? (raw.videoType as EasyState['videoType']) : null;
+  const attachmentSignature = typeof raw.attachmentSignature === 'string' && raw.attachmentSignature.length > 0 && raw.attachmentSignature.length <= 128
+    ? raw.attachmentSignature
+    : null;
+  const attachmentRevision = Number.isSafeInteger(raw.attachmentRevision) && (raw.attachmentRevision as number) >= 0
+    ? raw.attachmentRevision as number
+    : 0;
   const spendCap = raw.spendCap === null || (typeof raw.spendCap === 'number' && Number.isFinite(raw.spendCap)) ? raw.spendCap : d.spendCap;
   const planHash = raw.planHash === null || typeof raw.planHash === 'string' ? (raw.planHash as string | null) : d.planHash;
+  const builtPackageInputsHash = raw.builtPackageInputsHash === null || typeof raw.builtPackageInputsHash === 'string'
+    ? raw.builtPackageInputsHash as string | null
+    : d.builtPackageInputsHash;
   const packageId = raw.packageId === null || typeof raw.packageId === 'string' ? (raw.packageId as string | null) : d.packageId;
   const chatId = raw.chatId === null || typeof raw.chatId === 'string' ? (raw.chatId as string | null) : d.chatId;
   const productionId = raw.productionId === null || typeof raw.productionId === 'string' ? (raw.productionId as string | null) : d.productionId;
@@ -188,8 +215,15 @@ export function normalizeEasyState(raw: unknown): EasyState {
     levelTouched,
     compute,
     motionModel: raw.motionModel === 'h3' || raw.motionModel === 'ltx' || raw.motionModel === 'klein' ? raw.motionModel : 'auto',
+    videoType,
+    songTrim: normalizeSongTrim(raw.songTrim),
+    lyricsStyle: raw.lyricsStyle === 'caption' || raw.lyricsStyle === 'reel' ? raw.lyricsStyle : 'off',
+    lyricsLrc: typeof raw.lyricsLrc === 'string' ? raw.lyricsLrc : '',
+    attachmentSignature,
+    attachmentRevision,
     spendCap,
     planHash,
+    builtPackageInputsHash,
     plan: normalizePlan(raw.plan),
     generate: normalizeGenerate(raw.generate),
     review: normalizeReview(raw.review),
@@ -234,6 +268,12 @@ export function planInputsHash(state: EasyState): string {
     narration: state.narration,
     level: state.level,
     compute: state.compute,
+    videoType: state.videoType,
+    songTrim: state.songTrim,
+    lyricsStyle: state.lyricsStyle,
+    lyricsLrc: state.lyricsLrc,
+    attachmentSignature: state.attachmentSignature,
+    attachmentRevision: state.attachmentRevision,
   };
   const source = stableJson(payload);
   let hash = 0x811c9dc5;

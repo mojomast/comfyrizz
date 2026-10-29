@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { createServer, request as httpRequest } from 'node:http';
-import { copyFileSync, existsSync, mkdtempSync, rmSync, statSync } from 'node:fs';
+import { copyFileSync, existsSync, mkdtempSync, readFileSync, rmSync, statSync } from 'node:fs';
 import { spawnSync } from 'node:child_process';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -62,8 +62,12 @@ test('the render path runs the QA gate and serves it from /api/qa', async () => 
   await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
   const port = server.address().port;
   try {
-    const response = await request({ port, method: 'POST', path: '/api/render', body: { package: { id: 'pkg_qatest0001', revision: 1 } } });
-    assert.equal(response.status, 200);
+    const pkg = JSON.parse(readFileSync(new URL('../../renderer/test/fixtures/tiny/package.json', import.meta.url), 'utf8'));
+    const invalid = await request({ port, method: 'POST', path: '/api/render', body: { package: { id: 'pkg_qatest0001', revision: 1 } } });
+    assert.equal(invalid.status, 400, JSON.stringify(invalid.json));
+    assert.equal(invalid.json.code, 'INVALID_PACKAGE');
+    const response = await request({ port, method: 'POST', path: '/api/render', body: { package: pkg, intent: 'draft' } });
+    assert.equal(response.status, 200, JSON.stringify(response.json));
     const renderId = response.headers['x-comfyrizz-render-id'];
     assert.ok(renderId);
     const qa = await request({ port, method: 'GET', path: `/api/qa?renderId=${renderId}` });

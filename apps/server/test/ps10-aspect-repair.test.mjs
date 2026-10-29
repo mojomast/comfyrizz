@@ -2,12 +2,8 @@
 // output is an actionable repair problem, not a silently accepted plan.
 
 import assert from 'node:assert/strict';
-import { mkdtempSync, rmSync } from 'node:fs';
-import { tmpdir } from 'node:os';
-import { join } from 'node:path';
 import test from 'node:test';
-import { createCpuAgentRunner, generatedFilmCompletionProblems } from '../src/agent-runner.mjs';
-import { replayProvider } from './fake-provider.mjs';
+import { generatedFilmCompletionProblems, repairPackageFacts } from '../src/agent-runner.mjs';
 
 const INTENT = {
   requestedSeconds: 6,
@@ -97,53 +93,11 @@ test('PS10 a square still is not accepted for a landscape film', () => {
   assert.ok(problems.some(line => /source still/i.test(line) && /1024x1024/.test(line)), JSON.stringify(problems));
 });
 
-test('PS10 repair facts name the still size and the required output size', async t => {
-  const runtimeDir = mkdtempSync(join(tmpdir(), 'ps10-aspect-repair-'));
-  const initial = [{
-    name: 'storyboard.propose',
-    args: {
-      brief: 'Create a 6-second wordless generated film in 1 shot. A paper flower unfolds on a table. Aspect: 1920x1080.',
-      title: 'A Paper Flower',
-      proposal: PROPOSAL,
-      scenes: [{ id: 'shot1', layout: 'hero', preferredFrames: 180 }],
-    },
-  }, {
-    name: 'assets.generate_image',
-    args: { scene_id: 'shot1', kind: 'illustration', intent: 'A paper flower on a clean table.', aspect: '1:1', seed: 1 },
-  }, {
-    name: 'assets.generate_image',
-    args: { scene_id: 'shot1', kind: 'illustration', intent: 'A second view of the paper flower.', aspect: '1:1', seed: 2 },
-  }];
-  const provider = await replayProvider(initial);
-  const runner = createCpuAgentRunner({ runtimeDir, providers: { custom: { baseUrl: provider.url } } });
-  t.after(async () => {
-    await provider.close();
-    rmSync(runtimeDir, { recursive: true, force: true });
-  });
-
-  let repaired = false;
-  const error = await runner({
-    brief: 'Create a 6-second wordless generated film in 1 shot. A paper flower unfolds on a table. Aspect: 1920x1080.',
-    provider: 'custom',
-    motionModel: 'auto',
-    sessionId: 'ps10-aspect-repair',
-    onEvent: event => {
-      if (event.type === 'done' && !repaired) {
-        repaired = true;
-        provider.setCalls([]);
-      }
-    },
-  }).then(() => null, cause => cause);
-
-  assert.ok(error, 'the unaligned plan must not be accepted');
-  assert.equal(repaired, true, 'the mismatched still really exercised the repair phase');
-  assert.equal(error.status, 422);
-  assert.match(error.message, /source still/i);
-  assert.match(error.message, /1024x1024/);
-  assert.match(error.message, /1920x1080/);
-
-  const repairRequest = provider.requests.at(-1);
-  const prompt = JSON.stringify(repairRequest.messages);
+test('PS10 repair facts name the still size and the required output size', () => {
+  // Current image tools align output size automatically; use a legacy package
+  // with a shot-referenced mismatched source to exercise the repair facts.
+  const pkg = packageWithStills(1920, 1080, 1024, 1024);
+  const prompt = repairPackageFacts(pkg, INTENT, '16:9');
   assert.match(prompt, /Source aspect repair/i);
   assert.match(prompt, /1024x1024/);
   assert.match(prompt, /1920x1080/);

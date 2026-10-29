@@ -5,9 +5,11 @@
 // Every render helper below is pure so the step can be checked without a DOM.
 
 import { COPY, fill } from '../copy.ts';
+import { narrationPending } from '../narration-status.ts';
 import { escapeHtml, renderProgressBar } from '../components.ts';
 import { loadSyncnetBanner } from '../syncnet-notice.ts';
-import { defaultEasyState } from '../store.ts';
+import { defaultEasyState, planInputsHash } from '../store.ts';
+import { recoverProductionIdentity } from '../resume.ts';
 import {
   corruptExportArtifactNotice,
   createExportArtifactRecord,
@@ -285,10 +287,8 @@ function doneParts(options: ExportDoneOptions) {
   const pkg = options.pkg ?? options.package;
   const state = options.state;
   const name = firstString(options.name, options.title, options.videoName, recordOf(pkg)?.title) || COPY.shell.untitled;
-  const durationS = numberOrNull(options.durationS)
-    ?? numberOrNull(options.durationSeconds)
-    ?? durationSecondsFrom(pkg, state);
-  const duration = firstString(options.duration) || formatDuration(durationS);
+  const durationS = numberOrNull(options.durationS) ?? numberOrNull(options.durationSeconds);
+  const duration = firstString(options.duration) || (durationS !== null && durationS > 0 ? formatDuration(durationS) : 'Duration unavailable');
   const aspect = firstString(options.aspect, aspectFrom(pkg), state?.idea?.aspect) || DEFAULT_ASPECT;
   const sizeValue = numberOrNull(options.sizeBytes);
   const size = firstString(options.size) || (sizeValue !== null ? formatSize(sizeValue) : '');
@@ -319,8 +319,7 @@ function doneParts(options: ExportDoneOptions) {
   const colabStopped = typeof options.colabStopped === 'boolean'
     ? options.colabStopped
     : sessionExisted && firstString(teardownValue) === 'stopped';
-  const meta = [name, duration, aspect, size].filter(Boolean).join(' · ');
-  return { name, duration, aspect, size, blobUrl, fileName, narration, captionsUrl, qa, stale, colabStopped, meta };
+  return { name, duration, aspect, size, blobUrl, fileName, narration, captionsUrl, qa, stale, colabStopped };
 }
 
 function renderQa(qa: ExportQa | null): string {
@@ -368,11 +367,13 @@ export function renderExportDone(input: ExportDoneOptions | string | null = {}):
     ? renderExportArtifactRecovery(artifact.recovery.state, artifact.recovery.message)
     : '';
   const facts = renderDeliveryFacts(savedRecord);
+  const pendingNarration = narrationPending(options.pkg ?? options.package);
   return `<section class="easy-export-done" data-easy-export-done>
-<h2 class="easy-export-heading" tabindex="-1">${escapeHtml(COPY.export.doneHeading)}</h2>
+<h2 class="easy-export-heading" tabindex="-1">${escapeHtml(pendingNarration ? 'Preview' : COPY.export.doneHeading)}</h2>
+${pendingNarration ? '<p role="status">Narration is planned but not yet available. This preview may be silent.</p>' : ''}
 <figure class="easy-export-player">
 <video data-easy-player controls preload="metadata"${source}>${track}</video>
-<figcaption class="easy-export-meta" data-easy-export-meta>${escapeHtml(parts.meta)}</figcaption>
+<figcaption class="easy-export-meta" data-easy-export-meta>${escapeHtml(parts.name)} · <span data-easy-export-duration>${escapeHtml(parts.duration)}</span> · ${escapeHtml(parts.aspect)}${parts.size ? ` · ${escapeHtml(parts.size)}` : ''}</figcaption>
 </figure>
 <div class="easy-export-actions">
 ${download}
@@ -599,7 +600,7 @@ function mountExport(el: HTMLElement, ctx: EasyStepContext): ExportController {
     phase = 'done';
     stopTimer();
     el.innerHTML = withNotice(renderExportDone(doneOptions()));
-    setHeading(el, COPY.export.doneHeading, true);
+    setHeading(el, narrationPending(currentPackage()) ? 'Preview' : COPY.export.doneHeading, true);
     const canDownload = Boolean(blobUrl || (artifactRecord && (!recovery || recovery.state === 'ready')));
     ctx.shell.setPrimary({ label: canDownload ? COPY.export.download : COPY.export.again });
   }
@@ -637,7 +638,19 @@ function mountExport(el: HTMLElement, ctx: EasyStepContext): ExportController {
     paintWorking();
     startTimer();
     try {
-      const result = await ctx.host.renderMp4({ productionId: ctx.store.get().productionId });
+      const state = ctx.store.get();
+      let persistedRevision: number | undefined;
+      if (state.productionId && state.idea.text.trim() && (state.plan.status === 'stale' || state.planHash !== planInputsHash(state))) {
+        throw new Error('The plan inputs changed. Review and approve the current plan before exporting.');
+      }
+      if (state.productionId && !state.idea.text.trim()) {
+        if (!await recoverProductionIdentity({ api: ctx.api, host: ctx.host, state, productionId: state.productionId })) {
+          throw new Error('The approved project version could not be verified. Return to the plan before exporting.');
+        }
+        persistedRevision = currentPackage()?.revision;
+        if (!Number.isSafeInteger(persistedRevision)) throw new Error('The project version could not be verified.');
+      }
+      const result = await ctx.host.renderMp4({ productionId: state.productionId, ...(persistedRevision === undefined ? {} : { persistedRevision }) });
       if (destroyed || run !== currentRun) return;
       blob = result.blob;
       if (blob && typeof URL !== 'undefined' && typeof URL.createObjectURL === 'function') {
@@ -790,17 +803,33 @@ function mountExport(el: HTMLElement, ctx: EasyStepContext): ExportController {
     }
   }
 
+  function onVideoMetadata(event: Event): void {
+    const video = el.querySelector<HTMLVideoElement>('video[data-easy-player]');
+    if (destroyed || phase !== 'done' || !video || event.target !== video) return;
+    const label = el.querySelector<HTMLElement>('[data-easy-export-duration]');
+    if (!label) return;
+    label.textContent = event.type !== 'error' && Number.isFinite(video.duration) && video.duration > 0
+      ? formatDuration(video.duration)
+      : 'Duration unavailable';
+  }
+
   function destroy(): void {
     destroyed = true;
     currentRun += 1;
     stopTimer();
     revoke();
     el.removeEventListener('click', onClick);
+    el.removeEventListener('loadedmetadata', onVideoMetadata, true);
+    el.removeEventListener('durationchange', onVideoMetadata, true);
+    el.removeEventListener('error', onVideoMetadata, true);
     if (activeController === controller) activeController = null;
   }
 
   const controller: ExportController = { destroy, primary };
   el.addEventListener('click', onClick);
+  el.addEventListener('loadedmetadata', onVideoMetadata, true);
+  el.addEventListener('durationchange', onVideoMetadata, true);
+  el.addEventListener('error', onVideoMetadata, true);
   void loadSyncnetBanner(ctx).then((html) => {
     if (html === null || destroyed) return;
     syncnetNotice = html;

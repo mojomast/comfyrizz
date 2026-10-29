@@ -7,6 +7,63 @@ import { createCpuAgentRunner, motionGraphicsCompletionProblems } from '../src/a
 import { replayProvider } from './fake-provider.mjs';
 
 const NARRATION = 'The jerboa lifts the lamp.';
+
+test('recorded Data Story correction and media prohibition lists do not request GPU stills', () => {
+  const slice = { package: { scenes: [{ id: 's_title', layout: 'title', copy: { headline: 'FICTIONAL STUDY LOG' } }], assets: {} }, pendingGpu: [], problems: [] };
+  const missing = brief => motionGraphicsCompletionProblems(slice, brief).some(problem => problem.code === 'PENDING_GPU_MISSING');
+  const recorded = 'Create exactly 20 seconds of landscape native motion graphics: a Data Story titled FICTIONAL STUDY LOG. Use only native editable typography and a native bar chart; no generated images, stills, footage or GPU assets. The attached fictional-study.csv has four fictional practice measurements. In source order the exact day/value pairs are Monday=10, Tuesday=15, Wednesday=20, Thursday=25. The unit for every value is minutes. These are measured values from the minutes column, never counts of rows. Show exactly four bars with those exact day labels, numeric values and the minutes unit. Keep FICTIONAL STUDY LOG visibly readable to identify this as a fictional illustration. End with Thursday and its value 25 highlighted. Navy, cream and one orange highlight. Simple bar reveal, followed by a readable static final hold. No narration, inferred causes, percentages or additional statistics. A gentle instrumental bed is optional if supported. The full film runtime is exactly 20 seconds.';
+  assert.equal(missing(recorded), false);
+  for (const list of [
+    'No generated images, stills, footage or GPU assets',
+    'Without footage, generated stills, or keyframes',
+    'Avoid images and stills',
+    'Exclude stock photographs, still images and keyframes',
+    'Do not use generated images, stills or footage',
+    'Never generate footage or stills',
+  ]) {
+    assert.equal(missing(`${list}. Keep the ending completely still.`), false, list);
+    for (const separator of ['. ', '; ', ', but ', ', ', ' and ']) {
+      assert.equal(missing(`${list}${separator}add a texture still for the ending.`), true, `${list}${separator}`);
+    }
+  }
+});
+
+test('static title holds do not request GPU stills; actual image requests remain checked', () => {
+  const slice = { package: { scenes: [{ id: 's_title', layout: 'title', copy: { headline: 'PLEASE HOLD' } }], assets: {} }, pendingGpu: [], problems: [] };
+  const missing = brief => motionGraphicsCompletionProblems(slice, brief).some(problem => problem.code === 'PENDING_GPU_MISSING');
+  for (const brief of [
+    'Keep the final three seconds completely still.',
+    'Hold the title still. The letters should still be readable.',
+    'Use no generated stills.',
+    'Avoid still images. Use native typography.',
+    'Do not generate a still.',
+  ]) assert.equal(missing(brief), false, brief);
+  for (const brief of ['Include a texture still.', 'Generate one still.', 'Use two keyframes.', 'Add a still image.']) {
+    assert.equal(missing(brief), true, brief);
+  }
+  slice.package.assets.a_photo = { kind: 'image', status: 'ready' };
+  assert.equal(missing('Use a still image.'), true, 'an orphan image is insufficient');
+  slice.package.scenes[0].foreground = [{ asset: 'a_photo' }];
+  assert.equal(missing('Use a still image.'), false, 'a ready referenced image needs no extra GPU plan');
+});
+
+test('drawing continuity is checked only for an explicit continuous plan', () => {
+  const line = { type: 'path', points: [[100, 100], [300, 100]], color: '#111111', width: 3, start: 0, end: 20 };
+  const slice = { package: { scenes: [
+    { id: 's1', drawing: { elements: [line] } },
+    { id: 's2', drawing: { elements: [{ ...line, points: [[10, 10], [20, 20]] }] } },
+  ] }, svgAssets: [], pendingGpu: [], problems: [] };
+  const codes = brief => motionGraphicsCompletionProblems(slice, brief).map(problem => problem.code);
+  assert.ok(codes('The drawing grows. Finish on the completed sheet.').includes('DRAWING_DISCONTINUITY'));
+  assert.ok(!codes('Show a drawing, then a different diagram.').includes('DRAWING_DISCONTINUITY'));
+  slice.package.scenes[1].drawing.elements = [{ ...line, start: 0, end: 0 }];
+  assert.ok(!codes('The drawing grows. Finish on the completed sheet.').includes('DRAWING_DISCONTINUITY'));
+  delete slice.package.scenes[1].drawing;
+  const mixed = codes('Show a drawing, then a different diagram.');
+  assert.ok(!mixed.includes('DRAWING_MISSING'));
+  assert.ok(!mixed.includes('PENDING_GPU_MISSING'));
+  assert.ok(codes('The drawing grows. Finish on the completed sheet.').includes('DRAWING_MISSING'));
+});
 const PROPOSAL = {
   logline: 'A felt jerboa restores the lighthouse lamp before the boat arrives.',
   look: 'Handcrafted felt miniatures at dusk.',
@@ -23,6 +80,21 @@ async function setup(t, calls) {
   });
   return { provider, runner };
 }
+
+test('native planner retains speech prohibitions despite narration-cue wording', async t => {
+  for (const constraint of ['Silent', 'No audio', 'No spoken words']) {
+    const brief = `Create exactly 6 seconds of motion graphics. ${constraint}. Narration-timed motion with cue_phrases.`;
+    const { runner, provider } = await setup(t, [{ name: 'storyboard.propose', args: {
+      brief, title: 'QUIET', proposal: { logline: 'A readable title.', look: 'Plain cream.', soundtrack: 'Silent.' },
+      scenes: [{ id: 's_title', layout: 'title', preferredFrames: 180, narration: 'Unrequested speech.', motion: { cue_phrases: ['Unrequested'] }, copy: { headline: 'QUIET' } }],
+    } }]);
+    const result = await runner({ brief, videoType: 'title-reveal', provider: 'custom' });
+    assert.equal(result.package.scenes[0].narration, undefined, constraint);
+    assert.equal(result.package.scenes[0].motion?.cue_phrases, undefined, constraint);
+    assert.equal(result.package.voice.enabled, false, constraint);
+    assert.equal(provider.requests.length, 2, 'no narration repair required');
+  }
+});
 
 test('PS08 narration-timed repair demands scene.narration and verbatim cue phrases', async t => {
   const brief = 'Create a 6-second generated film in 1 shot. A mustard felt jerboa restores a lighthouse lamp at dusk with cinematic camera moves and coastal sound. Narration-timed motion with cue_phrases copied verbatim. No captions.';
@@ -93,8 +165,8 @@ test('PS08 narration-timed repair demands scene.narration and verbatim cue phras
   assert.ok(result.package.scenes[0].narration.includes(result.package.scenes[0].motion.cue_phrases[0]));
 });
 
-test('PS08 motion-graphics repair names the SVG floor and a scene-referenced pending still', async t => {
-  const brief = 'Create a 5-second two-scene motion-graphics kinetic bumper. Scene one headline is exactly "MAKE IT". Scene two headline is exactly "MOVE". Bold cuts. No narration.';
+test('PS08 motion-graphics repair plans the requested scene-referenced still without adding SVGs', async t => {
+  const brief = 'Create a 5-second two-scene motion-graphics kinetic bumper with a texture still. Scene one headline is exactly "MAKE IT". Scene two headline is exactly "MOVE". Bold cuts. No narration.';
   const scenes = [
     { id: 's_one', layout: 'title', preferredFrames: 75, copy: { headline: 'MAKE IT' } },
     { id: 's_two', layout: 'title', preferredFrames: 75, copy: { headline: 'MOVE' } },
@@ -113,10 +185,6 @@ test('PS08 motion-graphics repair names the SVG floor and a scene-referenced pen
     },
   }];
   const repair = [
-    { name: 'assets.generate_svg', args: { scene_id: 's_one', kind: 'diagram', intent: 'MAKE IT kinetic slab', seed: 1 } },
-    { name: 'assets.generate_svg', args: { scene_id: 's_one', kind: 'pattern', intent: 'electric field pattern', seed: 2 } },
-    { name: 'assets.generate_svg', args: { scene_id: 's_two', kind: 'diagram', intent: 'MOVE kinetic arrow', seed: 3 } },
-    { name: 'assets.generate_svg', args: { scene_id: 's_two', kind: 'icon', intent: 'motion icon', seed: 4 } },
     { name: 'assets.generate_image', args: { scene_id: 's_one', kind: 'illustration', intent: 'a workshop texture still', seed: 5 } },
   ];
   const { provider, runner } = await setup(t, initial);
@@ -135,21 +203,20 @@ test('PS08 motion-graphics repair names the SVG floor and a scene-referenced pen
 
   assert.equal(repaired, true, 'the incomplete package really exercised the repair phase');
   assert.equal(result.fallback, false);
-  assert.ok(result.svgAssets.length >= 4);
+  assert.deepEqual(result.svgAssets, []);
+  assert.equal(result.usage.svg.requests, 0);
   assert.ok(result.pendingGpu.length >= 1);
   assert.ok(result.pendingGpu.some(item => item.sceneId === 's_one'), 'the planned still is scene-referenced');
 
   const request = provider.requests[2];
   const system = request.messages[0].content;
-  assert.match(system, /at least 4 ready llm-svg assets/i);
-  assert.match(system, /scene-referenced/i);
-  assert.match(system, /reference, identity, cast, portrait or start-frame/i);
+  assert.match(system, /Create assets only when the report explicitly requires them/i);
 
   const prompt = JSON.stringify(request.messages);
   assert.match(prompt, /Pending GPU still repair/i);
   assert.match(prompt, /scene_id/);
   assert.match(prompt, /s_one/);
-  assert.match(prompt, /SVG floor/i);
+  assert.doesNotMatch(prompt, /SVG floor|SVG_ASSET_FLOOR/i);
 });
 
 test('PS08 a pending still without a scene reference does not satisfy the motion-graphics floor', () => {
@@ -191,7 +258,7 @@ test('PS08 a pending still without a scene reference does not satisfy the motion
     svgAssets: ['a1', 'a2', 'a3', 'a4'],
     pendingGpu: [{ assetId: 'a_img', generator: 'flux3-klein' }],
     problems: [],
-  });
+  }, 'Include a texture still.');
   assert.ok(
     problems.some(problem => problem.code === 'PENDING_GPU_MISSING' && problem.count === 0),
     JSON.stringify(problems),

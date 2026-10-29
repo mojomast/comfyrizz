@@ -8,6 +8,61 @@ import { COPY } from '../src/easy/copy.ts';
 import { defaultEasyState } from '../src/easy/store.ts';
 import { templateChangeNeedsConfirm, templateChangePlan, step } from '../src/easy/steps/idea.ts';
 import { ideaPrompt } from '../src/easy/idea-prompt.ts';
+import { classifyProductionIntent } from '../../../packages/agent/src/production-intent.ts';
+import { OLIVE_BRIEF } from '../../../packages/agent/test/fixtures/olive-action.ts';
+import { FICTIONAL_DATA_STORY, FICTIONAL_DATA_STORY_UI } from '../../../packages/agent/test/fixtures/fictional-data-story.ts';
+
+// Actual first-pass UI text from 24h-small-data/evidence, before appended settings.
+const RECORDED_DATA_STORY = FICTIONAL_DATA_STORY;
+
+test('recorded fictional Data Story keeps its medium and 20-second output runtime', () => {
+  const state = defaultEasyState();
+  state.videoType = 'data-story';
+  state.idea.text = RECORDED_DATA_STORY;
+  state.idea.lengthS = 20;
+  const prompt = ideaPrompt(state);
+  assert.equal(prompt, FICTIONAL_DATA_STORY_UI);
+  assert.ok(prompt.startsWith(RECORDED_DATA_STORY));
+  assert.doesNotMatch(prompt, /Look: photorealistic live-action/);
+  const intent = classifyProductionIntent(prompt, 'motion-graphics');
+  assert.equal(intent.kind, 'motion-graphics');
+  assert.equal(intent.liveActionHumans, false);
+  assert.equal(intent.requestedSeconds, 20);
+  assert.equal(intent.exactDuration, true);
+});
+
+test('look inference respects negation and native/chart medium while preserving positive live action', () => {
+  for (const text of [
+    'This is not a claim about real people.',
+    'No real people. Use native motion graphics.',
+    'Do not show realistic humans.',
+    'Avoid photorealistic images, real people and live-action footage.',
+    'Use charts about real people.',
+    'Use native editable typography to tell a story about real humans.',
+    'Use charts instead of live action.',
+  ]) {
+    const state = ideaState();
+    state.idea.text = text;
+    assert.doesNotMatch(ideaPrompt(state), /Look: photorealistic live-action/, text);
+    assert.equal(classifyProductionIntent(ideaPrompt(state)).liveActionHumans, false, text);
+  }
+  for (const text of [
+    'Show real people in a bakery.',
+    'No charts. Show real people in a bakery.',
+    'No charts. A film with real people in a bakery.',
+    'Show real people alongside native chart overlays.',
+    'Create a live-action film.',
+    'Use photorealistic humans with native chart overlays.',
+    'No charts, use live action.',
+    'Avoid cartoons and use realistic humans.',
+    'No real people in the opening. Show live-action humans in the ending.',
+    'Not only live action, but also charts.',
+  ]) {
+    const state = ideaState();
+    state.idea.text = text;
+    assert.match(ideaPrompt(state), /Look: photorealistic live-action/, text);
+  }
+});
 
 const facts = {
   hasPackage: false,
@@ -16,6 +71,30 @@ const facts = {
   allShotsKept: false,
   exportCurrent: false,
 };
+
+test('recorded olive Action and other photographic subjects never acquire human direction', () => {
+  for (const text of [OLIVE_BRIEF, 'A live-action landscape shot of waves.', 'Photorealistic wildlife: a fox running.', 'Live-action product photography of a watch. No people.']) {
+    const state = ideaState();
+    state.videoType = 'action-scene';
+    state.idea.text = text;
+    const prompt = ideaPrompt(state);
+    assert.ok(prompt.startsWith(text));
+    assert.match(prompt, /Look: photorealistic live-action, natural light and real-world materials\./);
+    assert.doesNotMatch(prompt.slice(text.length), /humans?|people|skin/);
+    assert.equal(classifyProductionIntent(prompt).liveActionHumans, false, text);
+    assert.equal(classifyProductionIntent(prompt).kind, 'generated-film');
+  }
+});
+
+test('subject-neutral look preserves explicitly requested live-action human subjects', () => {
+  for (const text of ['Show real people in a bakery.', 'Use photorealistic humans with native chart overlays.', 'A live-action baker kneads dough.', 'No charts. Show realistic humans.']) {
+    const state = ideaState();
+    state.idea.text = text;
+    const prompt = ideaPrompt(state);
+    assert.ok(prompt.startsWith(text));
+    assert.equal(classifyProductionIntent(prompt).liveActionHumans, true, text);
+  }
+});
 
 function count(html, pattern) {
   return (html.match(pattern) || []).length;
@@ -130,13 +209,43 @@ test('ideaPrompt keeps the brief sentence order and skips decide answers', () =>
   ];
   state.answers = { cta: 'Visit the website', audience: '__decide__' };
 
-  assert.equal(
-    ideaPrompt(state),
-    'A 30-second video for my bakery. Aspect: 16:9. Look: cinematic-dark. Music: instrumental bed. Finishing narration: meaningful scene-specific Kokoro voiceover that preserves the native soundscape. What should viewers do at the end? Visit the website',
-  );
+  const prompt = ideaPrompt(state);
+  assert.match(prompt, /^A 30-second video for my bakery\. Aspect: 16:9\. Look: cinematic-dark\. Music: instrumental bed\. Finishing narration:/);
+  assert.match(prompt, /Narration timing is provisional/);
+  assert.match(prompt, /What should viewers do at the end\? Visit the website$/);
 
   state.idea.sound = false;
   assert.ok(ideaPrompt(state).includes('No music.'));
+});
+
+test('Music Video uses only the supplied song master, never automatic TTS or a music bed', () => {
+  const state = ideaState();
+  state.videoType = 'music-video';
+  state.idea.text = 'A bold performance video for our supplied song';
+  state.idea.sound = true;
+  state.narration.on = true;
+  const prompt = ideaPrompt(state);
+  assert.match(prompt, /supplied song is the only song master/u);
+  assert.match(prompt, /Do not add a narrator, narration, or any composed music substitute/u);
+  assert.match(prompt, /performance is an experimental reviewed audition/u);
+  assert.doesNotMatch(prompt, /Music: instrumental bed|Kokoro|Finishing narration:/u);
+  assert.doesNotMatch(prompt, /detected beats|detected lyrics|perfect lip sync/iu);
+});
+
+test('Music Video brief names only LRC presentation and never serializes lyric text', () => {
+  const state = ideaState();
+  state.videoType = 'music-video';
+  state.idea.text = 'A bold performance video for our supplied song';
+  state.lyricsStyle = 'caption';
+  state.lyricsLrc = '[00:01.00]Never put this private lyric in the brief';
+  const caption = ideaPrompt(state);
+  assert.match(caption, /separately supplied LRC uses bottom-safe caption presentation/u);
+  assert.doesNotMatch(caption, /Never put this private lyric|\[00:01\.00\]/u);
+
+  state.lyricsStyle = 'reel';
+  assert.match(ideaPrompt(state), /large-overlay reel presentation/u);
+  state.lyricsStyle = 'off';
+  assert.doesNotMatch(ideaPrompt(state), /Never put this private lyric|caption presentation|reel presentation/u);
 });
 
 test('ideaPrompt uses the selected duration but explicit typed durations win', () => {
@@ -175,6 +284,51 @@ test('explicit wordless and no-speech requests suppress automatic narration guid
     assert.ok(prompt.startsWith(text));
     assert.doesNotMatch(prompt, /Kokoro|Finishing narration:/u);
   }
+});
+
+test('silence matrix suppresses default voice and bed in every non-song mode', () => {
+  for (const videoType of [null, 'motion-explainer', 'sketch-build', 'data-story', 'product-walkthrough', 'title-reveal', 'action-scene']) {
+    for (const request of ['Silent', 'No audio', 'No spoken words', 'No narration', 'Wordless']) {
+      const state = ideaState();
+      state.videoType = videoType;
+      state.idea.text = `${request}. Reveal our new identity.`;
+      state.narration.on = true;
+      state.idea.sound = true;
+      const prompt = ideaPrompt(state);
+      assert.doesNotMatch(prompt, /Kokoro|Finishing narration:|Narration timing|Music: instrumental bed/u, `${videoType}: ${request}`);
+      if (['Silent', 'No audio'].includes(request)) assert.match(prompt, /Full silence: no audio/u);
+      else assert.doesNotMatch(prompt, /Full silence|No music/u, 'wordless does not prohibit native sound or music');
+    }
+  }
+});
+
+test('wordless retains explicitly requested native sound/music and the sound-off setting', () => {
+  const state = ideaState();
+  state.idea.text = 'Wordless with native SFX and gentle piano music.';
+  assert.match(ideaPrompt(state), /^Wordless with native SFX and gentle piano music\./u);
+  assert.doesNotMatch(ideaPrompt(state), /No music|Full silence|instrumental bed|Kokoro/u);
+  state.idea.sound = false;
+  assert.match(ideaPrompt(state), /No music\./u);
+});
+
+test('title reveal has no default narrator, but an active spoken request is retained', () => {
+  const state = ideaState();
+  state.videoType = 'title-reveal';
+  state.idea.text = 'Reveal our new identity with bold shapes.';
+  assert.doesNotMatch(ideaPrompt(state), /Kokoro|Narration timing/u);
+  assert.match(ideaPrompt(state), /No narration\./u);
+  state.idea.text = 'Reveal our new identity. Narrate the company name.';
+  assert.match(ideaPrompt(state), /Finishing narration:.*Kokoro/u);
+  state.narration.on = false;
+  assert.doesNotMatch(ideaPrompt(state), /Finishing narration:|No narration\./u);
+  assert.match(ideaPrompt(state), /Narrate the company name/u);
+});
+
+test('explicit music prohibition does not suppress an active narrator', () => {
+  const state = ideaState();
+  state.idea.text = 'No music. A narrator explains the supplied values.';
+  assert.match(ideaPrompt(state), /Finishing narration:.*Kokoro/u);
+  assert.doesNotMatch(ideaPrompt(state), /Music: instrumental bed/u);
 });
 
 test('narration off adds no narration only when the prompt has no speech intent', () => {

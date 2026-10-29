@@ -2,7 +2,7 @@ import React, { createContext, useContext, useMemo, useState } from 'react';
 import { AbsoluteFill, Img, Loop, OffthreadVideo, interpolate, staticFile, useCurrentFrame, useVideoConfig } from 'remotion';
 import type { Asset, ForegroundItem, PackageV1 } from '../../../packages/schema/types';
 import { palette, textColors, useFontFamily } from './theme';
-import { isMissingMedia } from './media-model.js';
+import { isMissingMedia, mediaPlaybackDurationSeconds } from './media-model.js';
 import { resolveMediaSrc } from './media-src.js';
 
 export type { MediaSidecar, LowerThirdContent, ResolvedSceneMedia } from './media-model.js';
@@ -15,6 +15,12 @@ export { isRenderableMedia, resolveSceneMedia } from './media-model.js';
  * Remotion for a file that is not in this clone.
  */
 const MissingMediaContext = createContext<Set<string>>(new Set());
+const MasterMusicMuteContext = createContext(false);
+
+/** Force every visual plate silent while an authoritative master song is playing. */
+export function MasterMusicMuteProvider({ enabled, children }: { enabled: boolean; children: React.ReactNode }) {
+  return <MasterMusicMuteContext.Provider value={enabled}>{children}</MasterMusicMuteContext.Provider>;
+}
 
 export function MissingMediaProvider({ files, children }: { files?: string[]; children: React.ReactNode }) {
   // Memoised so a per-frame parent render does not hand every media node a new
@@ -104,6 +110,7 @@ export function MediaFill({
 }) {
   const { fps } = useVideoConfig();
   const missing = useMissingMedia();
+  const masterMusicMuted = useContext(MasterMusicMuteContext);
   // Remember which file failed, so a later src (e.g. a take's media ticket
   // replacing the static path) gets its own chance to load.
   const [failedFile, setFailedFile] = useState<string | null>(null);
@@ -119,9 +126,7 @@ export function MediaFill({
   // Cover/contain is centred so a wrong declared size can crop, never stretch.
   const style: React.CSSProperties = { width: '100%', height: '100%', objectFit: fit, objectPosition: 'center' };
   if (asset.kind === 'image') return <AbsoluteFill><Img src={src} pauseWhenLoading style={style} onError={() => setFailed(true)} /></AbsoluteFill>;
-  const sourceFrames = asset.media?.frames ?? 97;
-  const sourceFps = asset.media?.fps ?? 24;
-  const clipFrames = Math.max(1, Math.round((sourceFrames / sourceFps) * fps));
+  const clipFrames = Math.max(1, Math.round(mediaPlaybackDurationSeconds(asset) * fps));
   // Stretch a short clip over the scene (down to half speed) before looping it.
   const rate = speed ?? Math.max(0.5, Math.min(1, clipFrames / Math.max(1, sceneFrames)));
   const loopFrames = Math.max(1, Math.floor(clipFrames / rate) - 1);
@@ -129,7 +134,7 @@ export function MediaFill({
     <OffthreadVideo
       src={src}
       pauseWhenBuffering
-      muted={muted}
+      muted={muted || masterMusicMuted}
       playbackRate={rate}
       onError={() => setFailed(true)}
       style={style}

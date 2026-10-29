@@ -756,6 +756,7 @@ async function startStubModel(t) {
     }
     response.setHeader('content-type', 'text/event-stream');
     response.write(`data: ${JSON.stringify({ choices: [{ delta: { content: 'The correction needs production approval.' } }] })}\n\n`);
+    response.write(`data: ${JSON.stringify({ choices: [{ delta: {}, finish_reason: 'stop' }] })}\n\n`);
     response.end('data: [DONE]\n\n');
   });
   await new Promise((done) => server.listen(0, '127.0.0.1', done));
@@ -764,14 +765,18 @@ async function startStubModel(t) {
 }
 
 function fakeChatBackend() {
-  const state = { calls: 0 };
+  const state = { calls: 0, estimates: 0 };
   return {
     state,
     id: 'colab',
     async describe() {
       return { label: 'fake Google Colab', costVisibility: 'external-unknown' };
     },
-    async runPackage() {
+    async runPackage(_pkg, options = {}) {
+      if (options.dryRun) {
+        state.estimates++;
+        return { jobsDoc: { jobs: [{ id: `${ASSET_ID}.plate`, asset: ASSET_ID }] }, estimate: { gpuMinutes: 0, overheadMinutes: 0 } };
+      }
       state.calls += 1;
       throw new Error('a production-bound chat correction must not start a backend');
     },
@@ -902,7 +907,7 @@ function chatTurn(api, conversationId, proposalId, turnId) {
   });
 }
 
-test('a production-bound chat correction returns approval_required and starts nothing, before and after a restart', { timeout: 30_000 }, async (t) => {
+test('a production-bound chat correction proposes an approval-gated plan and starts nothing, before and after a restart', { timeout: 30_000 }, async (t) => {
   const runtimeDir = tempRuntime(t);
   const upstream = await startStubModel(t);
   const backend = fakeChatBackend();
@@ -932,8 +937,8 @@ test('a production-bound chat correction returns approval_required and starts no
   const turnBefore = await chatTurn(first.api, CONVERSATION_BEFORE, 'cp_before', 'turn_ip62_before');
   assert.equal(turnBefore.status, 200, JSON.stringify(turnBefore.body));
   const proposalBefore = turnBefore.body.conversation.clipProposals.find((item) => item.id === 'cp_before');
-  assert.equal(proposalBefore.status, 'approval_required');
-  assert.equal(proposalBefore.planHash, null);
+  assert.equal(proposalBefore.status, 'plan_ready', JSON.stringify(proposalBefore));
+  assert.match(proposalBefore.planHash, /^[a-f0-9]{64}$/);
   assert.equal(proposalBefore.runId, undefined);
   assert.equal(first.app.runs.status().activeRunId, null, 'no run starts before the restart');
   assert.equal(backend.state.calls, 0);
@@ -944,16 +949,17 @@ test('a production-bound chat correction returns approval_required and starts no
   const turnAfter = await chatTurn(second.api, CONVERSATION_AFTER, 'cp_after', 'turn_ip62_after');
   assert.equal(turnAfter.status, 200, JSON.stringify(turnAfter.body));
   const proposalAfter = turnAfter.body.conversation.clipProposals.find((item) => item.id === 'cp_after');
-  assert.equal(proposalAfter.status, 'approval_required');
-  assert.equal(proposalAfter.planHash, null);
+  assert.equal(proposalAfter.status, 'plan_ready', JSON.stringify(proposalAfter));
+  assert.match(proposalAfter.planHash, /^[a-f0-9]{64}$/);
   assert.equal(proposalAfter.runId, undefined);
   assert.equal(second.app.runs.status().activeRunId, null, 'the restarted app still starts no run');
   assert.equal(backend.state.calls, 0);
 
   const afterSnapshot = await second.api(`/api/productions/${productionId}`);
   const afterEvents = await second.api(`/api/productions/${productionId}/events`);
-  assert.deepEqual(afterSnapshot.body, beforeSnapshot.body, 'the production snapshot is unchanged');
-  assert.deepEqual(afterEvents.body, beforeEvents.body, 'the production journal is unchanged');
+  assert.ok(afterSnapshot.body.production.revision > beforeSnapshot.body.production.revision, 'only plan proposals advance the journal');
+  assert.ok(afterEvents.body.events.length > beforeEvents.body.events.length, 'the approval-gated plans survive restart');
+  assert.equal(backend.state.estimates, 2, 'each correction may estimate locally, never allocate or execute');
   assert.deepEqual(ledger.snapshot(), beforeLedger, 'the production budget ledger is unchanged');
 });
 

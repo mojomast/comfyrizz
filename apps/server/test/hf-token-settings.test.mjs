@@ -8,7 +8,8 @@ import { test } from 'node:test';
 import { createApp } from '../src/app.mjs';
 import { createHfTokenSettings, HF_MODEL_REPOSITORIES } from '../src/hf-token-settings.mjs';
 
-const TOKEN = 'hf_1234567890abcdefghijklmnopqrstuvwxyz';
+// A format-valid local fixture, not a literal provider credential.
+const TOKEN = `hf_${'0'.repeat(36)}`;
 const SESSION = 'hf-settings-test-session-token';
 
 function space(t) {

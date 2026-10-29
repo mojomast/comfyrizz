@@ -110,6 +110,21 @@ test('PS10 landscape sources also use the exact package output size', async () =
   assert.equal(result.asset.gen.inputs.height, 1080);
 });
 
+test('generated-film landscape references ignore an explicit portrait aspect', async () => {
+  const tools = portraitTools();
+  await proposeFilm(tools, '1920x1080');
+
+  const result = await tools['assets.generate_image'].run({
+    scene_id: 'shot1', kind: 'composition', aspect: '4:5',
+    intent: 'A portrait-framed view of the paper flower.',
+  }) as any;
+
+  assert.equal(result.source_aspect, '16:9');
+  assert.equal(result.asset.gen.inputs.width, 1920);
+  assert.equal(result.asset.gen.inputs.height, 1080);
+  assert.doesNotMatch(result.note, /centre-crop/);
+});
+
 test('PS10 an H3 shot keeps both identity and composition sources at the output size', async () => {
   const tools = portraitTools();
   await proposeFilm(tools, '1080x1920');

@@ -27,6 +27,8 @@ import {
 export interface SuperEasyProgressFailure {
   message: string;
   retryable?: boolean;
+  narrationRevision?: boolean | string;
+  proposalRevisionNote?: string;
 }
 
 export interface SuperEasyProgressViewOptions {
@@ -283,7 +285,7 @@ function actionsKeyOf(
 ): string {
   const message = failure === null ? '' : failure.message;
   const retryable = failure === null ? 0 : failure.retryable === false ? 0 : 1;
-  return `${finalReady ? 1 : 0}|${gallery.final.url ?? ''}|${previewReady ? 1 : 0}|${message}|${retryable}|${options.packageId ?? ''}|${options.search ?? ''}`;
+  return `${finalReady ? 1 : 0}|${gallery.final.url ?? ''}|${previewReady ? 1 : 0}|${message}|${retryable}|${failure?.narrationRevision ? 1 : 0}|${failure?.proposalRevisionNote ?? ''}|${options.packageId ?? ''}|${options.search ?? ''}`;
 }
 
 function previewMarkup(): string {
@@ -302,9 +304,13 @@ function failureMarkup(failure: SuperEasyProgressFailure): string {
   const retry = failure.retryable === false
     ? ''
     : `\n<button type="button" class="btn btn-primary" data-super-easy-retry>${escapeHtml(EASY_COPY.errors.tryAgain)}</button>`;
+  const revise = failure.narrationRevision
+    ? '\n<button type="button" class="btn btn-primary" data-super-easy-revise-narration>Revise narration for this length</button><p>Review and approve the revised proposal before generation. Speech will be measured again; existing footage may need regeneration.</p>'
+    : '';
   return `<section class="super-easy-progress-error" data-super-easy-error>
 <p class="super-easy-progress-error-message" data-super-easy-error-message>${escapeHtml(failure.message)}</p>
-<div class="super-easy-progress-error-actions">${retry}
+${failure.proposalRevisionNote !== undefined ? `<form class="super-easy-proposal-revise" data-super-easy-revise-proposal><label for="super-easy-proposal-change">Edit your revision request</label><div><textarea id="super-easy-proposal-change" rows="4">${escapeHtml(failure.proposalRevisionNote)}</textarea><button type="submit" class="btn btn-primary">Revise proposal</button></div></form>` : ''}
+<div class="super-easy-progress-error-actions">${retry}${revise}
 <button type="button" class="btn btn-secondary" data-super-easy-more-control>${escapeHtml(COPY.done.openStudio)}</button>
 <button type="button" class="btn btn-secondary" data-super-easy-open-editor>${escapeHtml(EASY_COPY.shell.openEditor)}</button>
 </div>

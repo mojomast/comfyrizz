@@ -7,6 +7,7 @@ import { dirname, join } from 'node:path';
 import { createExporter } from '../src/export.mjs';
 import { buildVariants } from '../src/variant.mjs';
 import { loadCompositionManifest } from '../../../packages/compositions/src/index.mjs';
+import { collectMockContribution } from './helpers/comfy-contribution.mjs';
 
 const example = new URL('../../../examples/composition-stories/', import.meta.url);
 
@@ -23,6 +24,7 @@ function fixture(t) {
   const exportsDir = join(root, 'exports');
   mkdirSync(sourceDir);
   const pkg = JSON.parse(readFileSync(new URL('package.json', example)));
+  pkg.scenes.unshift({ id: 's_mock_plate', layout: 'title', copy: { headline: 'Editorial context' }, preferredFrames: 90 });
   const manifest = JSON.parse(readFileSync(new URL('compositions/manifest.json', example)));
   const asset = Buffer.from('original image bytes');
   pkg.assets.a_original = { kind: 'image', origin: 'upload', status: 'ready', file: 'assets/original.png',
@@ -34,6 +36,7 @@ function fixture(t) {
   mkdirSync(dirname(manifestPath), { recursive: true });
   const packagePath = join(sourceDir, 'package.json');
   const save = () => {
+    collectMockContribution(pkg, sourceDir);
     writeFileSync(packagePath, JSON.stringify(pkg));
     writeFileSync(manifestPath, JSON.stringify(manifest));
   };
@@ -98,7 +101,7 @@ test('composition cutdown exports retain only entries for surviving scenes', asy
   const variant = buildVariants(h.pkg, { aspects: ['9:16'], durations: [6] })[0];
   assert.ok(variant.package.scenes.length < h.pkg.scenes.length, 'real cutdown removes scenes');
   const result = await h.exporter.variants({ pkg: h.pkg, packagePath: h.packagePath, variants: [variant] });
-  const ids = variant.package.scenes.map(scene => scene.id);
+  const ids = variant.package.scenes.filter(scene => scene.composition).map(scene => scene.id);
   assert.deepEqual(h.prepared[0].source.scenes.map(entry => entry.sceneId), ids);
   const zip = result.variants[0].result.files.find(file => file.name === 'package.zip').path;
   const archived = JSON.parse(execFileSync('unzip', ['-p', zip, `compositions/${variant.package.id}/manifest.json`]));
@@ -151,7 +154,7 @@ test('composition variants reject invalid IDs, missing data, unmatched phrases a
   });
 });
 
-test('ordinary variant exports keep their existing source-directory rendering path', async t => {
+test('ordinary variant exports render from an isolated delivery package', async t => {
   const h = fixture(t);
   rmSync(join(h.sourceDir, 'compositions'), { recursive: true });
   const original = tree(h.sourceDir);
@@ -160,7 +163,7 @@ test('ordinary variant exports keep their existing source-directory rendering pa
     materialize: () => assert.fail('ordinary variants must not materialize compositions'),
     render: (path, output) => {
       renderedPath = path;
-      assert.equal(dirname(path), h.sourceDir);
+      assert.notEqual(dirname(path), h.sourceDir);
       assert.equal(readFileSync(join(dirname(path), 'assets/original.png'), 'utf8'), 'original image bytes');
       writeFileSync(output, 'fake MP4');
       return { output, frames: 1, bytes: 8 };

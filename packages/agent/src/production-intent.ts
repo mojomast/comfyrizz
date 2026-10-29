@@ -1,15 +1,22 @@
 export type ProductionIntentKind = 'motion-graphics' | 'generated-film';
 
-export interface ProductionIntent {
-  kind: ProductionIntentKind;
-  generatedFilm: boolean;
+export interface AudioIntent {
+  /** Full silence prohibits music, effects and speech, including native audio. */
+  silent: boolean;
   /** Wordless describes speech, never the presence of a native soundscape. */
   wordless: boolean;
-  noCaptions: boolean;
+  speechRequested: boolean;
   /** Explicitly requests finishing narration rather than native H3 dialogue. */
   narrationRequested: boolean;
   /** Explicitly requests a score/music bed; soundscape alone does not imply music. */
   musicRequested: boolean;
+  musicProhibited: boolean;
+}
+
+export interface ProductionIntent extends AudioIntent {
+  kind: ProductionIntentKind;
+  generatedFilm: boolean;
+  noCaptions: boolean;
   /** Explicitly requires narration-anchored motion.cue_phrases on every scene. */
   requiresNarrationCues: boolean;
   /** Live-action fictional humans, not a substituted stylized medium. */
@@ -19,6 +26,7 @@ export interface ProductionIntent {
   /** Purpose-matched structured editorial treatment for the middle shots. */
   structuredVisual: 'technical-flow' | 'sketch' | 'morph' | 'focus' | null;
   requestedSeconds: number | null;
+  exactDuration: boolean;
   evidence: {
     generatedShots: boolean;
     recurringPhysicalCharacters: boolean;
@@ -28,16 +36,54 @@ export interface ProductionIntent {
   };
 }
 
-const NEGATED_PREFIX = /\b(?:no|not|without|never|avoid|exclude|instead\s+of)\s+(?:[\w-]+\s+){0,2}$/i;
-const NEGATED_LIST_PREFIX = /\b(?:no|not|without|never|avoid|exclude)\b[^.!?;]{0,40}(?:,|\bor\b|\band\b)\s*$/i;
+// Lists remain in the same clause ("avoid photos, people and live action"),
+// while a separate directive starts fresh ("avoid cartoons and show people").
+// Do not use a character/word window: disclaimers may qualify distant subjects.
+function clausePrefix(text: string, index: number): string {
+  return text.slice(0, index).split(/[.!?;\n]|\b(?:but|however|yet)\b|(?:,|\band\b)\s*(?=(?:(?:then|also|please|I|we)\s+)*(?:include|add|create|generate|use|show|feature|film|want|need)\b)/i).at(-1) ?? '';
+}
 
-function positiveMatch(text: string, pattern: RegExp): boolean {
+const NEGATED_CLAUSE = /\b(?:no|not|without|never|avoid|exclude|instead\s+of|rather\s+than|don['’]t|doesn['’]t|isn['’]t)\b(?!\s+only\b)[^.!?;\n]*$/i;
+
+function* positiveMatches(text: string, pattern: RegExp): Generator<{ match: RegExpMatchArray; prefix: string }> {
   const flags = pattern.flags.includes('g') ? pattern.flags : `${pattern.flags}g`;
   for (const match of text.matchAll(new RegExp(pattern.source, flags))) {
-    const prefix = text.slice(Math.max(0, (match.index ?? 0) - 36), match.index);
-    if (!NEGATED_PREFIX.test(prefix) && !NEGATED_LIST_PREFIX.test(prefix)) return true;
+    const prefix = clausePrefix(text, match.index ?? 0);
+    if (!NEGATED_CLAUSE.test(prefix)) yield { match, prefix };
+  }
+}
+
+function positiveMatch(text: string, pattern: RegExp): boolean {
+  return !positiveMatches(text, pattern).next().done;
+}
+
+/** Shared, subject-neutral visual look policy for UI serialization and planning. */
+export function requestsLiveActionLook(text: string): boolean {
+  const nativeMedium = positiveMatch(text, /\b(?:native\s+(?:editable\s+)?(?:motion\s+graphics|typography|graphics|bar\s+chart)|(?:bar\s+)?charts?|graphs?)\b/i);
+  const pattern = /\b(?:real\s+(?:humans?|people)|realistic\s+humans?|photoreal(?:istic)?(?:\s+humans?)?|live[\s-]*action)\b/i;
+  for (const { match, prefix } of positiveMatches(text, pattern)) {
+    // People can be the subject of a chart without defining its visual medium.
+    const peopleRequested = /\b(?:show|use|include|feature|film|want|need)\s+(?:(?:some|actual|fictional|two|three|\d+)\s+)*$/i.test(prefix);
+    if (nativeMedium && /^real\s+(?:humans?|people)$/i.test(match[0]) && !peopleRequested) continue;
+    return true;
   }
   return false;
+}
+
+/** Browser-safe audio policy shared by brief serialization and scene planning. */
+export function classifyAudioIntent(brief: string): AudioIntent {
+  const text = String(brief ?? '');
+  const silent = positiveMatch(text, /\bsilent\b|\b(?:full|complete|total)\s+silence\b|\bin\s+silence\b/i)
+    || /\b(?:no|without)\s+(?:any\s+)?(?:audio|sound)\b(?!\s+(?:effects?|design)\b)/i.test(text);
+  const wordless = silent || positiveMatch(text, /\bwordless\b/i)
+    || /\b(?:no|without)\s+(?:any\s+)?(?:dialogue|narration|narrator|speech|spoken\s+words?|voice[\s-]?over)\b/i.test(text)
+    || /\bno\s+(?:dialogue|narration|speech|music|captions?|subtitles?)(?:\s*(?:,|or|and)\s*(?:dialogue|narration|speech|music|captions?|subtitles?))*\s*(?:,|or|and)\s*(?:dialogue|narration|speech|spoken\s+words?|voice[\s-]?over)\b/i.test(text);
+  const musicProhibited = silent || /\b(?:no|without)\s+(?:any\s+)?(?:music|soundtrack|score|instrumental(?:\s+bed)?|BGM)\b/i.test(text)
+    || /\bno\s+(?:dialogue|narration|speech)(?:\s*,\s*(?:dialogue|narration|speech))*\s*(?:,|or|and)\s*music\b/i.test(text);
+  const narrationRequested = !wordless && positiveMatch(text, /\b(?:narrat(?:e|es|ed|ing|ion|or)|voice[\s-]?over|spoken\s+(?:script|narration)|Kokoro)\b/i);
+  const speechRequested = !wordless && (narrationRequested || positiveMatch(text, /\b(?:dialogue|speech|spoken|speak(?:s|ing)?|talk(?:s|ing)?|conversations?)\b/i));
+  const musicRequested = !musicProhibited && positiveMatch(text, /\b(?:music|soundtrack|score|instrumental(?:\s+bed)?|theme\s+song|BGM)\b/i);
+  return { silent, wordless, speechRequested, narrationRequested, musicRequested, musicProhibited };
 }
 
 const NUMBER_WORDS: Record<string, number> = { one: 1, two: 2, three: 3, four: 4, five: 5, six: 6, seven: 7, eight: 8, nine: 9, ten: 10 };
@@ -48,8 +94,34 @@ function durationNumber(value: string): number {
   return Number.isFinite(numeric) ? numeric : NUMBER_WORDS[value.toLowerCase()] ?? Number.NaN;
 }
 
-/** Rule-first classification: an explicit procedural deliverable wins over film language. */
-export function classifyProductionIntent(brief: string): ProductionIntent {
+/** Prefer output-runtime instructions over durations quoted in source data. */
+function requestedDuration(brief: string): { requestedSeconds: number | null; exactDuration: boolean } {
+  const text = brief.replace(/\b(exactly|precisely|exact)(?=\d)/gi, '$1 ');
+  const minutes = '(?:minutes?|mins?|m)';
+  const seconds = '(?:seconds?|secs?|s)';
+  const pattern = new RegExp(`\\b(${DURATION_NUMBER})[\\s-]*(?:(${minutes})(?:\\b|(?=\\d))(?:[\\s,-]*(?:and\\s+)?(${DURATION_NUMBER})[\\s-]*${seconds}\\b)?|(${seconds})\\b)`, 'gi');
+  let chosen: { seconds: number; exact: boolean; score: number } | null = null;
+  for (const match of text.matchAll(pattern)) {
+    const prefix = text.slice(0, match.index).split(/[!?;\n]|\.(?!\d)/).at(-1) ?? '';
+    const suffix = text.slice(match.index + match[0].length);
+    const exact = /\b(?:exactly|precisely|exact)\s+(?:(?:at|of)\s+)?$/i.test(prefix);
+    const outputPrefix = /\b(?:runtime|run\s*time|duration|length)\s*(?::|=|is|of|should\s+be|must\s+be)?\s*(?:(?:exactly|precisely|exact|about|around|approximately|at|of)\s+)*$/i.test(prefix)
+      || /\b(?:make|create|produce|render|lasts?|lasting|runs?\s+for)\s+(?:(?:it|a|an|the|film|video|output|exactly|precisely|about|around)\s+)*$/i.test(prefix)
+      || /\b(?:film|video|output)\s*(?::|=|is|of|should\s+be|must\s+be|will\s+be)\s*(?:(?:exactly|precisely|about|around)\s+)*$/i.test(prefix);
+    const outputSuffix = /^(?:[\s-]+(?:of\s+)?(?:a\s+|an\s+)?(?:(?:landscape|portrait|native|animated|short|live[\s-]*action|generated|motion|data)\s+)*(?:film|video|story|graphics|explainer|teaser|bumper|short)\b|\s+(?:long|in\s+total)\b)/i.test(suffix);
+    const score = (outputPrefix || outputSuffix ? 4 : 0) + (exact ? 2 : 0);
+    const isMinutes = Boolean(match[2]);
+    const value = durationNumber(match[1]) * (isMinutes ? 60 : 1) + (isMinutes && match[3] ? durationNumber(match[3]) : 0);
+    if (!chosen || score > chosen.score) chosen = { seconds: isMinutes ? Math.round(value) : value, exact, score };
+  }
+  return { requestedSeconds: chosen?.seconds ?? null, exactDuration: chosen?.exact ?? false };
+}
+
+/**
+ * Rule-first classification: explicit medium wording wins over a preset fallback.
+ * With no fallback, the original brief-only inference remains unchanged.
+ */
+export function classifyProductionIntent(brief: string, fallbackKind?: ProductionIntentKind): ProductionIntent {
   const text = String(brief ?? '');
   const proceduralConstraint = positiveMatch(
     text,
@@ -75,32 +147,28 @@ export function classifyProductionIntent(brief: string): ProductionIntent {
     text,
     /\b(?:native\s+(?:audio|sound|soundscape)|soundscape|sound\s+design|foley|ambient\s+sound|coastal\s+sound|gentle\s+[\w-]+\s+sound)\b/i,
   );
-  const wordless = /\bwordless\b/i.test(text)
-    || /\bno\b[^.!?\n]{0,70}\b(?:dialogue|narration|speech|voice[\s-]?over)\b/i.test(text)
-    || /\bwithout\s+(?:dialogue|narration|speech|voice[\s-]?over)\b/i.test(text);
+  const audioIntent = classifyAudioIntent(text);
   const explicitRemotionCopy = positiveMatch(text, /\b(?:Remotion(?:\s+[\w-]+){0,3}\s+(?:titles?|title\s+cards?|end\s+cards?|headlines?|copy|captions?|lower\s+thirds?)|(?:titles?|title\s+cards?|end\s+cards?|headlines?|copy|captions?|lower\s+thirds?)\s+(?:in|with|using)\s+Remotion)\b/i);
-  const noCaptions = !explicitRemotionCopy && (/\bno\b[^.!?\n]{0,90}\b(?:captions?|subtitles?|on[\s-]+screen\s+text|headlines?|titles?|title\s+cards?|end\s+cards?|lower\s+thirds?|copy)\b/i.test(text)
+  const noCaptions = !explicitRemotionCopy && (/\bno\b[^.!?\n]{0,90}\b(?:captions?|subtitles?|text|on[\s-]+screen\s+text|headlines?|titles?|title\s+cards?|end\s+cards?|lower\s+thirds?|copy)\b/i.test(text)
     || /\bwithout\s+(?:captions?|subtitles?|on[\s-]+screen\s+text|headlines?|titles?|title\s+cards?|end\s+cards?|lower\s+thirds?)\b/i.test(text)
     || /\btext[\s-]+free\b/i.test(text));
-  const narrationRequested = positiveMatch(text, /\b(?:narrat(?:ed|ion|or)|voice[\s-]?over|spoken\s+(?:script|narration)|Kokoro)\b/i);
-  const musicRequested = positiveMatch(text, /\b(?:music|soundtrack|score|instrumental(?:\s+bed)?|theme\s+song|BGM)\b/i);
   const requiresNarrationCues = /\bcue_phrases\b|narration[\s-]+(?:linked|anchored)\s+(?:motion|animation|cues?)|timed\s+(?:to|with)\s+(?:the\s+)?narration/i.test(text);
-  const liveActionHumans = positiveMatch(text, /\b(?:real\s+(?:humans?|people)|(?:realistic\s+humans?|photoreal(?:istic)?(?:\s+humans?)?)|photoreal(?:istic)?(?:\s+humans?)?|live[\s-]*action)\b/i);
-  const requestedMinutesMatch = new RegExp(`\\b(${DURATION_NUMBER})[\\s-]+(?:minutes?|mins?)\\b`, 'i').exec(text);
-  const requestedSecondsMatch = new RegExp(`\\b(${DURATION_NUMBER})[\\s-]+seconds?\\b`, 'i').exec(text);
-  const adjacentSeconds = requestedMinutesMatch && requestedSecondsMatch
-    && requestedSecondsMatch.index > requestedMinutesMatch.index
-    && /^\s*(?:and\s+)?$/i.test(text.slice(requestedMinutesMatch.index + requestedMinutesMatch[0].length, requestedSecondsMatch.index))
-    ? durationNumber(requestedSecondsMatch[1])
-    : 0;
-  const requestedSeconds = requestedMinutesMatch
-    ? Math.round(durationNumber(requestedMinutesMatch[1]) * 60 + adjacentSeconds)
-    : requestedSecondsMatch ? durationNumber(requestedSecondsMatch[1]) : null;
+  // A photographic medium does not imply a human subject (food, wildlife,
+  // products and landscapes use it too). Keep human-specific enforcement only
+  // when the brief also positively requests people.
+  const liveActionLook = requestsLiveActionLook(text);
+  const humanSubject = positiveMatch(text, /\b(?:humans?|people|persons?|men|women|man|woman|adults?|children|child|boys?|girls?|actors?|actresses|performers?|bakers?|chefs?|dancers?|cyclists?|skateboarders?)\b/i);
+  const liveActionHumans = liveActionLook && humanSubject;
+  const { requestedSeconds, exactDuration } = requestedDuration(text);
   const strongEvidence = [generatedShots, recurringPhysicalCharacters, cinematicCameraOrAction, nativeSoundscape]
     .filter(Boolean).length;
   // An explicit generated film may use Remotion overlays and motion graphics.
   // Procedural wording only wins when the brief is not explicitly a generated film.
-  const generatedFilm = explicitGeneratedFilm || (!proceduralConstraint && (generatedShots || strongEvidence >= 2));
+  // A selected preset supplies a fallback, never permission to override explicit wording.
+  const generatedFilm = explicitGeneratedFilm || (!proceduralConstraint && (
+    fallbackKind === 'motion-graphics' ? false
+      : generatedShots || strongEvidence >= 2 || fallbackKind === 'generated-film'
+  ));
   const structuredVisual = noCaptions ? null
     : positiveMatch(text, /\b(?:mechanisms?|how\s+(?:a|an|the)\s+[\w\s-]+works?|sketch(?:book)?|draw[\s-]+on)\b/i) ? 'sketch'
       : positiveMatch(text, /\b(?:technical[\s-]+flow|workflows?|process(?:es)?|architecture|cause[\s-]+and[\s-]+effect|pipelines?)\b/i) ? 'technical-flow'
@@ -110,15 +178,14 @@ export function classifyProductionIntent(brief: string): ProductionIntent {
   return {
     kind: generatedFilm ? 'generated-film' : 'motion-graphics',
     generatedFilm,
-    wordless,
+    ...audioIntent,
     noCaptions,
-    narrationRequested,
-    musicRequested,
     requiresNarrationCues,
     liveActionHumans,
     bookends: generatedFilm && !noCaptions,
     structuredVisual,
     requestedSeconds,
+    exactDuration,
     evidence: { generatedShots, recurringPhysicalCharacters, cinematicCameraOrAction, nativeSoundscape, proceduralConstraint },
   };
 }

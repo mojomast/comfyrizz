@@ -1,0 +1,13 @@
+Open on a single race-result tile against black. It receives a date and classification with a sharp mechanical click.
+
+Another race. Another result. Then another.
+
+The tiles accumulate into a wall. Each tile represents one actual race start, in chronological order. A restrained counter tracks starts. A second counter tracks wins and remains at zero.
+
+Accelerate the accumulation, but pause on a few source-verified near misses and retirements. Give podiums their own visual treatment: they were achievements, not interchangeable failures.
+
+Use ivory typography, dark graphite tiles, and a single vivid pink reserved for the eventual victory. No cars, driver portraits, or broadcast footage.
+
+As the first-win tile approaches, slow down dramatically. Leave a brief silence. Stamp P1.
+
+Pull back to reveal the entire accumulation of starts and that one changed result. End with the driver, race, date, and verified start count. Let the data provide the emotion.

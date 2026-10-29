@@ -21,7 +21,7 @@ export type ChatChunk =
   /** Provider continuation data; never display as assistant reply text. */
   | { type: 'reasoning'; delta: string }
   | { type: 'tool_call'; id: string; name: string; args: unknown }
-  | { type: 'usage'; input: number; output: number }
+  | { type: 'usage'; input: number; output: number; cacheRead?: number; cacheWrite?: number; reasoningTokens?: number }
   | { type: 'error'; code: string; message?: string; retryAfterMs?: number; toolCallId?: string }
   | { type: 'done' };
 
@@ -61,5 +61,6 @@ export interface ResolvedProvider {
   reasoningEffort?: 'low' | 'high' | 'max';
   /** DeepSeek thinking-mode toggle; omitted preserves the provider default. */
   thinking?: 'enabled' | 'disabled';
+  maxTokens?: number;
   status: ProviderPreset['status'];
 }

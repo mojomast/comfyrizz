@@ -49,6 +49,7 @@ __all__ = [
 SCHEMA_VERSION = 1
 
 SEMANTIC_CODES = (
+    "SEM_DRAWING_TIMING",
     "SEM_DUPLICATE_SCENE_ID",
     "SEM_ID_PATTERN",
     "SEM_REF_UNRESOLVED",
@@ -92,6 +93,9 @@ SEMANTIC_CODES = (
     "SEM_AUDIO_ASSET_NOT_AUDIO",
     "SEM_AUDIO_ASSET_NOT_READY",
     "SEM_AUDIO_UNKNOWN_SCENE",
+    "SEM_AUDIO_TRIM_INVALID",
+    "SEM_LYRICS_INVALID",
+    "SEM_LYRICS_MUSIC_REQUIRED",
     "SEM_LAYOUT_REQUIRES_MEDIA",
     "SEM_CODE_REQUIRED",
     "SEM_MOTION_FOCUS_RECT",
@@ -131,6 +135,8 @@ NON_REDISTRIBUTABLE_LICENSE_RE = re.compile(
 )
 URL_RE = re.compile(r"^[A-Za-z][A-Za-z0-9+.-]*://")
 DRIVE_RE = re.compile(r"^[A-Za-z]:")
+# Exact ECMAScript trim() whitespace, shared with semantic.mjs for lyric blanks.
+LYRIC_BLANK_RE = re.compile(r"^[\u0009-\u000d\u0020\u00a0\u1680\u2000-\u200a\u2028\u2029\u202f\u205f\u3000\ufeff]*$")
 
 
 def repo_root() -> Path:
@@ -290,6 +296,12 @@ def _collect(doc: dict[str, Any], errors: list[dict[str, Any]]):
 def _check_ids(doc, scenes, assets, datasets, errors) -> None:
     seen: set[str] = set()
     for i, scene in enumerate(scenes):
+        drawing = scene.get("drawing")
+        elements = drawing.get("elements") if _is_obj(drawing) else None
+        if isinstance(elements, list):
+            for j, element in enumerate(elements):
+                if _is_obj(element) and isinstance(element.get("start"), (int, float)) and isinstance(element.get("end"), (int, float)) and element["end"] < element["start"]:
+                    errors.append(_err("SEM_DRAWING_TIMING", f"/scenes/{i}/drawing/elements/{j}/end", "end must be at least start"))
         sid = scene.get("id")
         if not _is_str(sid) or not SCENE_ID_RE.fullmatch(sid):
             errors.append(
@@ -432,6 +444,8 @@ def _check_scenes(scenes, assets, datasets, errors) -> None:
         at = f"/scenes/{i}"
         layout = scene.get("layout")
         spec = LAYOUTS.get(layout) if _is_str(layout) else None
+        # A drawing replaces SceneView; JSON Schema validates its structure separately.
+        has_drawing = _is_obj(scene.get("drawing"))
         if spec:
             if "variant" in scene:
                 variants = spec.get("variants", [])
@@ -441,23 +455,23 @@ def _check_scenes(scenes, assets, datasets, errors) -> None:
                         _err("SEM_LAYOUT_VARIANT", f"{at}/variant", f"layout {layout} allows {allowed} (got {json.dumps(scene.get('variant'))})")
                     )
             copy = scene.get("copy") if _is_obj(scene.get("copy")) else {}
-            if spec.get("requiresData") and not (_is_obj(scene.get("data")) and _is_str(scene["data"].get("dataset"))):
+            if not has_drawing and spec.get("requiresData") and not (_is_obj(scene.get("data")) and _is_str(scene["data"].get("dataset"))):
                 errors.append(_err("SEM_LAYOUT_REQUIRES_DATA", f"{at}/data", f"layout {layout} requires data.dataset"))
-            if spec.get("requiresHeadline") and not _non_empty(copy.get("headline")):
+            if not has_drawing and spec.get("requiresHeadline") and not _non_empty(copy.get("headline")):
                 errors.append(_err("SEM_COPY_REQUIRED", f"{at}/copy/headline", f"layout {layout} requires copy.headline"))
-            if layout == "list" and scene.get("variant") == "bullets":
+            if not has_drawing and layout == "list" and scene.get("variant") == "bullets":
                 items = copy.get("items")
                 if not isinstance(items, list) or len(items) < 2:
                     errors.append(
                         _err("SEM_COPY_REQUIRED", f"{at}/copy/items", "list variant bullets requires copy.items with 2 to 6 entries")
                     )
-            if layout == "list" and scene.get("variant") == "quote" and not _non_empty(copy.get("quote")):
+            if not has_drawing and layout == "list" and scene.get("variant") == "quote" and not _non_empty(copy.get("quote")):
                 errors.append(_err("SEM_COPY_REQUIRED", f"{at}/copy/quote", "list variant quote requires copy.quote"))
-            if spec.get("requiresMedia") and (not isinstance(scene.get("media"), list) or len(scene.get("media")) != spec["requiresMedia"]):
+            if not has_drawing and spec.get("requiresMedia") and (not isinstance(scene.get("media"), list) or len(scene.get("media")) != spec["requiresMedia"]):
                 errors.append(
                     _err("SEM_LAYOUT_REQUIRES_MEDIA", f"{at}/media", f"layout {layout} requires media with {spec['requiresMedia']} plates")
                 )
-            if spec.get("requiresCode"):
+            if not has_drawing and spec.get("requiresCode"):
                 block = scene.get("code") if _is_obj(scene.get("code")) else {}
                 if not _non_empty(block.get("language")) or not _non_empty(block.get("code")):
                     errors.append(_err("SEM_CODE_REQUIRED", f"{at}/code", f"layout {layout} requires code.language and code.code"))
@@ -501,7 +515,7 @@ def _check_scenes(scenes, assets, datasets, errors) -> None:
         if scene.get("media_only") is True:
             has_media_background = _is_obj(bg) and _is_str(bg.get("asset"))
             has_foreground = isinstance(scene.get("foreground"), list) and len(scene["foreground"]) > 0
-            if not has_media_background and not has_foreground:
+            if not has_drawing and not has_media_background and not has_foreground:
                 errors.append(
                     _err(
                         "SEM_MEDIA_ONLY_NO_MEDIA",
@@ -620,6 +634,16 @@ def _check_audio(doc, scenes, assets, errors) -> None:
     music = audio.get("music")
     if _is_obj(music):
         require_audio(music.get("asset"), "/audio/music/asset", "the music bed")
+        trim = music.get("trim") if _is_obj(music.get("trim")) else None
+        if (
+            trim is not None
+            and _is_number(trim.get("startSeconds"))
+            and math.isfinite(float(trim.get("startSeconds")))
+            and _is_number(trim.get("endSeconds"))
+            and math.isfinite(float(trim.get("endSeconds")))
+            and trim.get("startSeconds") >= trim.get("endSeconds")
+        ):
+            errors.append(_err("SEM_AUDIO_TRIM_INVALID", "/audio/music/trim", "music trim requires startSeconds < endSeconds"))
     sfx = audio.get("sfx")
     if isinstance(sfx, list):
         for index, item in enumerate(sfx):
@@ -628,6 +652,77 @@ def _check_audio(doc, scenes, assets, errors) -> None:
             require_audio(item.get("asset"), f"/audio/sfx/{index}/asset", "the sound effect")
             if item.get("scene") not in scene_ids:
                 errors.append(_err("SEM_AUDIO_UNKNOWN_SCENE", f"/audio/sfx/{index}/scene", f"unknown scene {json.dumps(item.get('scene'))}"))
+    _check_lyrics(audio, errors)
+
+
+def _check_lyrics(audio, errors) -> None:
+    """Canonical music-video lyric timing; mirrors semantic.mjs checkLyrics."""
+    style = audio.get("lyricsStyle")
+    if style is None:
+        style = "off"
+    non_off = style in ("caption", "reel")
+    cues = audio.get("lyrics") if isinstance(audio.get("lyrics"), list) else []
+
+    if non_off or len(cues) > 0:
+        if not _is_obj(audio.get("music")):
+            errors.append(_err("SEM_LYRICS_MUSIC_REQUIRED", "/audio/music", "lyrics require audio.music as their master song"))
+        elif not _is_obj(audio["music"].get("trim")):
+            errors.append(_err("SEM_LYRICS_MUSIC_REQUIRED", "/audio/music/trim", "lyrics require an explicit audio.music.trim source window"))
+    if non_off and len(cues) == 0:
+        errors.append(_err("SEM_LYRICS_INVALID", "/audio/lyrics", f"lyricsStyle {style} requires at least one lyric cue"))
+
+    previous_cue_start = None
+    for i, cue in enumerate(cues):
+        if not _is_obj(cue):
+            continue
+        at = f"/audio/lyrics/{i}"
+        if _is_str(cue.get("text")) and LYRIC_BLANK_RE.fullmatch(cue["text"]):
+            errors.append(_err("SEM_LYRICS_INVALID", f"{at}/text", "lyric cue text must not be blank"))
+        start = cue.get("startSeconds") if _is_number(cue.get("startSeconds")) and math.isfinite(float(cue.get("startSeconds"))) else None
+        if start is not None:
+            if previous_cue_start is not None and start <= previous_cue_start:
+                errors.append(_err("SEM_LYRICS_INVALID", f"{at}/startSeconds", "lyric cue starts must be strictly increasing"))
+            previous_cue_start = start
+
+        next_cue = cues[i + 1] if i + 1 < len(cues) and _is_obj(cues[i + 1]) else None
+        next_start = (
+            next_cue.get("startSeconds")
+            if next_cue is not None
+            and _is_number(next_cue.get("startSeconds"))
+            and math.isfinite(float(next_cue.get("startSeconds")))
+            else None
+        )
+        end = cue.get("endSeconds") if _is_number(cue.get("endSeconds")) and math.isfinite(float(cue.get("endSeconds"))) else None
+        if start is not None and end is not None and end <= start:
+            errors.append(_err("SEM_LYRICS_INVALID", f"{at}/endSeconds", "lyric cue endSeconds is exclusive and must be greater than startSeconds"))
+        elif end is not None and next_start is not None and end > next_start:
+            errors.append(_err("SEM_LYRICS_INVALID", f"{at}/endSeconds", "lyric cue endSeconds overlaps the next cue"))
+
+        boundary = math.inf
+        if end is not None:
+            boundary = end
+        if next_start is not None:
+            boundary = min(boundary, next_start)
+        words = cue.get("words")
+        if not isinstance(words, list):
+            continue
+        previous_word_start = None
+        for j, word in enumerate(words):
+            if not _is_obj(word):
+                continue
+            word_at = f"{at}/words/{j}"
+            if _is_str(word.get("text")) and LYRIC_BLANK_RE.fullmatch(word["text"]):
+                errors.append(_err("SEM_LYRICS_INVALID", f"{word_at}/text", "lyric word text must not be blank"))
+            if not (_is_number(word.get("startSeconds")) and math.isfinite(float(word.get("startSeconds")))):
+                continue
+            word_start = word.get("startSeconds")
+            non_strict = previous_word_start is not None and word_start <= previous_word_start
+            outside = (start is not None and word_start < start) or word_start >= boundary
+            if outside:
+                errors.append(_err("SEM_LYRICS_INVALID", f"{word_at}/startSeconds", "lyric word start is outside its cue's explicit or implicit exclusive boundary"))
+            elif non_strict:
+                errors.append(_err("SEM_LYRICS_INVALID", f"{word_at}/startSeconds", "lyric word starts must be strictly increasing"))
+            previous_word_start = word_start
 
 
 def _check_assets(assets, errors) -> None:

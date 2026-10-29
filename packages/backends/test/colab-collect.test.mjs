@@ -29,10 +29,10 @@ import {
 import { planJobs } from "../../jobs/src/index.mjs";
 import { installFakeColab, makeCli, readLog } from "./helpers.mjs";
 import { runPackage } from "../src/run-package.mjs";
+import { KLEIN_SHA, mockCapture, mockOutput, assertCollectedReceipt } from "./mock-generation.mjs";
 
 const REPO = resolve(fileURLToPath(new URL(".", import.meta.url)), "..", "..", "..");
 const LAUNCH_DEMO = join(REPO, "examples", "launch-demo", "package.json");
-const SHA = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
 
 const sha256 = (text) => createHash("sha256").update(text).digest("hex");
 
@@ -48,13 +48,15 @@ function fixture(...assetIds) {
       gen: {
         generator: "flux3-klein",
         workflow: "workflows/flux3_klein_t2i.api.json",
-        workflow_sha256: SHA,
+        workflow_sha256: KLEIN_SHA,
         model: "flux-3-image-klein",
         caption: `A wide abstract nebula number ${index + 1}.`,
         inputs: { prompt: "A wide abstract nebula.", width: 960, height: 544, seed: 42 + index, steps: 16 },
       },
       model_license: { id: "LicenseRef-FLUX.3-Image-Klein" },
     };
+    // Paid work must be reachable from an actual render placement.
+    pkg.scenes[index].background = { asset: assetId, fit: "cover" };
   }
   return pkg;
 }
@@ -63,10 +65,11 @@ function jobsFor(pkg) {
   return planJobs(pkg).jobs;
 }
 
-function manifestForJob(job, content) {
+function manifestForJob(doc, job, content) {
   return {
     v: 1,
     run_id: "run_ip09",
+    jobsHash: doc.hash,
     packageId: "pkg_ip09collect",
     complete: true,
     counts: { succeeded: 1 },
@@ -76,7 +79,7 @@ function manifestForJob(job, content) {
         status: "succeeded",
         job_id: "job_ip09",
         attempt_id: "att_ip09_01",
-        outputs: [{ file: job.output, relative: job.output, sha256: sha256(content), bytes: Buffer.byteLength(content) }],
+        outputs: [mockOutput(job, content)],
       },
     ],
   };
@@ -92,9 +95,11 @@ function colabWorkspace({ assetId = "a_ip09_still", failDownloads = 0 } = {}) {
   mkdirSync(workDir, { recursive: true });
 
   const pkg = fixture(assetId);
-  const [job] = jobsFor(pkg);
+  const doc = planJobs(pkg);
+  const [job] = doc.jobs;
   const content = "IP09-COLLECTED-BYTES";
-  const manifest = manifestForJob(job, content);
+  const manifest = manifestForJob(doc, job, content);
+  const capture = mockCapture(job);
 
   const fake = installFakeColab(work, {
     state: {
@@ -110,7 +115,8 @@ function colabWorkspace({ assetId = "a_ip09_still", failDownloads = 0 } = {}) {
           output: JSON.stringify({ v: 1, event: "job_done", job: job.id }),
           files: [
             { path: "/content/comfyrizz/out/manifest.json", content: JSON.stringify(manifest) },
-            { path: `/content/comfyrizz/out/${job.output}`, content },
+             { path: `/content/comfyrizz/out/${job.output}`, content },
+             { path: `/content/comfyrizz/out/${capture.relative}`, content: capture.content },
           ],
         },
       },
@@ -149,6 +155,7 @@ test("runPackage verifies where Google Colab collected, without a second downloa
   assert.equal(result.verification.dir, join(ws.scratchDir, "out"), "verification must use the backend's collected dir");
   assert.equal(result.applied.length, 1);
   assert.equal(result.package.assets.a_ip09_still.status, "ready");
+  assertCollectedReceipt(result, "a_ip09_still");
 
   assert.equal(events.filter((event) => event.phase === "collecting").length, 0, "a clean run must not collect again");
   assert.equal(events.filter((event) => event.event === "collect_retry").length, 0);
@@ -186,6 +193,7 @@ test("a failed collect retries from the VM's existing tree without re-running in
   assert.equal(result.verification.attempts, 1, "one collect retry was enough");
   assert.equal(result.applied.length, 1);
   assert.ok(events.some((event) => event.event === "collect_retry"), "the retry is on the event log");
+  assertCollectedReceipt(result, "a_ip09_still");
   assert.ok(events.some((event) => event.phase === "collecting"));
 
   const execs = readLog(ws.fake.logPath)

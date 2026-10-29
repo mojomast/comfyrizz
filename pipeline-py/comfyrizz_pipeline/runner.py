@@ -836,6 +836,20 @@ class Runner:
         outputs = result.get("outputs") or []
         if saved and outputs:
             outputs[0]["workflow"] = saved["api"]
+            # Delivery provenance distinguishes an actual submitted graph from
+            # a reconstruction made after an interrupted worker lost its graph.
+            outputs[0]["workflow_submitted"] = graph is not None
+            if graph is not None:
+                consumed = []
+                for node_id, node in graph.items():
+                    for field, value in node.get("inputs", {}).items():
+                        if not isinstance(value, str):
+                            continue
+                        for digest, upload in self._uploads.items():
+                            if value in (upload.get("reference"), upload.get("name")):
+                                consumed.append({"nodeId": node_id, "input": field, "sha256": digest,
+                                                 "bytes": upload.get("bytes"), "uploadedName": value})
+                outputs[0]["conditioning_inputs"] = consumed
             outputs[0]["workflow_readme"] = saved["readme"]
             if saved.get("redactions"):
                 outputs[0]["workflow_redactions"] = saved["redactions"]

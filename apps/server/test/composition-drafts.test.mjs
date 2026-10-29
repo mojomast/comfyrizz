@@ -71,7 +71,7 @@ async function setup(t) {
   const request = async (route, body) => {
     const response = await fetch(base + route, { method: 'POST', headers: {
       'content-type': 'application/json', 'x-comfyrizz-token': token, origin: base,
-    }, body: JSON.stringify(body) });
+    }, body: JSON.stringify({ intent: 'draft', ...body }) });
     const text = await response.text();
     // Client consumption and the server's finish/close cleanup are independent
     // event-loop callbacks. Assert eventual cleanup, not their scheduling order.
@@ -121,7 +121,8 @@ test('draft export retains validated manifest and original assets in its archive
   assert.deepEqual(JSON.parse(execFileSync('unzip', ['-p', zip, 'compositions/manifest.json'])), { version: 1, scenes: [] });
   assert.equal(execFileSync('unzip', ['-p', zip, 'assets/marker.png'], { encoding: 'utf8' }), 'original asset');
   assert.equal(JSON.parse(execFileSync('unzip', ['-p', zip, 'package.json'])).title, 'Unsaved export');
-  assert.equal(h.calls.at(-1).dir, h.dir);
+  assert.notEqual(h.calls.at(-1).dir, h.dir, 'final export renders from an isolated delivery package');
+  assert.equal(existsSync(h.calls.at(-1).dir), false, 'delivery package is cleaned up');
   assert.equal(h.calls.at(-1).options.final, true);
   h.assertClean();
 });

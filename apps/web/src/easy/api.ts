@@ -1,5 +1,7 @@
 import { clipsPath } from '../takes/api.ts';
 import { randomUUID } from '../uuid.ts';
+import type { VideoType } from './super-easy/video-types.ts';
+import type { LyricsStyle, SongTrim } from './types.ts';
 
 export class EasyApiError extends Error {
   status: number;
@@ -131,7 +133,21 @@ export function createEasyApi(fetchImpl: FetchImpl) {
     planBrief(prompt: any, decisions?: any) {
       return request('POST', '/api/brief', { prompt, mode: 'plan', decisions });
     },
-    buildVideo({ brief, provider, motionModel, sessionId }: { brief: any; provider?: any; motionModel?: 'auto' | 'h3' | 'ltx' | 'klein'; sessionId?: string }) {
+    buildVideo({ brief, provider, motionModel, thinking, sessionId, videoType, songTrim, lyricsStyle, lyricsLrc, conversationId, attachmentSignature, narrationRevision, proposalRevision }: {
+      brief: any;
+      provider?: any;
+      motionModel?: 'auto' | 'h3' | 'ltx' | 'klein';
+      thinking?: 'disabled';
+      sessionId?: string;
+      videoType?: VideoType;
+      songTrim?: SongTrim | null;
+      lyricsStyle?: LyricsStyle;
+      lyricsLrc?: string;
+      conversationId?: string;
+      attachmentSignature?: string;
+      narrationRevision?: { packageId: string; baseRevision: number; note: string; recoveryProductionId?: string };
+      proposalRevision?: { packageId: string; baseRevision: number; note: string };
+    }) {
       // /api/agent takes the provider id and model as top-level fields. Easy
       // callers pass the selection object from Agent settings, so flatten it
       // here; a bare provider id is accepted too.
@@ -145,37 +161,55 @@ export function createEasyApi(fetchImpl: FetchImpl) {
       return request('POST', '/api/agent', {
         brief,
         ...(motionModel ? { motionModel } : {}),
+        ...(thinking ? { thinking } : {}),
         ...(chosen && chosen !== 'none' ? { provider: chosen } : {}),
         ...(chosen && chosen !== 'none' && model ? { model } : {}),
         ...(sessionId ? { sessionId } : {}),
+        ...(videoType ? { videoType } : {}),
+        ...(songTrim ? { songTrim } : {}),
+        ...(videoType === 'music-video' && (lyricsStyle === 'caption' || lyricsStyle === 'reel' || (lyricsLrc ?? '').trim() !== '') ? {
+          lyricsStyle: lyricsStyle ?? 'off',
+          lyricsLrc: lyricsLrc ?? '',
+        } : {}),
+        ...(conversationId ? { conversationId } : {}),
+        ...(attachmentSignature ? { attachmentSignature } : {}),
+        ...(narrationRevision ? { narrationRevision } : {}),
+        ...(proposalRevision ? { proposalRevision } : {}),
       });
     },
     getAgentProgress(sessionId: string) {
       return request('GET', `/api/agent/progress?sessionId=${encodeURIComponent(sessionId)}`);
     },
+    cancelAgent(sessionId: string) {
+      return request('POST', '/api/agent/cancel', { sessionId });
+    },
     createConversation() {
       return request('POST', '/api/conversations');
     },
-    async createProduction({ conversationId, packageId }: { conversationId: any; packageId: any }) {
+    async createProduction({ conversationId, packageId, expectedPackageRevision }: { conversationId: any; packageId: any; expectedPackageRevision?: number }) {
       return request('POST', '/api/productions', {
         commandId: randomUUID(),
         idempotencyKey: randomUUID(),
         kind: 'production.create',
-        expected: { productionRevision: 0 },
+        expected: { productionRevision: 0, ...(expectedPackageRevision !== undefined ? { packageRevision: expectedPackageRevision } : {}) },
         payload: { conversationId, packageId },
       });
     },
     getProduction,
+    getNarrationFit(id: string) {
+      return request('GET', `/api/productions/${encodeURIComponent(id)}/narration-fit`);
+    },
     sendCommand(id: any, envelope: any) {
       return request('POST', `/api/productions/${encodeURIComponent(id)}/commands`, envelope);
     },
-    proposeEasyPlan(id: any, body: { level: any; compute: any; onlyShotIds?: string[]; chip?: string }) {
-      const payload: { level: any; compute: any; onlyShotIds?: string[]; chip?: string } = {
+    proposeEasyPlan(id: any, body: { level: any; compute: any; onlyShotIds?: string[]; chip?: string; expectedPackageRevision?: number }) {
+      const payload: { level: any; compute: any; onlyShotIds?: string[]; chip?: string; expectedPackageRevision?: number } = {
         level: body.level,
         compute: body.compute,
       };
       if (body.onlyShotIds !== undefined) payload.onlyShotIds = body.onlyShotIds;
       if (body.chip !== undefined) payload.chip = body.chip;
+      if (body.expectedPackageRevision !== undefined) payload.expectedPackageRevision = body.expectedPackageRevision;
       return request('POST', `/api/productions/${encodeURIComponent(id)}/easy-plan`, payload);
     },
     proposeActionPlan(id: any, body: any) {
@@ -200,6 +234,9 @@ export function createEasyApi(fetchImpl: FetchImpl) {
     },
     startRun(body: any) {
       return request('POST', '/api/run', body);
+    },
+    generateLocalNarration(body: { packageId: string; productionId: string; baseRevision: number; recoveryInputs?: unknown }) {
+      return request('POST', '/api/local-narration', body);
     },
     getRun(id: any) {
       return request('GET', `/api/run/${encodeURIComponent(id)}`);
@@ -242,4 +279,3 @@ export function createEasyApi(fetchImpl: FetchImpl) {
     },
   };
 }
-

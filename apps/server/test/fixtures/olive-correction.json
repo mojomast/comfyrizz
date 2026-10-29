@@ -1,0 +1,19 @@
+{
+  "source": "olive-anchor-20261029/runtime/conversations/chat_45a80eee-c393-469f-b1e1-cf6e75dc181a.json",
+  "message": "Correct the existing OLIVE ON LINEN project before any generation. Keep exactly one 6-second silent scene and the existing single Klein starting frame plus single LTX I2V plate. Remove the accidental human-adults prefix from all generation prompts and the proposal look; this is an inanimate olive-only macro still life, no people or hands. Remove the starting keyframe from the scene foreground: it is conditioning input only, not an overlay. The single LTX plate must be the full-frame visible image for the entire six seconds, without any foreground, titles, transitions or audio. Remove orphan unused generated assets a_img_fc74f7c56dc2a5a9 and a_vid_851fed0d554d516c; retain only a_img_5e53b789d50e2324 and a_vid_dda0ffcac81f83b1 with the existing dependency and dimensions. Do not create extra candidates or assets; do not generate or approve paid work. Preserve exact one olive straight roll left to right then full rest for final two seconds. Apply these targeted edits to this existing project.",
+  "responseProjectId": "pkg_8c391679f6224b40a9cbacecbfaf37b9",
+  "responseScene": {
+    "id": "s1",
+    "layout": "hero",
+    "headline": "OLIVE ON LINEN",
+    "sub": "",
+    "body": "",
+    "items": [],
+    "footnote": "",
+    "narration": "",
+    "seconds": 6,
+    "visual": "Full-frame LTX I2V plate, edge to edge, no inset and no overlay. Inanimate macro still life: one green olive on natural linen under soft raking cinematic-dark light, shallow depth of field. The olive makes one straight roll left to right, then settles completely still and holds for the final two seconds. No hands, no people, no props entering frame, no text, no inset keyframe image.",
+    "mediaType": "image",
+    "transition": {"type": "none"}
+  }
+}

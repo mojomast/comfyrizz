@@ -62,12 +62,13 @@ test('presets: three providers, OpenCode fallback key and session header', () =>
   assert.equal(oc.sessionHeader, 'x-opencode-session');
   assert.equal(oc.headers['User-Agent'], 'comfyrizz/0.1');
   assert.equal(oc.model, 'deepseek-v4.1-flash');
-  assert.equal(oc.reasoningEffort, 'max');
+  assert.equal(oc.reasoningEffort, 'low');
+  assert.equal(oc.maxTokens, 8192);
   const custom = resolveProvider('custom', { env: {} });
   assert.equal(custom.apiKey, null);
   assert.equal(custom.reasoningEffort, undefined);
   const directDeepSeek = resolveProvider('custom', { env: {}, baseUrl: 'https://api.deepseek.com/v1', model: 'deepseek-flash' });
-  assert.equal(directDeepSeek.reasoningEffort, 'max');
+  assert.equal(directDeepSeek.reasoningEffort, 'low');
   assert.throws(() => resolveProvider('openrouter', { env: {} }), /requires OPENROUTER_API_KEY/);
   assert.throws(() => resolveProvider('openrouter', { env: { OPENROUTER_API_KEY: 'secret' }, apiKey: null }), /requires/);
 });
@@ -104,7 +105,7 @@ test('streams text and usage, sends bearer + session header and keeps tools out 
   assert.ok(noTools.some(chunk => chunk.type === 'done'));
 });
 
-test('OpenCode Go DeepSeek defaults to explicit max reasoning on the wire', async () => {
+test('OpenCode Go DeepSeek defaults to bounded low reasoning on the wire', async () => {
   let body: any;
   const fetchImpl = (async (_url: string | URL | Request, init?: RequestInit) => {
     body = JSON.parse(String(init?.body));
@@ -113,7 +114,21 @@ test('OpenCode Go DeepSeek defaults to explicit max reasoning on the wire', asyn
   const provider = resolveProvider('opencode-go', { env: { OPENCODE_GO_API_KEY: 'k' }, baseUrl: 'http://mock/v1' });
   await collect(createOpenAICompatibleModel({ ...provider, fetchImpl, maxRetries: 0 }));
   assert.equal(body.model, 'deepseek-v4.1-flash');
-  assert.equal(body.reasoning_effort, 'max');
+  assert.equal(body.reasoning_effort, 'low');
+  assert.equal(body.max_tokens, 8192);
+});
+
+test('truncated or interrupted streams cannot execute even valid partial tool calls', async () => {
+  for (const finish of ['length', 'insufficient_system_resource', null]) {
+    const fetchImpl = (async () => sse([
+      { choices: [{ delta: { tool_calls: [{ index: 0, id: 'c', function: { name: 'ping', arguments: '{"value":"x"}' } }] }, finish_reason: finish }] },
+      { choices: [], usage: { prompt_tokens: 5, completion_tokens: 8 } },
+    ])) as typeof fetch;
+    const chunks = await collect(createOpenAICompatibleModel(config(fetchImpl)));
+    assert.equal(chunks.some(chunk => chunk.type === 'tool_call'), false);
+    assert.ok(chunks.some(chunk => chunk.type === 'error' && chunk.code === (finish ? `finish_${finish}` : 'incomplete_tool_calls')));
+    assert.ok(chunks.some(chunk => chunk.type === 'usage' && chunk.output === 8));
+  }
 });
 
 test('DeepSeek thinking mode can be explicitly disabled on the wire', async () => {
@@ -175,6 +190,18 @@ test('malformed tool JSON is an error, not an executed call', async () => {
   assert.equal((error as { toolCallId?: string }).toolCallId, 'call_bad');
 });
 
+test('one malformed call discards its entire completed batch', async () => {
+  const fetchImpl = (async () => sse([
+    { choices: [{ delta: { tool_calls: [
+      { index: 0, id: 'good', function: { name: 'ping', arguments: '{"value":"ok"}' } },
+      { index: 1, id: 'bad', function: { name: 'ping', arguments: '{"value":' } },
+    ] }, finish_reason: 'tool_calls' }] },
+  ])) as typeof fetch;
+  const chunks = await collect(createOpenAICompatibleModel(config(fetchImpl)));
+  assert.equal(chunks.some(chunk => chunk.type === 'tool_call'), false);
+  assert.ok(chunks.some(chunk => chunk.type === 'error' && chunk.code === 'invalid_tool_arguments'));
+});
+
 test('retries 429 with Retry-After, then streams', async () => {
   let calls = 0;
   const fetchImpl = (async () => {
@@ -234,7 +261,7 @@ test('wire messages distinguish absent reasoning from an explicitly empty field'
     const assistants = JSON.parse(String(init?.body)).messages.filter((m: ChatMessage) => m.role === 'assistant');
     assert.equal(Object.hasOwn(assistants[0], 'reasoning_content'), false);
     assert.equal(assistants[1].reasoning_content, '');
-    return sse([{ choices: [{ delta: { content: 'ok' } }] }]);
+    return sse([{ choices: [{ delta: { content: 'ok' }, finish_reason: 'stop' }] }]);
   }) as typeof fetch;
   for await (const _chunk of createOpenAICompatibleModel(config(fetchImpl)).stream({ ...request, messages: [
     { role: 'assistant', content: 'old reply' },

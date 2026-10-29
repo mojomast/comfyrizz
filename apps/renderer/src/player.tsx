@@ -14,7 +14,9 @@ import { presentationFor } from './motion/presentations';
 import type { MediaSidecar } from './media';
 import { MediaDimsProvider, MissingMediaProvider, type MediaDimsMap } from './media';
 import { CaptionOverlay } from './captions';
+import { LyricsOverlay, type ResolvedLyrics } from './lyrics';
 import { FontFamilyContext, brandFontFamily, ensureBrandFonts } from './theme';
+import { ProceduralDrawing } from './procedural-drawing';
 
 /**
  * Composes the compiled timeline. Each scene is a TransitionSeries sequence; the
@@ -28,21 +30,27 @@ export function TimelinePlayer({
   timeline,
   scenes,
   captions,
+  lyrics,
+  reducedMotion = false,
   presenters,
   generatedAssets,
   media,
   missingMedia,
   mediaDims,
+  fontSources,
 }: {
   pkg: PackageV1;
   timeline: Timeline;
   scenes?: Scene[];
   captions?: TimelineCaption[];
+  lyrics?: ResolvedLyrics | null;
+  reducedMotion?: boolean;
   presenters?: TimelinePresenter[];
   generatedAssets?: Record<string, InlineAsset>;
   media?: MediaSidecar;
   missingMedia?: string[];
   mediaDims?: MediaDimsMap;
+  fontSources?: Record<string, string> | null;
 }) {
   // Merge the package's copy/transition vocabulary over the committed timing. The
   // timeline alone has overlap frames but no transition types, so without this every
@@ -53,13 +61,13 @@ export function TimelinePlayer({
   const { width, height } = useVideoConfig();
   // B1: load any brand fonts before measuring, and typeset the whole run with
   // the kit's first family (Inter when the kit has none).
-  ensureBrandFonts(pkg);
+  ensureBrandFonts(pkg, fontSources);
   const fontFamily = brandFontFamily(pkg);
   const children: React.ReactNode[] = [];
   list.forEach((scene, index) => {
     children.push(
       <TransitionSeries.Sequence key={scene.id} durationInFrames={scene.durationInFrames}>
-        <SceneView scene={scene} pkg={pkg} media={media} />
+        {scene.drawing ? <ProceduralDrawing drawing={scene.drawing} /> : <SceneView scene={scene} pkg={pkg} media={media} />}
       </TransitionSeries.Sequence>,
     );
     const transition = scene.transitionOutFrames ?? 0;
@@ -80,6 +88,7 @@ export function TimelinePlayer({
       {/* P-pres: presenter above the scene stack, captions (z 100) above both. */}
       <PresenterOverlay presenters={presenters ?? timeline.presenters} pkg={pkg} />
       {captions && <CaptionOverlay captions={captions} pkg={pkg} />}
+      {lyrics && <LyricsOverlay lyrics={lyrics} reducedMotion={reducedMotion} />}
     </FontFamilyContext.Provider>
   );
   return generatedAssets ? (

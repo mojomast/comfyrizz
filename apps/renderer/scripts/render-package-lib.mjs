@@ -13,9 +13,11 @@ import { compileTimeline, measuredFromReport } from '../../../packages/planner/d
 import { renderCheck, sanitizeSvg, SANITIZER_VERSION } from '../../../packages/vector/dist/src/index.js';
 import { listMediaFiles } from '../src/media-model.js';
 import { narrationWarning } from '../src/audio-model.js';
+import { timelineWithMasterMusicDuration } from '../src/audio-mix-model.js';
 import { collectMediaDims, dimMismatches } from '../src/media-dims.js';
 import { normalizeMixLoudness } from './mix-loudness.mjs';
 import { loadCompositionManifest } from '../../../packages/compositions/src/index.mjs';
+import { assertModelContribution } from '../../../packages/jobs/src/model-contribution.mjs';
 
 const here = dirname(fileURLToPath(import.meta.url));
 export const repoRoot = resolve(here, '..', '..', '..');
@@ -31,6 +33,15 @@ function assetError(assetId, code, message) {
   });
 }
 
+function isLegacyStubSvg(raw) {
+  const color = '#[0-9a-fA-F]{6}';
+  const icon = new RegExp(`^<svg xmlns="http://www\\.w3\\.org/2000/svg" viewBox="0 0 64 64"><circle cx="32" cy="32" r="26" fill="none" stroke="(${color})" stroke-width="6"/><path d="M20 34l9 9 16-20" fill="none" stroke="\\1" stroke-width="6" stroke-linecap="round" stroke-linejoin="round"/></svg>$`);
+  const diagram = new RegExp(`^<svg xmlns="http://www\\.w3\\.org/2000/svg" viewBox="0 0 320 180"><rect x="12" y="60" width="90" height="60" rx="10" fill="(${color})"/><rect x="218" y="60" width="90" height="60" rx="10" fill="${color}"/><path d="M102 90h116" stroke="\\1" stroke-width="6" stroke-linecap="round"/><path d="M206 78l14 12-14 12" fill="none" stroke="\\1" stroke-width="6" stroke-linecap="round" stroke-linejoin="round"/></svg>$`);
+  const pattern = new RegExp(`^<svg xmlns="http://www\\.w3\\.org/2000/svg" viewBox="0 0 160 160"><defs><pattern id="dots" width="40" height="40" patternUnits="userSpaceOnUse"><circle cx="20" cy="20" r="6" fill="${color}"/></pattern></defs><rect width="160" height="160" fill="${color}"/><rect width="160" height="160" fill="url\\(#dots\\)" opacity="0\\.35"/></svg>$`);
+  const bars = new RegExp(`^<svg xmlns="http://www\\.w3\\.org/2000/svg" viewBox="0 0 200 120"><rect width="200" height="120" rx="16" fill="${color}"/><rect x="24" y="30" width="24" height="60" rx="8" fill="(${color})"/><rect x="64" y="46" width="24" height="44" rx="8" fill="\\1"/><rect x="104" y="20" width="24" height="70" rx="8" fill="\\1"/><rect x="144" y="54" width="24" height="36" rx="8" fill="\\1"/></svg>$`);
+  return [icon, diagram, pattern, bars].some(template => template.test(raw.trim()));
+}
+
 export function inlineGeneratedAssets(pkg, packageDir) {
   const assets = {};
   for (const [id, asset] of Object.entries(pkg.assets ?? {})) {
@@ -42,6 +53,12 @@ export function inlineGeneratedAssets(pkg, packageDir) {
       raw = readFileSync(file, 'utf8');
     } catch {
       throw assetError(id, 'SVG_ASSET_MISSING', `could not read ${asset.file}`);
+    }
+    // Older live plans recorded the deterministic test generator as llm-svg.
+    // Match its complete markup, including the palette inferred from the asset,
+    // so existing misleading packages cannot silently export again.
+    if (asset?.gen?.generator === 'llm-svg') {
+      if (isLegacyStubSvg(raw)) throw assetError(id, 'SVG_TEST_PLACEHOLDER', 'this asset is a deterministic test placeholder; regenerate the requested visual before rendering');
     }
     const sanitized = sanitizeSvg(raw);
     if (!sanitized.ok) {
@@ -77,7 +94,8 @@ function assetFiles(pkg) {
 }
 
 function needsMediaPublicDir(pkg) {
-  return Object.values(pkg.assets ?? {}).some(asset => asset?.kind === 'image' || asset?.kind === 'video' || asset?.kind === 'audio');
+  return (pkg.theme?.fonts ?? []).some(font => typeof font?.file === 'string')
+    || Object.values(pkg.assets ?? {}).some(asset => asset?.kind === 'image' || asset?.kind === 'video' || asset?.kind === 'audio');
 }
 
 /** A9: the final export resolution. The Player preview stays at the package's working size. */
@@ -110,6 +128,7 @@ export function preferUpscaledAssets(pkg, packageDir) {
     if (!existsSync(join(packageDir, variant.file))) continue;
     const base = asset.file;
     asset.file = variant.file;
+    asset.sha256 = variant.sha256;
     used.push({ id, file: variant.file, base, ...(variant.width && variant.height ? { width: variant.width, height: variant.height } : {}) });
   }
   return { pkg: out, used };
@@ -184,8 +203,10 @@ export function applyFinalRender(pkg, packageDir, final = {}) {
  * chunk seconds to compileTimeline so scene lengths and captions match the
  * audio instead of falling back to preferredFrames and rendering silent.
  */
-export function narrationOptions(packageDir) {
-  const durationsPath = join(packageDir, 'audio', 'durations.json');
+export function narrationOptions(packageDir, pkg = null) {
+  const file = pkg?.assets?.a_narration?.file;
+  const scoped = typeof file === 'string' && /^audio\/generated\/[A-Za-z0-9_-]+\/narration\.norm\.wav$/.test(file);
+  const durationsPath = scoped ? join(packageDir, dirname(file), 'durations.json') : join(packageDir, 'audio', 'durations.json');
   if (!existsSync(durationsPath)) return {};
   return measuredFromReport(JSON.parse(readFileSync(durationsPath, 'utf8')));
 }
@@ -243,7 +264,7 @@ function remotionArguments({ still, compositionId, outputPath, propsPath, public
   ];
 }
 
-function stagePackageRender(packagePath, outputPath, { onLog = () => {}, publicDir, compositionId = 'PackageDemo', still = false, frame = 0, final = null, narration, scale, mixAudio = true, normalizeLoudness = true, captionOverrides: explicitOverrides, editor = null } = {}) {
+function stagePackageRender(packagePath, outputPath, { onLog = () => {}, publicDir, compositionId = 'PackageDemo', still = false, frame = 0, final = null, intent = 'final', narration, scale, mixAudio = true, normalizeLoudness = true, captionOverrides: explicitOverrides, editor = null } = {}) {
   const raw = JSON.parse(readFileSync(packagePath, 'utf8'));
   const packageDir = dirname(packagePath);
   // A9: validate the package as stored — the base `file` and `variants` are checked (H12 variant
@@ -256,6 +277,7 @@ function stagePackageRender(packagePath, outputPath, { onLog = () => {}, publicD
   // A9: the final-export option overrides the format to 1920×1080 and prefers upscaled media.
   const applied = final ? applyFinalRender(raw, packageDir, typeof final === 'boolean' ? {} : final) : null;
   let pkg = applied?.pkg ?? raw;
+  if (!still && intent !== 'draft') assertModelContribution({ pkg, packageDir });
   // L1: a language variant has its own narration text, so callers pass the
   // variant's measured durations (or `{}` to re-estimate from the translated
   // `scene.narration`) instead of the base package's English durations.
@@ -263,10 +285,11 @@ function stagePackageRender(packagePath, outputPath, { onLog = () => {}, publicD
     ? explicitOverrides
     : (Array.isArray(editor?.captionOverrides) ? editor.captionOverrides : []);
   const compileOptions = {
-    ...(narration !== undefined ? narration : narrationOptions(packageDir)),
+    ...(narration !== undefined ? narration : narrationOptions(packageDir, pkg)),
     ...(captionOverrides.length === 0 ? {} : { captionOverrides }),
   };
-  let timeline = compileTimeline(pkg, compileOptions);
+  let timeline = timelineWithMasterMusicDuration(pkg, compileTimeline(pkg, compileOptions));
+  if (!still && intent !== 'draft') assertModelContribution({ pkg, packageDir, timeline });
   if (loadCompositionManifest(packageDir, pkg)) {
     if (pkg.voice?.enabled && timeline.provisional) throw new Error('Composition narration timing is still provisional');
     const task = spawnSync(process.execPath, [join(here, 'composition-task.mjs')], {
@@ -276,7 +299,7 @@ function stagePackageRender(packagePath, outputPath, { onLog = () => {}, publicD
     if (task.status !== 0) throw new Error(`Composition preparation failed: ${(task.stderr || task.error?.message || '').slice(-1500)}`);
     pkg = JSON.parse(task.stdout).pkg;
     if (!validatePackage(pkg).valid) throw new Error('Materialized render package failed validation');
-    timeline = compileTimeline(pkg, compileOptions);
+    timeline = timelineWithMasterMusicDuration(pkg, compileTimeline(pkg, compileOptions));
   }
   if (applied) {
     onLog(`final render ${applied.width}×${applied.height}${applied.used.length > 0 ? `, ${applied.used.length} upscaled variant(s)` : ', no upscaled variants'}`);
@@ -321,7 +344,7 @@ function finishPackageRender(staged, outputPath) {
   // `audio` block are touched, so a silent video stays byte-identical.
   let mixLoudness = null;
   if (!staged.still && staged.mixAudio && staged.normalizeLoudness && staged.pkg.audio) {
-    mixLoudness = normalizeMixLoudness(outputPath, { onLog: staged.onLog });
+    mixLoudness = normalizeMixLoudness(outputPath, { onLog: staged.onLog, pkg: staged.pkg });
   }
   return {
     output: outputPath,

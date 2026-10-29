@@ -33,6 +33,8 @@ export type { CutdownResult, CutdownSeconds, PresenterPlan, VoiceFn, VoiceInput,
 export type { AgentTool, PlannedImage, SvgAssetResult, ToolsetOptions } from './tools.js';
 export { classifyProductionIntent } from './production-intent.js';
 export type { ProductionIntent, ProductionIntentKind } from './production-intent.js';
+export { VIDEO_TYPES, VIDEO_TYPE_IDS, getVideoType, isVideoType } from './video-types.js';
+export type { VideoType, VideoTypeDefinition } from './video-types.js';
 export { MOTION_MODELS, parseMotionModel, autoMotionModel, resolveShotMotionModel } from './motion-model.js';
 export type { MotionModel, ResolvedMotionModel, AutoResolvedMotionModel, ShotMotionDirection } from './motion-model.js';
 export { runAgent } from './agent.js';
@@ -311,3 +313,4 @@ export type {
   PresenterSetResult,
   PresenterFinding,
 } from './presenter.js';
+export { runPiRuntime, piRequest, toPiMessages, fromPiMessages } from './pi-runtime.js';

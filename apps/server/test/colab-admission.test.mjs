@@ -4,6 +4,7 @@
 // finishes, fails or is cancelled. Local only: a fake worker, no network, no Google Colab
 // runtime, no secrets.
 import { test } from 'node:test';
+import { seedMockContribution } from './helpers/comfy-contribution.mjs';
 import assert from 'node:assert/strict';
 import { createServer } from 'node:http';
 import { cpSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
@@ -83,7 +84,7 @@ async function setup(t, { render, renderScene } = {}) {
   // The store keeps packages in <runtime>/packages, and the pipeline stages the package's
   // files into the run, so the example assets have to be there too.
   cpSync(join(REPO, 'examples', 'launch-demo', 'assets'), join(runtimeDir, 'packages', 'assets'), { recursive: true });
-  app.store.seed(structuredClone(seed));
+  seedMockContribution(app.store, structuredClone(seed));
   const server = createServer(app.handler);
   await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
   t.after(async () => {

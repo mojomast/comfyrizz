@@ -9,6 +9,9 @@ import { dbToLinear } from './audio-mix-model.js';
 import { resolvePackageComposition } from './composition-model.js';
 import { resolveMediaSrc } from './media-src.js';
 import { LookLayer, type LookSidecar } from './look-layer';
+import { MasterMusicMuteProvider } from './media';
+import { MusicReactiveOverlay, type MusicReactive } from './music-reactive';
+import { palette } from './theme';
 
 export type MediaSources = Record<string, string>;
 
@@ -64,6 +67,7 @@ export function PackageComposition({
   missingMedia,
   mediaDims,
   mixAudio = true,
+  reducedMotion = false,
   mediaSources = null,
   look = null,
 }: {
@@ -75,6 +79,7 @@ export function PackageComposition({
   missingMedia?: string[];
   mediaDims?: MediaDimsMap;
   mixAudio?: boolean;
+  reducedMotion?: boolean;
   mediaSources?: MediaSources | null;
   look?: LookSidecar | null;
 }) {
@@ -86,13 +91,24 @@ export function PackageComposition({
   const mix = resolved.mix;
   const fps = timeline.fps ?? 30;
   const missing = new Set(missingMedia ?? []);
+  const masterMusic = resolved.mixAudio && mix.music?.master === true;
+  const musicTrim = mix.music && typeof mix.music.startSeconds === 'number' && typeof mix.music.endSeconds === 'number'
+    ? { startSeconds: mix.music.startSeconds, endSeconds: mix.music.endSeconds }
+    : null;
   return (
-    <>
+    <MasterMusicMuteProvider enabled={masterMusic}>
       {resolved.narration && !resolved.narration.missing ? <Audio src={src(resolved.narration.file)} pauseWhenBuffering /> : null}
       {resolved.mixAudio ? (
         <>
           {mix.music && !missing.has(mix.music.file) ? (
-            <SafeAudio file={mix.music.file} src={src(mix.music.file)} gains={mix.music.gains} loop={mix.music.loop} />
+            <SafeAudio
+              file={mix.music.file}
+              src={src(mix.music.file)}
+              gains={mix.music.gains}
+              loop={mix.music.loop}
+              {...(musicTrim ? { trimBefore: Math.max(0, Math.round(musicTrim.startSeconds * fps)) } : {})}
+              {...(typeof mix.music.durationInFrames === 'number' ? { durationInFrames: mix.music.durationInFrames } : {})}
+            />
           ) : null}
           {mix.dialogue.map(dialogue =>
             missing.has(dialogue.file) ? null : (
@@ -117,18 +133,30 @@ export function PackageComposition({
           )}
         </>
       ) : null}
+      {mix.music?.reactive ? (
+        <MusicReactiveOverlay
+          src={src(mix.music.file)}
+          missing={missing.has(mix.music.file)}
+          trim={musicTrim}
+          reactive={mix.music.reactive as MusicReactive}
+          color={palette(pkg)[2]}
+        />
+      ) : null}
       <LookLayer look={look} palette={pkg.theme?.palette}>
         <TimelinePlayer
           pkg={pkg}
           timeline={timeline}
+          fontSources={mediaSources}
           {...(scenes ? { scenes } : {})}
           generatedAssets={generatedAssets}
           media={media}
           missingMedia={missingMedia}
           mediaDims={mediaDims}
           {...(resolved.captions ? { captions: resolved.captions } : {})}
+          {...(resolved.lyrics ? { lyrics: resolved.lyrics } : {})}
+          reducedMotion={reducedMotion}
         />
       </LookLayer>
-    </>
+    </MasterMusicMuteProvider>
   );
 }

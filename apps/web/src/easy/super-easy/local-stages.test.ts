@@ -94,3 +94,10 @@ test('a failed run marks the stage it stopped in', () => {
   assert.equal(late.render.status, 'error');
   assert.equal(late.plan.status, 'done');
 });
+
+test('measured narration failure stops Voice before Video starts', () => {
+  const pkg = { ...PKG, voice: { enabled: true, engine: 'kokoro' }, scenes: [{ id: 's1', narration: 'Hello' }] };
+  const readings = localStageReadings({ phase: 'run', failed: true, narrationFailed: true, pkg, packageId: 'pkg_1' });
+  assert.equal(readings.voice.status, 'error');
+  assert.equal(readings.render, undefined);
+});

@@ -10,6 +10,7 @@
  */
 import { spawnSync } from 'node:child_process';
 import { renameSync, rmSync } from 'node:fs';
+import { hasMasterMusic } from '../src/audio-mix-model.js';
 
 /** The same target `packages/tts/scripts/narrate.mjs` normalises narration to. */
 export const MIX_LOUDNESS_TARGET = Object.freeze({ integratedLufs: -16, truePeakDbtp: -1, rangeLu: 11 });
@@ -61,7 +62,9 @@ function staticGainFilter(measured, target) {
 }
 
 /**
- * Normalise a rendered file's audio to `target`, copying the video stream.
+ * Finish a rendered file's audio, copying the video stream when normalising.
+ * Pass the effective `pkg` so authoritative music masters keep their authored
+ * level; ordinary mixes (and legacy callers without a package) use `target`.
  *
  * Two passes: `measureLoudness` reads the file, then loudnorm applies that
  * measurement with `linear=true`, which is a single gain and does NOT pump the
@@ -71,7 +74,14 @@ function staticGainFilter(measured, target) {
  * Returns `{ applied: false, reason }` for a silent file, otherwise the measured
  * input and output loudness. The file is replaced in place.
  */
-export function normalizeMixLoudness(path, { target = MIX_LOUDNESS_TARGET, onLog = () => {} } = {}) {
+export function normalizeMixLoudness(path, { target = MIX_LOUDNESS_TARGET, onLog = () => {}, pkg = null } = {}) {
+  // Trim/reactive music already owns sole-master routing in the audio model.
+  // Keep its authored level and envelope; AAC export is still a re-encode,
+  // not a bit-identical copy of the uploaded source. Ordinary mixes retain M2.
+  if (hasMasterMusic(pkg)) {
+    onLog('preserved music master level; skipped mix loudness normalization');
+    return { applied: false, reason: 'preserve music master' };
+  }
   if (!hasAudioStream(path)) return { applied: false, reason: 'no audio stream' };
   const measured = measureLoudness(path);
   // A silent mix has nothing to normalise; leave it as it is.

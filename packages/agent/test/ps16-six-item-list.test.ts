@@ -212,7 +212,7 @@ test('PS16 a shared-dataset comparison brief still gets compare and keeps the li
     scenes: [
       { id: 's_chart', layout: 'chart', copy: { headline: 'Regions' }, data: { dataset: 'd_regions', display: 'bar' } },
       { id: 's_stat', layout: 'stat', copy: { headline: 'North', body: '12' }, data: { dataset: 'd_regions', display: 'number' } },
-      { id: 's_compare', layout: 'hero', copy: { headline: 'North versus South' }, data: { dataset: 'd_regions', display: 'bar' } },
+      { id: 's_compare', layout: 'compare', copy: { headline: 'North versus South' }, data: { dataset: 'd_regions', display: 'bar' }, media: [{ procedural: { pattern: 'gradient', seed: 12 } }, { procedural: { pattern: 'grid', seed: 19 } }] },
       { id: 's_list', layout: 'list', copy: { headline: 'Six points' }, items: SIX_ITEMS },
     ],
   }) as any;

@@ -58,7 +58,7 @@ test('CPU agent slice -> valid package -> ffprobe-checked MP4', { timeout: 600_0
     const packagePath = join(dir, 'package.json');
     writeFileSync(packagePath, JSON.stringify(slice.package, null, 2));
     const output = join(dir, 'agent-slice.mp4');
-    const rendered = renderPackage(packagePath, output, { onLog: () => {} });
+    const rendered = renderPackage(packagePath, output, { onLog: () => {}, intent: 'draft' });
     assert.ok(rendered.bytes > 100_000, `expected a real MP4, got ${rendered.bytes} bytes`);
 
     const probe = JSON.parse(

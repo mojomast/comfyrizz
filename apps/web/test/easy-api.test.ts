@@ -39,6 +39,56 @@ test('buildVideo', async () => {
   assert.deepEqual(JSON.parse(calls[0].init.body), { brief: 'b', provider: 'p' });
 });
 
+test('buildVideo sends explicit thinking selection to the agent endpoint', async () => {
+  const { fetchImpl, calls } = makeFetch([{ status: 200, body: {} }]);
+  await createEasyApi(fetchImpl).buildVideo({ brief: 'b', provider: { provider: 'opencode-go', model: 'deepseek-v4.1-flash' }, thinking: 'disabled' });
+  assert.equal(JSON.parse(calls[0].init.body).thinking, 'disabled');
+});
+
+test('buildVideo adds video type and context identity only when supplied', async () => {
+  const { fetchImpl, calls } = makeFetch([{ status: 200, body: {} }, { status: 200, body: {} }]);
+  const api = createEasyApi(fetchImpl);
+  await api.buildVideo({
+    brief: 'b',
+    videoType: 'data-story',
+    songTrim: { startSeconds: 3, endSeconds: 27 },
+    conversationId: 'chat_context123',
+    attachmentSignature: 'ctx_12345678_1',
+  });
+  assert.deepEqual(JSON.parse(calls[0].init.body), {
+    brief: 'b',
+    videoType: 'data-story',
+    songTrim: { startSeconds: 3, endSeconds: 27 },
+    conversationId: 'chat_context123',
+    attachmentSignature: 'ctx_12345678_1',
+  });
+
+  await api.buildVideo({ brief: 'legacy' });
+  assert.deepEqual(JSON.parse(calls[1].init.body), { brief: 'legacy' }, 'the exact legacy body is unchanged');
+});
+
+test('buildVideo forwards exact Music Video LRC and omits empty-off or non-music lyric fields', async () => {
+  const { fetchImpl, calls } = makeFetch([
+    { status: 200, body: {} },
+    { status: 200, body: {} },
+    { status: 200, body: {} },
+  ]);
+  const api = createEasyApi(fetchImpl);
+  const raw = '\n[00:01.00]<00:01.00>Exact <00:01.50>lyrics\r\n[00:03.00]Do not canonicalize\n';
+  await api.buildVideo({ brief: 'creative brief only', videoType: 'music-video', lyricsStyle: 'reel', lyricsLrc: raw });
+  assert.deepEqual(JSON.parse(calls[0].init.body), {
+    brief: 'creative brief only',
+    videoType: 'music-video',
+    lyricsStyle: 'reel',
+    lyricsLrc: raw,
+  });
+
+  await api.buildVideo({ brief: 'empty off', videoType: 'music-video', lyricsStyle: 'off', lyricsLrc: '' });
+  assert.deepEqual(JSON.parse(calls[1].init.body), { brief: 'empty off', videoType: 'music-video' });
+  await api.buildVideo({ brief: 'other preset', videoType: 'data-story', lyricsStyle: 'caption', lyricsLrc: raw });
+  assert.deepEqual(JSON.parse(calls[2].init.body), { brief: 'other preset', videoType: 'data-story' });
+});
+
 test('buildVideo flattens an Agent settings selection for /api/agent', async () => {
   const { fetchImpl, calls } = makeFetch([
     { status: 200, body: {} },

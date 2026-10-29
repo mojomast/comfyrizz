@@ -1,7 +1,7 @@
 import { COPY, fill } from './copy.ts';
 import { escapeHtml } from './components.ts';
 import { createEasyApi } from './api.ts';
-import { createEasyStore, preserveUnsentPrompt, storageKey } from './store.ts';
+import { createEasyStore, planInputsHash, preserveUnsentPrompt, storageKey } from './store.ts';
 import { mountShell, renderShell } from './shell.ts';
 import { STEPS, stepIndex } from './steps.ts';
 import { initialRoute, nextUrl } from './router.ts';
@@ -13,7 +13,7 @@ import type { EasyHost, EasyState, EasyStepContext, EasyStepModule, StepFacts, S
 import { getMode, setMode, subscribeMode, type Mode } from '../ui/mode.ts';
 import { writePlan } from './plan-writer.ts';
 import { invalidatePlanSnapshot, requestFullPlanReview } from './steps/plan.ts';
-import { resumeFacts } from './resume.ts';
+import { recoverProductionIdentity, restoreNarrationFit, resumeFacts } from './resume.ts';
 import { approveAndGenerate, resetPlanDecisionAnswers, retryShot } from './approve-generate.ts';
 import { runCpuGenerate } from './cpu-path.ts';
 import { levelForState } from './steps/level.ts';
@@ -38,6 +38,9 @@ import { createProcedureCapture, type ProcedureCapture } from './procedure/captu
 import { readCaptureArmed, writeCaptureArmed } from './procedure/arm.ts';
 import { renderProcedureToggle } from './procedure/toggle.ts';
 import { PROCEDURE_COPY } from './procedure/copy.ts';
+import { createSuperEasyContextAttachments } from './super-easy/context-attachments.ts';
+import { mountCorrectionShutdown } from './correction-shutdown.ts';
+import { readPlanCard } from '../productions/cards/plan-card.ts';
 
 import './easy.css';
 
@@ -68,6 +71,7 @@ export interface EasyStudioDeps {
 export function mountEasyStudio(root: HTMLElement, baseHost: EasyHost, deps: EasyStudioDeps = {}): () => void {
   const doc = root.ownerDocument;
   const view = doc.defaultView;
+  const stopCorrectionShutdown = mountCorrectionShutdown(root, baseHost.apiFetch);
   let settings: ReturnType<typeof mountEasyAgentSettings> | null = null;
   const host: EasyHost = {
     ...baseHost,
@@ -96,6 +100,8 @@ export function mountEasyStudio(root: HTMLElement, baseHost: EasyHost, deps: Eas
   let superEasySnapshot: unknown = null;
   let superEasyTicket = 0;
   let superEasySession: SuperEasySession | null = null;
+  let narrationRecoveryChecked = false;
+  let narrationRecoveryReady = false;
   let primaryAction: () => void = () => host.openEditor();
   let cpuFlight: Promise<unknown> | null = null;
   let projectName: ProjectNameController | null = null;
@@ -117,6 +123,66 @@ export function mountEasyStudio(root: HTMLElement, baseHost: EasyHost, deps: Eas
     allShotsKept: false,
     exportCurrent: false,
   };
+
+  let conversationFlight: { generation: number; promise: Promise<string> } | null = null;
+  async function ensureEasyConversation(): Promise<string> {
+    const generation = store.generation();
+    const existing = store.get().chatId;
+    if (existing) return existing;
+    if (conversationFlight?.generation === generation) {
+      const shared = await conversationFlight.promise;
+      if (store.generation() !== generation) throw new Error('The conversation belongs to an earlier project.');
+      return shared;
+    }
+    const flight = (async () => {
+      const created = await api.createConversation();
+      if (store.generation() !== generation) throw new Error('The conversation belongs to an earlier project.');
+      const chatId = typeof created?.chatId === 'string'
+        ? created.chatId
+        : typeof created?.id === 'string'
+          ? created.id
+          : typeof created?.conversation?.id === 'string'
+            ? created.conversation.id
+            : '';
+      if (!chatId) throw new Error('The conversation did not return an id.');
+      if (store.generation() !== generation) throw new Error('The conversation belongs to an earlier project.');
+      store.patch({ chatId });
+      return chatId;
+    })();
+    const current = { generation, promise: flight };
+    conversationFlight = current;
+    try {
+      const chatId = await flight;
+      if (store.generation() !== generation) throw new Error('The conversation belongs to an earlier project.');
+      return chatId;
+    } finally {
+      if (conversationFlight === current) conversationFlight = null;
+    }
+  }
+
+  function patchSuperEasyInputs(partial: Partial<EasyState>): void {
+    const current = store.get();
+    const candidate = { ...current, ...partial };
+    const invalidate = current.plan.status === 'ready' && current.planHash !== planInputsHash(candidate);
+    store.patch({
+      ...partial,
+      ...(invalidate ? { plan: { ...current.plan, status: 'stale' as const } } : {}),
+    });
+  }
+
+  const contextAttachments = createSuperEasyContextAttachments({
+    apiFetch: (input, init) => host.apiFetch(input, init),
+    chatId: () => store.get().chatId,
+    ensureChatId: ensureEasyConversation,
+    videoType: () => store.get().videoType,
+    attachmentRevision: () => store.get().attachmentRevision,
+    generation: () => store.generation(),
+    onChange: ({ attachmentSignature, attachmentRevision }) => {
+      patchSuperEasyInputs({ attachmentSignature, attachmentRevision });
+      superEasy?.syncAttachments();
+    },
+    onStatus: () => superEasy?.syncAttachments(),
+  });
 
   settings = mountEasyAgentSettings({ apiFetch: (input, init) => host.apiFetch(input, init) });
   ask = createAskDrawer({
@@ -159,6 +225,57 @@ export function mountEasyStudio(root: HTMLElement, baseHost: EasyHost, deps: Eas
   }
 
   async function loadFacts(): Promise<StepFacts> {
+    const initial = store.get();
+    const productionId = new URLSearchParams(search()).get('production') ?? initial.productionId;
+    if (!narrationRecoveryChecked && productionId && initial.packageId && (!initial.productionId || initial.productionId === productionId)) {
+      narrationRecoveryChecked = true;
+      const generation = store.generation();
+      try {
+        const fit = await api.getNarrationFit(productionId);
+        const current = store.get();
+        if (generation === store.generation() && JSON.stringify(current) === JSON.stringify(initial) && !superEasySession) {
+          const restored = restoreNarrationFit(fit, host.getPackage(), productionId);
+          if (restored && (!current.idea.text.trim() || current.idea.text === restored.state.idea.text)) {
+            store.patch(restored.state);
+            ensureSuperEasySession().restoreNarrationFailure(restored.input, restored.failure);
+            narrationRecoveryReady = true;
+          } else if (fit.packageId === current.packageId && fit.packageRevision === host.getPackage()?.revision) {
+            store.patch({ productionId, generate: { status: 'error' } });
+            ensureSuperEasySession().restoreNarrationFailure({ prompt: '' }, { ok: false, code: 'CPU_FAILED', stage: 'run', retryable: false,
+              message: fit.blocked || 'The saved reviewed inputs cannot be verified against this project. Create a fresh proposal with the original source before revising narration.' });
+            narrationRecoveryReady = true;
+          }
+        }
+      } catch (error) {
+        // Older approved productions did not record narration failures. Do not
+        // turn a diagnostic or an absent render admission into an approval.
+        if ((error as { code?: string })?.code === 'NARRATION_FIT_NOT_FOUND' && new URLSearchParams(search()).has('production')) {
+          try {
+            const snapshot = await api.getProduction(productionId);
+            const card = readPlanCard(snapshot);
+            const admitted = await recoverProductionIdentity({ api, host, state: initial, productionId });
+            if (generation === store.generation() && JSON.stringify(store.get()) === JSON.stringify(initial) && !superEasySession && !admitted
+              && snapshot.production?.packageId === initial.packageId && card.status === 'ready' && card.approved && !card.stale) {
+              store.patch({ productionId, generate: { status: 'error' } });
+              ensureSuperEasySession().restoreNarrationFailure({ prompt: '' }, { ok: false, code: 'CPU_FAILED', stage: 'run', retryable: false,
+                message: 'No measured narration failure was saved for this approved production. Create a fresh proposal with the original source before revising narration.' });
+              narrationRecoveryReady = true;
+            }
+          } catch { /* Incomplete journals cannot establish recovery. */ }
+        }
+      }
+    }
+    if (productionId && initial.packageId && !initial.productionId && !initial.idea.text.trim()) {
+      const generation = store.generation();
+      try {
+        const recovered = await recoverProductionIdentity({ api, host, state: initial, productionId });
+        const current = store.get();
+        if (recovered && generation === store.generation() && current.packageId === initial.packageId
+          && !current.productionId && !current.idea.text.trim()) store.patch(recovered);
+      } catch {
+        // An incomplete or unavailable journal must not grant access.
+      }
+    }
     facts = await resumeFacts({ api, host, state: store.get() });
     return facts;
   }
@@ -217,6 +334,7 @@ export function mountEasyStudio(root: HTMLElement, baseHost: EasyHost, deps: Eas
     const create = deps.createSession ?? createSuperEasySession;
     superEasySession = create({
       api: api as never,
+      fetchImpl: (input, init) => host.apiFetch(input, init),
       host: superEasyRunHost(),
       store: {
         get: () => store.get(),
@@ -337,7 +455,26 @@ export function mountEasyStudio(root: HTMLElement, baseHost: EasyHost, deps: Eas
       procedure.mark('prompt', fill(PROCEDURE_COPY.prompt, { prompt: input.prompt }));
       procedure.mark('compute', input.compute === 'colab' ? PROCEDURE_COPY.computeColab : PROCEDURE_COPY.computeCpu);
     }
-    void session.generate({ prompt: input.prompt, compute: input.compute, ...(input.lengthS === undefined ? {} : { lengthS: input.lengthS }), motionModel: input.motionModel, setupConfirmed: input.setupConfirmed, proposalOnly: true });
+    void session.generate({
+      prompt: input.prompt,
+      compute: input.compute,
+      ...(input.lengthS === undefined ? {} : { lengthS: input.lengthS }),
+      motionModel: input.motionModel,
+      ...(input.deepSeekNoThinking ? { deepSeekNoThinking: true } : {}),
+      ...(input.videoType ? { videoType: input.videoType } : {}),
+      ...(input.songTrim ? { songTrim: { ...input.songTrim } } : {}),
+      ...(input.lyricsStyle !== undefined || input.lyricsLrc !== undefined ? {
+        lyricsStyle: input.lyricsStyle ?? 'off',
+        lyricsLrc: input.lyricsLrc ?? '',
+      } : {}),
+      ...(input.conversationId ? { conversationId: input.conversationId } : {}),
+      ...(input.attachmentSignature ? {
+        attachmentSignature: input.attachmentSignature,
+        ...(input.attachmentRevision === undefined ? {} : { attachmentRevision: input.attachmentRevision }),
+      } : {}),
+      setupConfirmed: input.setupConfirmed,
+      proposalOnly: true,
+    });
   }
 
   function refreshSuperEasySnapshot(): void {
@@ -360,6 +497,7 @@ export function mountEasyStudio(root: HTMLElement, baseHost: EasyHost, deps: Eas
     return mergeLocalStages(readStages(snapshot), localStageReadings({
       phase,
       failed: session?.failure() != null,
+      narrationFailed: Boolean(session?.failure()?.narrationRevision),
       pkg: host.getPackage(),
       packageId: store.get().packageId,
     }));
@@ -391,6 +529,7 @@ export function mountEasyStudio(root: HTMLElement, baseHost: EasyHost, deps: Eas
       proposal: () => superEasySession?.proposal() ?? null,
       onApproveProposal: () => { void superEasySession?.approveProposal(); },
       onReviseProposal: (note) => { void superEasySession?.reviseProposal(note); },
+      onReviseNarration: () => { void superEasySession?.reviseNarration(); },
       onReviewEditPlan: (packageId) => {
         const current = store.get();
         store.patch({ plan: { ...current.plan, status: 'ready', error: null, errorAt: null, wordsChanged: false } });
@@ -405,6 +544,38 @@ export function mountEasyStudio(root: HTMLElement, baseHost: EasyHost, deps: Eas
       onLengthChange: (lengthS) => {
         const current = store.get();
         store.patch({ idea: { ...current.idea, lengthS } });
+      },
+      onAspectChange: (aspect) => {
+        const current = store.get();
+        store.patch({ idea: { ...current.idea, aspect } });
+      },
+      onVideoTypeChange: (videoType) => patchSuperEasyInputs({ videoType }),
+      onSongTrimChange: (songTrim) => patchSuperEasyInputs({ songTrim }),
+      onLyricsStyleChange: (lyricsStyle) => patchSuperEasyInputs({ lyricsStyle }),
+      onLyricsLrcChange: (lyricsLrc) => patchSuperEasyInputs({ lyricsLrc }),
+      attachments: contextAttachments,
+      previewFetch: (input, init) => host.apiFetch(input, init),
+      onFontUpload: async (file) => {
+        const chatId = await ensureEasyConversation();
+        const response = await host.apiFetch(`/api/chat/${encodeURIComponent(chatId)}/supplied-font`, {
+          method: 'POST',
+          headers: { 'content-type': 'font/ttf', 'x-filename': encodeURIComponent(file.name), 'x-rights-asserted': 'true' },
+          body: file,
+        });
+        const body = await response.json() as { error?: string; font?: { filename?: string } };
+        if (!response.ok) throw new Error(body.error || 'Font upload failed.');
+        const current = store.get();
+        patchSuperEasyInputs({ attachmentRevision: current.attachmentRevision + 1 });
+        return `${body.font?.filename || 'Font'} uploaded and will be used in the video.`;
+      },
+      onFontRemove: async () => {
+        const chatId = store.get().chatId;
+        if (!chatId) return 'No supplied font to remove.';
+        const response = await host.apiFetch(`/api/chat/${encodeURIComponent(chatId)}/supplied-font`, { method: 'DELETE' });
+        if (!response.ok) throw new Error('Font removal failed.');
+        const current = store.get();
+        patchSuperEasyInputs({ attachmentRevision: current.attachmentRevision + 1 });
+        return 'Supplied font removed for future videos.';
       },
       onSetup: () => { void openSuperEasySetup(); },
       onChangeAnything: (change = '') => {
@@ -646,6 +817,7 @@ export function mountEasyStudio(root: HTMLElement, baseHost: EasyHost, deps: Eas
     superEasySession?.stop();
     superEasySession = null;
     resetPlanDecisionAnswers();
+    contextAttachments.reset();
     store.startNew();
     refreshVideoName();
     go('idea');
@@ -818,6 +990,11 @@ export function mountEasyStudio(root: HTMLElement, baseHost: EasyHost, deps: Eas
     }
     // A saved editor session stays in the editor. Easy still resumes its step.
     if (getMode() !== 'easy') return;
+    const params = new URLSearchParams(search());
+    if (narrationRecoveryReady && !params.has('step')) {
+      showSuperEasy();
+      return;
+    }
     if (boot.view === 'superEasy') {
       if (!superEasy) showSuperEasy();
       return;
@@ -826,6 +1003,7 @@ export function mountEasyStudio(root: HTMLElement, baseHost: EasyHost, deps: Eas
   });
 
   return () => {
+    stopCorrectionShutdown();
     stopStore();
     stopMode();
     root.removeEventListener('change', onCaptureToggle);
@@ -835,6 +1013,8 @@ export function mountEasyStudio(root: HTMLElement, baseHost: EasyHost, deps: Eas
     stopStepper();
     releasePlayer();
     destroySuperEasy(true);
+    contextAttachments.destroy();
+    store.invalidateSession();
     ask?.destroy();
     settings?.destroy();
     destroyShellChrome();

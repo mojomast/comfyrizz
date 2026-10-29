@@ -14,9 +14,9 @@ function makePlan() {
   return conversationPlanSchema.parse({
     title: 'Solar explained', brief: 'Explain solar power.', audience: 'Homeowners', aspect: '16:9', stylePreset: 'cinematic-dark',
     scenes: [
-      { id: 's_title', layout: 'title', headline: 'Solar power', sub: 'From sunlight to electricity', seconds: 4, narration: 'Sunlight can power your home.', visual: 'A dawn gradient' },
+      { id: 's_title', layout: 'title', headline: 'Solar power', sub: 'From sunlight to electricity', seconds: 4, narration: 'Sunlight can power your home.', visual: 'Sunlight over solar panels at dawn', mediaType: 'image' },
       { id: 's_hero', layout: 'hero', headline: 'Inside a solar cell', sub: 'Silicon captures photons', body: 'Moving electrons create current.', seconds: 8, narration: 'Photons release electrons in the cell.', visual: 'A solar cell diagram', mediaType: 'svg', svg: SVG },
-      { id: 's_end', layout: 'title', headline: 'Power your home', seconds: 4, narration: 'An inverter converts the current.', visual: 'A dusk gradient' },
+      { id: 's_end', layout: 'title', headline: 'Power your home', seconds: 4, narration: 'An inverter converts the current.', visual: 'Solar panels at dusk', mediaType: 'image' },
     ],
   });
 }
@@ -34,7 +34,7 @@ function richPlan() {
     scenes: [
       {
         id: 's_title', layout: 'title', headline: 'Latency, measured', sub: 'A real before and after', seconds: 4,
-        narration: 'This is a measured latency comparison.', visual: 'A kinetic opening card',
+        narration: 'This is a measured latency comparison.', visual: 'A datacenter rack behind the native title', mediaType: 'image',
         motion: { recipe: 'kinetic', seed: 11, intensity: 0.45, entry: 'waterfall', cue_phrases: ['measured'] },
         transition: { type: 'paper-reveal', frames: 18 },
       },
@@ -502,7 +502,7 @@ test('layout switches add newly visible copy fields even when the plan value was
     datasets: { d_x: { unit: 'ms', values: [{ label: 'one', value: 1 }], source: 'user' } },
     scenes: [
       { id: 's_x', layout, headline: 'Head', sub: 'Sub', body: 'Body text', footnote: 'Footnote text', items: ['one', 'two'], seconds: 6, narration: 'Text.', visual: 'A card', ...extra },
-      { id: 's_end', layout: 'title', headline: 'End', seconds: 4, narration: 'End.', visual: 'end' },
+      { id: 's_end', layout: 'title', headline: 'End', seconds: 4, narration: 'End.', visual: 'end', mediaType: 'image' },
     ],
   });
 
@@ -529,7 +529,7 @@ test('a formerly-middle plan transition that becomes final is recognised as plan
   const basePlan = () => conversationPlanSchema.parse({
     title: 'Order', brief: 'Transition reorder.', audience: 'Test', aspect: '16:9', stylePreset: 'cinematic-dark',
     scenes: [
-      { id: 's_a', layout: 'title', headline: 'A', seconds: 4, narration: 'A opening.', visual: 'A card', transition: { type: 'paper-reveal', frames: 18 } },
+      { id: 's_a', layout: 'title', headline: 'A', seconds: 4, narration: 'A opening.', visual: 'A card', mediaType: 'image', transition: { type: 'paper-reveal', frames: 18 } },
       { id: 's_b', layout: 'hero', headline: 'B', seconds: 6, narration: 'B middle.', visual: 'B card' },
       { id: 's_c', layout: 'list', headline: 'C', items: ['one', 'two'], seconds: 6, narration: 'C list.', visual: 'C card' },
     ],
@@ -604,7 +604,7 @@ test('split/compare plate media types drive style and palette invalidation', asy
     scenes: [
       { id: 's_svg', layout: 'compare', headline: 'Compare', seconds: 6, narration: 'Compare.', visual: 'Two plates',
         plates: [{ label: 'Old', svg: paletteSvg }, { label: 'New', svg: paletteSvg }] },
-      { id: 's_end', layout: 'title', headline: 'End', seconds: 4, narration: 'End.', visual: 'end' },
+      { id: 's_end', layout: 'title', headline: 'End', seconds: 4, narration: 'End.', visual: 'end', mediaType: 'image' },
     ],
   });
   const svgDarkPlan = svgPlan('cinematic-dark');
@@ -623,7 +623,7 @@ test('removing a scene and dataset preserves manually edited unreferenced proven
     datasets: { d_x: { unit: 'ms', values: [{ label: 'one', value: 1 }], source: 'user', note: 'Plan note.' } },
     scenes: [
       { id: 's_stat', layout: 'stat', headline: '1 ms', seconds: 6, narration: 'One.', visual: 'stat', data: { dataset: 'd_x' } },
-      { id: 's_end', layout: 'title', headline: 'End', seconds: 4, narration: 'End.', visual: 'end' },
+      { id: 's_end', layout: 'title', headline: 'End', seconds: 4, narration: 'End.', visual: 'end', mediaType: 'image' },
     ],
   });
   const previousPlan = plan();

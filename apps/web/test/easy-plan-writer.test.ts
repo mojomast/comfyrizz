@@ -2,7 +2,12 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createEasyStore, planInputsHash } from '../src/easy/store.ts';
-import { writePlan } from '../src/easy/plan-writer.ts';
+import { plannerProgressAnnouncement, writePlan } from '../src/easy/plan-writer.ts';
+
+test('provider admission retry and failure are visible in planning progress', () => {
+  assert.match(plannerProgressAnnouncement({ activity: 'initial_admission_retry', elapsedMs: 1000, recentEvents: [{ status: 'admission_retry', delayMs: 26000 }] }), /retrying once after 26s/);
+  assert.match(plannerProgressAnnouncement({ activity: 'failed', message: 'http_429: ttft_admission_refused after 26 s' }), /http_429: ttft_admission_refused after 26 s/);
+});
 
 function memoryStore(patch = {}) {
   const store = createEasyStore({
@@ -71,6 +76,44 @@ function harness(options = {}) {
   return { calls, store, adopted, api, host };
 }
 
+test('non-thinking opt-in is restricted to supported DeepSeek Flash models', async () => {
+  for (const [selection, optIn, expected] of [
+    [{ provider: 'opencode-go', model: 'deepseek-v4.1-flash' }, true, 'disabled'],
+    [{ provider: 'opencode-go' }, true, 'disabled'],
+    [{ provider: 'opencode-go', model: 'other' }, true, undefined],
+    [{ provider: 'custom', model: 'deepseek-flash' }, true, 'disabled'],
+    [{ provider: 'custom', model: 'other' }, true, undefined],
+    [{ provider: 'custom', model: 'deepseek-flash' }, false, undefined],
+    [{ provider: 'openrouter', model: 'deepseek-v4.1-flash' }, true, undefined],
+    [{ provider: 'opencode-go', model: 'deepseek-v4.1-flash' }, false, undefined],
+  ]) {
+    const h = harness({ selection });
+    await writePlan(h.store.get(), h, { stopAfterPackage: true, deepSeekNoThinking: optIn });
+    assert.equal(h.calls.find(call => call.kind === 'build').input.thinking, expected);
+  }
+});
+
+test('stopping Super Easy cancels its in-flight planning session', async () => {
+  const h = harness({ patch: { generate: { status: 'running' } } });
+  let started;
+  const ready = new Promise(resolve => { started = resolve; });
+  let rejectBuild;
+  let sessionId;
+  h.api.buildVideo = input => {
+    sessionId = input.sessionId;
+    started();
+    return new Promise((_, reject) => { rejectBuild = reject; });
+  };
+  let cancelled;
+  h.api.cancelAgent = async id => { cancelled = id; rejectBuild(new Error('Planning cancelled')); };
+  const pending = writePlan(h.store.get(), h);
+  await ready;
+  h.store.patch({ generate: { status: 'stopped' } });
+  await pending;
+  assert.equal(cancelled, sessionId);
+  assert.equal(h.adopted.length, 0);
+});
+
 test('happy path calls the three APIs in order and ends ready', async () => {
   const { calls, store, adopted, api, host } = harness({ selection: { provider: 'opencode', model: 'go' } });
   await writePlan(store.get(), { api, host, store });
@@ -89,6 +132,7 @@ test('happy path calls the three APIs in order and ends ready', async () => {
   assert.equal(done.productionId, 'prod_1');
   assert.equal(done.offline, false);
   assert.equal(done.planHash, planInputsHash(done));
+  assert.equal(done.builtPackageInputsHash, planInputsHash(done));
   assert.equal(done.plan.error, null);
   assert.equal(done.plan.wordsChanged, false);
 });
@@ -128,10 +172,73 @@ test('a production failure leaves the package adopted and a retry starts at prod
 test('an unchanged hash makes no calls', async () => {
   const { calls, store, api, host } = harness();
   const hash = planInputsHash(store.get());
-  store.patch({ planHash: hash, plan: { ...store.get().plan, status: 'ready' } });
+  store.patch({ packageId: 'pkg_1', planHash: hash, builtPackageInputsHash: hash, plan: { ...store.get().plan, status: 'ready' } });
   await writePlan(store.get(), { api, host, store });
   assert.deepEqual(calls, []);
   assert.equal(store.get().plan.status, 'ready');
+});
+
+test('a legacy ready plan without package provenance rebuilds instead of reusing blindly', async () => {
+  const { calls, store, api, host } = harness();
+  const hash = planInputsHash(store.get());
+  store.patch({
+    packageId: 'pkg_legacy',
+    productionId: 'prod_legacy',
+    planHash: hash,
+    builtPackageInputsHash: null,
+    plan: { ...store.get().plan, status: 'ready' },
+  });
+  await writePlan(store.get(), { api, host, store });
+  assert.deepEqual(calls.map(call => call.kind), ['build', 'production', 'plan']);
+  assert.equal(store.get().builtPackageInputsHash, planInputsHash(store.get()));
+});
+
+test('Music Video song trim reaches buildVideo and unchanged approval does not rebuild', async () => {
+  const store = memoryStore({
+    videoType: 'music-video',
+    songTrim: { startSeconds: 5.5, endSeconds: 30 },
+  });
+  const { calls, api, host } = harness({ store });
+  await writePlan(store.get(), { api, host, store });
+  assert.deepEqual(calls.find(call => call.kind === 'build').input.songTrim, { startSeconds: 5.5, endSeconds: 30 });
+  assert.equal(store.get().plan.status, 'ready');
+  await writePlan(store.get(), { api, host, store });
+  assert.equal(calls.filter(call => call.kind === 'build').length, 1);
+  store.patch({ songTrim: { startSeconds: 6, endSeconds: 30 } });
+  await writePlan(store.get(), { api, host, store });
+  assert.equal(calls.filter(call => call.kind === 'build').length, 2, 'a trim change invalidates the creative package');
+  assert.deepEqual(calls.filter(call => call.kind === 'build').at(-1).input.songTrim, { startSeconds: 6, endSeconds: 30 });
+  store.patch({ videoType: 'product-walkthrough' });
+  await writePlan(store.get(), { api, host, store });
+  assert.equal(Object.hasOwn(calls.filter(call => call.kind === 'build').at(-1).input, 'songTrim'), false, 'a saved Music Video trim never leaks into Product Walkthrough');
+});
+
+test('Music Video forwards exact raw LRC, keeps lyric text out of the brief, and hashes edits into rebuilds', async () => {
+  const first = '[00:01.00]<00:01.00>Secret <00:01.50>lyric text\r\n[00:03.00]Second exact line';
+  const store = memoryStore({ videoType: 'music-video', lyricsStyle: 'reel', lyricsLrc: first });
+  const { calls, api, host } = harness({ store });
+  await writePlan(store.get(), { api, host, store });
+  const initial = calls.find(call => call.kind === 'build').input;
+  assert.equal(initial.lyricsStyle, 'reel');
+  assert.equal(initial.lyricsLrc, first);
+  assert.doesNotMatch(initial.brief, /Secret|lyric text|Second exact line/u);
+  assert.match(initial.brief, /separately supplied LRC uses large-overlay reel presentation/u);
+  assert.equal(Object.hasOwn(initial, 'lyrics'), false, 'canonical browser cues are never sent');
+
+  const second = '[00:02.00]A different supplied line';
+  store.patch({ lyricsStyle: 'caption', lyricsLrc: second });
+  await writePlan(store.get(), { api, host, store });
+  const rebuilt = calls.filter(call => call.kind === 'build').at(-1).input;
+  assert.equal(calls.filter(call => call.kind === 'build').length, 2);
+  assert.equal(rebuilt.lyricsStyle, 'caption');
+  assert.equal(rebuilt.lyricsLrc, second);
+  assert.doesNotMatch(rebuilt.brief, /A different supplied line/u);
+
+  store.patch({ lyricsStyle: 'off', lyricsLrc: '' });
+  await writePlan(store.get(), { api, host, store });
+  const emptyOff = calls.filter(call => call.kind === 'build').at(-1).input;
+  assert.equal(Object.hasOwn(emptyOff, 'lyricsStyle'), false);
+  assert.equal(Object.hasOwn(emptyOff, 'lyricsLrc'), false);
 });
 
 test('an explicit duration in the idea is not overridden by the default length', async () => {
@@ -142,7 +249,8 @@ test('an explicit duration in the idea is not overridden by the default length',
   assert.match(calls[0].input.brief, /two minute/);
   assert.doesNotMatch(calls[0].input.brief, /Length: about 30 seconds/);
   assert.doesNotMatch(calls[0].input.brief, /Look: clay/);
-  assert.match(calls[0].input.brief, /Look: photorealistic live-action humans/);
+  assert.match(calls[0].input.brief, /Look: photorealistic live-action, natural light and real-world materials\./);
+  assert.ok(calls[0].input.brief.startsWith(store.get().idea.text), 'the requested human subjects remain in the original brief');
 });
 
 test('offline is set when live is false and a disconnected provider is omitted', async () => {
@@ -189,7 +297,10 @@ test('Easy resume persists the selected level before re-pricing a paid plan', as
   const store = memoryStore({
     productionId: 'prod_1', packageId: 'pkg_1', compute: 'colab', level: 'draft', levelTouched: true,
   });
-  store.patch({ plan: { ...store.get().plan, status: 'stale', wordsChanged: true } });
+  store.patch({
+    builtPackageInputsHash: planInputsHash(store.get()),
+    plan: { ...store.get().plan, status: 'stale', wordsChanged: true },
+  });
   const { calls, api, host } = harness({
     store,
     iterationSnapshot: { productionId: 'prod_1', production: { id: 'prod_1', revision: 11 }, revision: 11, events: [] },
@@ -210,6 +321,7 @@ test('an unchanged Easy plan still repairs a missing server level before re-pric
   });
   store.patch({
     planHash: planInputsHash(store.get()),
+    builtPackageInputsHash: planInputsHash(store.get()),
     plan: { ...store.get().plan, status: 'ready' },
   });
   const { calls, api, host } = harness({
@@ -226,7 +338,10 @@ test('Easy resume does not rewrite a level already present on the server', async
   const store = memoryStore({
     productionId: 'prod_1', packageId: 'pkg_1', compute: 'colab', level: 'draft', levelTouched: true,
   });
-  store.patch({ plan: { ...store.get().plan, status: 'stale', wordsChanged: true } });
+  store.patch({
+    builtPackageInputsHash: planInputsHash(store.get()),
+    plan: { ...store.get().plan, status: 'stale', wordsChanged: true },
+  });
   const { calls, api, host } = harness({
     store,
     iterationSnapshot: {

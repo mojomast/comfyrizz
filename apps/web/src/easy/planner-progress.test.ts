@@ -17,6 +17,6 @@ test('planner announcements expose the current model, tool, phase and elapsed ti
   );
   assert.equal(
     plannerProgressAnnouncement({ phase: 'repair', activity: 'validation', elapsedMs: 90000 }),
-    'Planning repair · validating package · 90s',
+    'Planning repair · checking project · 90s',
   );
 });

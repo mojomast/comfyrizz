@@ -18,9 +18,10 @@ function safeName(name) {
  * @param {Array<{ name: string, args: unknown }>} calls
  * @returns {Promise<{ url: string, calls: number, close: () => Promise<void> }>}
  */
-export function replayProvider(initialCalls, { finalText = 'The package draft is ready.', model = 'local-compatible' } = {}) {
+export function replayProvider(initialCalls, { finalText = 'The package draft is ready.', model = 'local-compatible', svgText, svgStatus, onSvgRequest, svgHang = false } = {}) {
   let calls = initialCalls;
   let index = 0;
+  let admissionRefusals = 0;
   const requests = [];
   const server = createServer((request, response) => {
     let raw = '';
@@ -34,7 +35,28 @@ export function replayProvider(initialCalls, { finalText = 'The package draft is
         response.end(JSON.stringify({ data: [{ id: model }] }));
         return;
       }
+      if (admissionRefusals > 0) {
+        admissionRefusals -= 1;
+        response.writeHead(429, { 'content-type': 'application/json' });
+        response.end(JSON.stringify({ error: { type: 'server_error', message: '[ttft_admission_refused] the cell is at capacity; retry shortly (after 3 s)' } }));
+        return;
+      }
+      const svgRequest = raw && JSON.parse(raw).messages?.some(message => message.role === 'system' && message.content?.includes('one standalone SVG document'));
+      if (svgRequest) onSvgRequest?.();
+      if (svgHang && svgRequest) return;
+      if (svgStatus && svgRequest) {
+        response.writeHead(svgStatus, { 'content-type': 'application/json' });
+        response.end(JSON.stringify({ error: { message: 'SVG provider unavailable' } }));
+        return;
+      }
       response.writeHead(200, { 'content-type': 'text/event-stream', 'cache-control': 'no-cache' });
+      if (svgText !== undefined && svgRequest) {
+        writeSse(response, { choices: [{ delta: { content: svgText }, finish_reason: 'stop' }] });
+        writeSse(response, { choices: [], usage: { prompt_tokens: 13, completion_tokens: 7, total_tokens: 20 } });
+        response.write('data: [DONE]\n\n');
+        response.end();
+        return;
+      }
       const call = index < calls.length ? calls[index] : null;
       index += 1;
       if (call) {
@@ -73,6 +95,7 @@ export function replayProvider(initialCalls, { finalText = 'The package draft is
           return index;
         },
         requests,
+        refuseNext(count = 1) { admissionRefusals = count; },
         /** C13: reuse the same loopback URL for a second `/api/agent` run with a new script. */
         setCalls(nextCalls) {
           calls = nextCalls;

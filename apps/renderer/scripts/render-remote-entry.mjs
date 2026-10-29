@@ -28,7 +28,7 @@ export async function renderOnVm(packagePath, output, { onEvent = () => {} } = {
   let loudness = null;
   try {
     onEvent({ phase: 'normalizing', progress: null });
-    loudness = normalizeMixLoudness(output);
+    loudness = normalizeMixLoudness(output, { pkg: rendered.package });
     writeFileSync(joinDir(output, 'loudness.json'), JSON.stringify(loudness));
   } catch (error) {
     onEvent({ phase: 'normalizing', progress: null, message: error.message });

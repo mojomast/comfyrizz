@@ -55,6 +55,7 @@ function fidelityPlan() {
         mediaType: 'svg',
         svg: SVG,
       },
+      { id: 's_plate', layout: 'title', headline: 'Receipt journey', seconds: 4, visual: 'A teal receipt on a desk', mediaType: 'image' },
     ],
   });
 }
@@ -129,7 +130,7 @@ function durationPlan(firstTransition) {
         headline: 'First beat',
         seconds: 5,
         narration: 'The first beat.',
-        visual: 'A calm opening.',
+        visual: 'A calm opening.', mediaType: 'image',
         ...(firstTransition ? { transition: firstTransition } : {}),
       },
       {
@@ -175,7 +176,7 @@ test('an impossible requested duration reports the mismatch instead of stretchin
     audience: 'Editors',
     aspect: '16:9',
     stylePreset: 'cinematic-dark',
-    scenes: [{ id: 's_card', layout: 'title', headline: 'Short', seconds: 2, narration: '', visual: 'A short card.' }],
+    scenes: [{ id: 's_card', layout: 'title', headline: 'Short', seconds: 2, narration: '', visual: 'A short card.', mediaType: 'image' }],
   });
   const pkg = await buildChatProject({ plan, runtimeDir, requestedDuration: { seconds: 30 } });
   const timeline = compileTimeline(pkg);

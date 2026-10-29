@@ -14,6 +14,8 @@ import { assessBudget, nextJobUpperEstimate, resolveRatePerHour, DEFAULT_RATE_PE
 import { createBudgetLedger } from './productions/ledger.mjs';
 import { admissionRefusal, canTransition } from './productions/contract.mjs';
 import { createProductionAdmission } from './productions/admission.mjs';
+import { fingerprint } from './pipeline-contract.mjs';
+import { fingerprintJobFiles } from '../../../packages/backends/src/approved-files.mjs';
 
 /** Kept as the exported name earlier code and tests reference; the value is the shared default (PO-3). */
 export const G4_RATE_PER_HOUR = DEFAULT_RATE_PER_HOUR;
@@ -267,7 +269,7 @@ function durableAction(events, planHash, actionId) {
  *   the IP17 production journal; when present, a package bound to a production must
  *   present the IP20 authority that dispatched its action slot
  */
-export function createRunController({ backendFactory, events = null, runtimeDir, prepareWorkDir = null, prepareNarration = null, onComplete = null, gpu = DEFAULT_GPU, isBusy = () => false, ledgerFor = null, productionStore = null } = {}) {
+export function createRunController({ backendFactory, events = null, runtimeDir, prepareWorkDir = null, prepareNarration = null, onComplete = null, gpu = DEFAULT_GPU, isBusy = () => false, ledgerFor = null, productionStore = null, readPackage = null } = {}) {
   if (typeof backendFactory !== 'function') throw new Error('createRunController needs a backendFactory');
   if (ledgerFor !== null && typeof ledgerFor !== 'function') throw new Error('ledgerFor must be a function');
   if (productionStore !== null && (typeof productionStore.read !== 'function' || typeof productionStore.readEvents !== 'function' || typeof productionStore.commit !== 'function')) {
@@ -584,6 +586,7 @@ export function createRunController({ backendFactory, events = null, runtimeDir,
       runId: record.runId,
       backendId: record.backendId ?? null,
       productionId: record.productionId ?? null,
+      packageId: record.packageId ?? null,
       actionId: record.actionId ?? null,
       planHash: record.planHash ?? null,
       actionPlanHash: record.actionPlanHash ?? null,
@@ -1223,6 +1226,8 @@ export function createRunController({ backendFactory, events = null, runtimeDir,
         includeReady,
         assets,
         signal: record.signal,
+        ...(record.expectedJobs ? { expectedJobs: record.expectedJobs } : {}),
+        ...(record.expectedFiles ? { expectedFiles: record.expectedFiles } : {}),
         onEvent: emit,
       });
       record.result = result;
@@ -1369,9 +1374,30 @@ export function createRunController({ backendFactory, events = null, runtimeDir,
       const verdict = verifyBoundAuthority({ pkg, authority, expected, entryPoint, caller: { approved, actor, userEventId } });
       if (verdict.bound) {
         if (verdict.response) return verdict.response;
+        const slot = verdict.slot;
+        if (slot.executor === 'chat-correction-take') {
+          const expectedAsset = slot.assetIds?.[0];
+          if (slot.kind !== 'shot.generate' || slot.takes !== 1 || slot.assetIds?.length !== 1
+            || typeof expectedAsset !== 'string' || backendId !== slot.backendId || budgetUnits !== slot.upperBound
+            || mode !== 'take' || !includeReady || teardownMode !== 'done'
+            || !Array.isArray(assets) || assets.length !== 1 || assets[0] !== expectedAsset
+            || fingerprint(pkg) !== slot.packageFingerprint
+            || fingerprint(corrections) !== fingerprint({ [expectedAsset]: slot.correction })) {
+            return admissionRefusal('SHOT_SCOPE_MISMATCH', 'the run does not match the approved correction', { entryPoint, productionId: verdict.productionId });
+          }
+        }
         ledger = await ledgerForBound(verdict);
         if (!ledger) return { error: 'the production budget ledger is not available', code: 'LEDGER_UNAVAILABLE', status: 500 };
         const preview = await estimate({ backendId, pkg, budgetUnits, ratePerHour, includeReady, assets, comfyuiUrl });
+        if (slot.executor === 'chat-correction-take'
+          && (preview.planHash !== slot.runPlanHash || !preview.jobsDoc?.jobs?.length
+            || preview.jobsDoc.jobs.some(job => job.asset !== slot.assetIds[0]))) {
+          return admissionRefusal('SHOT_PLAN_CHANGED', 'the backend job differs from the approved correction', { entryPoint, productionId: verdict.productionId });
+        }
+        if (slot.executor === 'chat-correction-take'
+          && (typeof readPackage !== 'function' || fingerprint(readPackage(pkg.id)) !== slot.basePackageFingerprint)) {
+          return admissionRefusal('SHOT_PLAN_CHANGED', 'the project changed after the correction was prepared', { entryPoint, productionId: verdict.productionId });
+        }
         if (!preview.budget.allowed) {
           publish({ type: 'run.refused', ...preview });
           return admissionRefusal('BUDGET_EXCEEDED', preview.budget.message ?? 'the run would exceed the budget', {
@@ -1450,6 +1476,14 @@ export function createRunController({ backendFactory, events = null, runtimeDir,
         try {
           mkdirSync(outputDir, { recursive: true });
           if (prepareWorkDir) await prepareWorkDir(pkg, workDir, { runId, backendId });
+          if (slot.executor === 'chat-correction-take'
+            && fingerprint(readPackage(pkg.id)) !== slot.basePackageFingerprint) {
+            throw Object.assign(new Error('The project changed while the correction was being staged.'), { code: 'SHOT_PLAN_CHANGED' });
+          }
+          if (slot.executor === 'chat-correction-take'
+            && JSON.stringify(fingerprintJobFiles(preview.jobsDoc.jobs, workDir)) !== JSON.stringify(slot.inputFiles)) {
+            throw Object.assign(new Error('The correction input files changed after approval.'), { code: 'SHOT_PLAN_CHANGED' });
+          }
         } catch (error) {
           failBoundAction(verdict, runId, error);
           closeBoundReservation(ledger, verdict.reservationId, 'prepare_failed');
@@ -1465,6 +1499,8 @@ export function createRunController({ backendFactory, events = null, runtimeDir,
           estimate: preview.estimate,
           backend: preview.backend,
           jobs: preview.jobs,
+          ...(slot.executor === 'chat-correction-take' ? { expectedJobs: preview.jobsDoc.jobs } : {}),
+          ...(slot.executor === 'chat-correction-take' ? { expectedFiles: slot.inputFiles } : {}),
           events: [],
           workDir,
           outputDir,
@@ -1473,6 +1509,7 @@ export function createRunController({ backendFactory, events = null, runtimeDir,
           mode: runMode,
           corrections: runCorrections,
           productionId: verdict.productionId,
+          packageId: pkg.id,
           actionId: verdict.actionId,
           actionPlanHash: verdict.planHash,
           reservationId: verdict.reservationId,

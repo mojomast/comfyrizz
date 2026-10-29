@@ -25,6 +25,8 @@ const RUN_ALREADY_STARTED = 'The Super Easy run is already going.';
 export type SuperEasyWatch = (options: WatchProductionOptions) => () => void;
 
 export interface SuperEasySessionOptions extends RunSuperEasyDeps {
+  /** Authenticated transport used for production snapshots and events. */
+  fetchImpl?: WatchProductionOptions['fetchImpl'];
   /** The run under test can be replaced; production defaults to SE09. */
   run?: typeof runSuperEasy;
   /** The production watch under test can be replaced; production defaults to `watchProduction`. */
@@ -45,6 +47,8 @@ export interface SuperEasySession {
   proposal(): SuperEasyProposal | null;
   approveProposal(): Promise<SuperEasyRunResult | null>;
   reviseProposal(note: string): Promise<SuperEasyRunResult | null>;
+  reviseNarration(): Promise<SuperEasyRunResult | null>;
+  restoreNarrationFailure(input: RunSuperEasyInput, restoredFailure: SuperEasyRunFailure): void;
   stop(): void;
   status(): EasyState['generate']['status'];
   snapshot(): unknown;
@@ -78,6 +82,24 @@ export function createSuperEasySession(options: SuperEasySessionOptions): SuperE
   let objectUrl: string | null = null;
   let proposal: SuperEasyProposal | null = null;
   let activeRunId: string | null = null;
+
+  function withLiveInputs(input: RunSuperEasyInput): RunSuperEasyInput {
+    const current = options.store.get();
+    const has = (key: keyof EasyState): boolean => Object.prototype.hasOwnProperty.call(current, key);
+    return {
+      ...input,
+      ...(current.idea && Number.isFinite(current.idea.lengthS) ? { lengthS: current.idea.lengthS } : {}),
+      ...(current.compute ? { compute: current.compute } : {}),
+      ...(current.motionModel ? { motionModel: current.motionModel } : {}),
+      ...(has('videoType') ? { videoType: current.videoType } : {}),
+      ...(has('songTrim') ? { songTrim: current.songTrim ? { ...current.songTrim } : null } : {}),
+      ...(has('lyricsStyle') ? { lyricsStyle: current.lyricsStyle } : {}),
+      ...(has('lyricsLrc') ? { lyricsLrc: current.lyricsLrc } : {}),
+      ...(has('chatId') ? { conversationId: current.chatId } : {}),
+      ...(has('attachmentSignature') ? { attachmentSignature: current.attachmentSignature } : {}),
+      ...(has('attachmentRevision') ? { attachmentRevision: current.attachmentRevision } : {}),
+    };
+  }
 
   function finalBlobUrl(value: unknown): string | null {
     const url = buildGalleryModel(value).final.url;
@@ -113,7 +135,7 @@ export function createSuperEasySession(options: SuperEasySessionOptions): SuperE
       previewReady: preview,
       ...(failure === null
         ? {}
-        : { failure: { message: failure.message, retryable: true } }),
+        : { failure: { message: failure.message, retryable: failure.retryable !== false, narrationRevision: Boolean(failure.narrationRevision), proposalRevisionNote: failure.proposalRevisionNote } }),
     });
   }
 
@@ -155,12 +177,23 @@ export function createSuperEasySession(options: SuperEasySessionOptions): SuperE
       compute: input.compute ?? 'cpu',
       ...(input.lengthS === undefined ? {} : { lengthS: input.lengthS }),
       motionModel: input.motionModel ?? 'auto',
+      ...(input.deepSeekNoThinking ? { deepSeekNoThinking: true } : {}),
+      ...(input.videoType === undefined ? {} : { videoType: input.videoType }),
+      ...(input.songTrim === undefined ? {} : { songTrim: input.songTrim === null ? null : { ...input.songTrim } }),
+      ...(input.lyricsStyle === undefined ? {} : { lyricsStyle: input.lyricsStyle }),
+      ...(input.lyricsLrc === undefined ? {} : { lyricsLrc: input.lyricsLrc }),
+      ...(input.conversationId === undefined ? {} : { conversationId: input.conversationId }),
+      ...(input.attachmentSignature === undefined ? {} : { attachmentSignature: input.attachmentSignature }),
+      ...(input.attachmentRevision === undefined ? {} : { attachmentRevision: input.attachmentRevision }),
       ...(input.setupConfirmed === undefined ? {} : { setupConfirmed: input.setupConfirmed }),
       ...(input.cpu === undefined ? {} : { cpu: input.cpu }),
       ...(input.run === undefined ? {} : { run: input.run }),
       ...(input.proposalOnly === undefined ? {} : { proposalOnly: input.proposalOnly }),
       ...(input.basePrompt === undefined ? {} : { basePrompt: input.basePrompt }),
       ...(input.revisionNotes === undefined ? {} : { revisionNotes: input.revisionNotes }),
+      ...(input.narrationOnly === undefined ? {} : { narrationOnly: input.narrationOnly }),
+      ...(input.reviewedPackageRevision === undefined ? {} : { reviewedPackageRevision: input.reviewedPackageRevision }),
+      ...(input.recoveryProductionId === undefined ? {} : { recoveryProductionId: input.recoveryProductionId }),
     };
     lastInput = nextInput;
     activeRunId = null;
@@ -197,11 +230,20 @@ export function createSuperEasySession(options: SuperEasySessionOptions): SuperE
     }
 
     if (result.ok === false) {
-      failure = result;
+      // Approval may have dispatched work even if its response was lost. Never
+      // offer a replay that could create a second paid job in that situation.
+      const uncertainPaidWork = nextInput.compute === 'colab'
+        && (result.stage === 'approval' || result.stage === 'run');
+      failure = uncertainPaidWork
+        ? { ...result, retryable: false, message: `${result.message} Check the existing production in Studio before starting another run.` }
+        : result;
+      if (nextInput.proposalOnly === true && !nextInput.narrationOnly && nextInput.revisionNotes?.length && result.stage === 'plan') {
+        failure = { ...failure, retryable: false, proposalRevisionNote: nextInput.revisionNotes.at(-1) };
+      }
       patchStatus('error');
       publish();
-      options.onError?.(result);
-      return result;
+      options.onError?.(failure);
+      return failure;
     }
 
     if ('proposal' in result) {
@@ -235,6 +277,7 @@ export function createSuperEasySession(options: SuperEasySessionOptions): SuperE
 
     watchStop = watch({
       productionId: result.productionId,
+      ...(options.fetchImpl ? { fetchImpl: options.fetchImpl } : {}),
       onState,
     });
     if (stopped || status === 'done') cancelWatch();
@@ -243,7 +286,14 @@ export function createSuperEasySession(options: SuperEasySessionOptions): SuperE
 
   async function approveProposal(): Promise<SuperEasyRunResult | null> {
     if (!proposal || !lastInput) return null;
-    const next = { ...lastInput, proposalOnly: false, basePrompt: proposal.basePrompt, revisionNotes: proposal.revisionNotes };
+    const next = {
+      ...withLiveInputs(lastInput),
+      proposalOnly: false,
+      narrationOnly: false,
+      reviewedPackageRevision: proposal.reviewedPackageRevision,
+      basePrompt: proposal.basePrompt,
+      revisionNotes: proposal.revisionNotes,
+    };
     proposal = null;
     status = 'idle';
     return generate(next);
@@ -251,16 +301,51 @@ export function createSuperEasySession(options: SuperEasySessionOptions): SuperE
 
   async function reviseProposal(note: string): Promise<SuperEasyRunResult | null> {
     const change = note.trim();
+    if (status === 'error' && failure?.proposalRevisionNote !== undefined && lastInput && change) {
+      const next = { ...withLiveInputs(lastInput), revisionNotes: [...(lastInput.revisionNotes ?? []).slice(0, -1), change] };
+      status = 'idle';
+      return generate(next);
+    }
     if (!proposal || !lastInput || !change) return null;
-    const next = { ...lastInput, proposalOnly: true, basePrompt: proposal.basePrompt, revisionNotes: [...proposal.revisionNotes, change] };
+    const next = {
+      ...withLiveInputs(lastInput),
+      proposalOnly: true,
+      narrationOnly: false,
+      reviewedPackageRevision: proposal.reviewedPackageRevision,
+      basePrompt: proposal.basePrompt,
+      revisionNotes: [...proposal.revisionNotes, change],
+    };
     proposal = null;
     status = 'idle';
     return generate(next);
   }
 
   async function retry(): Promise<SuperEasyRunResult | null> {
-    if (status !== 'error' || lastInput === null) return null;
-    return generate(lastInput);
+    if (status !== 'error' || lastInput === null || failure?.retryable === false) return null;
+    return generate(withLiveInputs(lastInput));
+  }
+
+  async function reviseNarration(): Promise<SuperEasyRunResult | null> {
+    if (status !== 'error' || !lastInput || !failure?.narrationRevision) return null;
+    const next = {
+      ...withLiveInputs(lastInput),
+      proposalOnly: true,
+      narrationOnly: true,
+      reviewedPackageRevision: undefined,
+      basePrompt: lastInput.basePrompt ?? lastInput.prompt,
+      revisionNotes: [...(lastInput.revisionNotes ?? []), failure.narrationRevision],
+    };
+    status = 'idle';
+    return generate(next);
+  }
+
+  function restoreNarrationFailure(input: RunSuperEasyInput, restoredFailure: SuperEasyRunFailure): void {
+    if (status !== 'idle') return;
+    lastInput = input;
+    failure = restoredFailure;
+    phase = 'run';
+    patchStatus('error');
+    publish();
   }
 
   function stop(): void {
@@ -286,6 +371,8 @@ export function createSuperEasySession(options: SuperEasySessionOptions): SuperE
     proposal: () => proposal,
     approveProposal,
     reviseProposal,
+    reviseNarration,
+    restoreNarrationFailure,
     stop,
     status: () => status,
     snapshot: () => snapshot,

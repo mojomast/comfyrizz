@@ -13,6 +13,7 @@ import { join } from 'node:path';
 import { createApp } from '../src/app.mjs';
 import { EXPORT_FILE_NAMES, hasWordCues, collectAssetVariantBytes, collectNarrationExtras } from '../src/export.mjs';
 import { compileTimeline } from '../../../packages/planner/dist/src/index.js';
+import { collectMockContribution } from './helpers/comfy-contribution.mjs';
 
 const TOKEN = 'test-token-0123456789abcdef';
 const repo = new URL('../../..', import.meta.url).pathname;
@@ -59,7 +60,9 @@ before(async () => {
   // writes so the seeded example's SVG assets resolve (index.mjs does the same).
   mkdirSync(join(runtime, 'packages'), { recursive: true });
   cpSync(join(repo, 'examples', 'launch-demo', 'assets'), join(runtime, 'packages', 'assets'), { recursive: true });
-  app.store.seed(JSON.parse(JSON.stringify(seed)));
+  const pkg = structuredClone(seed);
+  collectMockContribution(pkg, join(runtime, 'packages'));
+  app.store.seed(pkg);
   server = createServer(app.handler);
   await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
   port = server.address().port;

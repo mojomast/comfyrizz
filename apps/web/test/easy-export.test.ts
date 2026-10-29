@@ -38,13 +38,19 @@ test('the done state has the heading, video, download link and QA text', () => {
   assert.match(html, /<video\b[^>]*controls/);
   assert.match(html, /<track\b[^>]*kind="captions"/);
   assert.match(html, /src="\/api\/export\/x\/captions\.vtt"/);
-  assert.match(html, /Crumb &amp; Co · 0:30 · 16:9 · 3\.0 MB/);
+  assert.match(html, /Crumb &amp; Co · <span data-easy-export-duration>0:30<\/span> · 16:9 · 3\.0 MB/);
   assert.match(html, /<a\b[^>]*download="crumb-co\.mp4"[^>]*href="blob:https:\/\/example\.test\/123"/);
   assert.match(html, new RegExp(COPY.export.download));
   assert.match(html, new RegExp(COPY.export.qaPass));
   assert.match(html, /data-easy-export-change[^>]*>Change anything<\/button>/);
   assert.match(html, /data-easy-export-editor[^>]*>Open in editor<\/button>/);
   assert.match(html, /Describe any change\. Paid regeneration still asks first\./);
+});
+
+test('export does not present requested or package duration as finished duration', () => {
+  const html = renderExportDone({ pkg: { durationSeconds: 30 }, state: defaultEasyState() });
+  assert.match(html, /data-easy-export-duration>Duration unavailable/);
+  assert.doesNotMatch(html, /0:30/);
 });
 
 test('the failure state has role=alert with the reason and both actions', () => {

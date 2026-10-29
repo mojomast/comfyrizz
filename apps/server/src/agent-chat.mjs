@@ -1,9 +1,10 @@
 import { existsSync, mkdirSync, readFileSync, readdirSync, renameSync, unlinkSync, writeFileSync } from 'node:fs';
+import { MODEL_CONTRIBUTION_PROMPT } from '../../../packages/jobs/src/model-contribution.mjs';
 import { join } from 'node:path';
 import { createHash, randomUUID } from 'node:crypto';
 import { isDeepStrictEqual } from 'node:util';
 import { withConversationLock } from './conversation-lock.mjs';
-import { runConversationTurn, brandTheme, CONVERSATION_PROMPT_VERSION, idMentions, manifestBlock as clipManifestBlock } from '../../../packages/agent/dist/src/index.js';
+import { runConversationTurn, brandTheme, conversationPlanSchema, CONVERSATION_PROMPT_VERSION, idMentions, manifestBlock as clipManifestBlock } from '../../../packages/agent/dist/src/index.js';
 import { createOpenAICompatibleModel } from '../../../packages/llm/dist/src/index.js';
 import { buildChatProject, chatPlanFromPackage, chatProjectResponse } from './chat-project.mjs';
 import { rebaseChatPlans } from './chat-state.mjs';
@@ -454,7 +455,13 @@ export function createProjectChat({
   function read(id) {
     if (!validId(id)) fail(400, 'Invalid conversation ID');
     const file = join(dir, `${id}.json`);
-    return existsSync(file) ? JSON.parse(readFileSync(file, 'utf8')) : null;
+    if (!existsSync(file)) return null;
+    const session = JSON.parse(readFileSync(file, 'utf8'));
+    // Attachment conversations are created before project chat and have no
+    // chat revision or plan yet. Treat them as revision zero, including on GET
+    // and CAS, while retaining their existing metadata.
+    return { revision: 0, plan: null, phase: 'chatting', projectId: null, projectRevision: null, ...session,
+      revision: Number.isSafeInteger(session.revision) && session.revision >= 0 ? session.revision : 0 };
   }
   function writeAtomic(file, text) {
     const temp = `${file}.${randomUUID()}.tmp`;
@@ -909,9 +916,15 @@ export function createProjectChat({
       if (conflict) fail(409, 'RECOVERY_CONFLICT', { code: 'RECOVERY_CONFLICT', recoveryConflict: conflict });
       session = read(id);
       if (!session) fail(404, 'Conversation not found');
+      if (input.expectedPackageId && session.projectId !== input.expectedPackageId) {
+        fail(409, 'The conversation belongs to a different project.', { code: 'EDIT_PACKAGE_MISMATCH' });
+      }
       if (input.turnId && input.turnId === session.lastTurnId) {
         baseRevision = -1;
         return;
+      }
+      if (input.expectedPackageId && store.read(session.projectId)?.revision !== input.expectedPackageRevision) {
+        fail(409, 'The project changed before the edit. Reload before continuing.', { code: 'EDIT_PACKAGE_STALE' });
       }
       if (input.baseRevision !== undefined && input.baseRevision !== session.revision) {
         fail(409, 'Conversation changed in another tab. Reload before continuing.', { currentRevision: session.revision });
@@ -942,7 +955,7 @@ export function createProjectChat({
         try {
           result = await runs.start({
             backendId: 'colab', pkg: built.package, assets: [proposal.assetId], includeReady: true,
-            mode: 'take', corrections: { [proposal.assetId]: built.correction }, approved: true,
+            mode: 'take', corrections: { [proposal.assetId]: built.correction }, approved: false,
           });
         } catch (error) {
           if (!isBusyError(error)) throw error;
@@ -1011,6 +1024,14 @@ export function createProjectChat({
     if (input.adoptPackageId !== undefined && (typeof input.adoptPackageId !== 'string'
       || !/^[A-Za-z0-9_.-]{1,128}$/.test(input.adoptPackageId))) {
       fail(400, 'adoptPackageId must be a valid package ID', { code: 'INVALID_ADOPT_PACKAGE_ID' });
+    }
+    if (input.expectedPackageId !== undefined && (typeof input.expectedPackageId !== 'string'
+      || !/^[A-Za-z0-9_.-]{1,128}$/.test(input.expectedPackageId)
+      || !Number.isSafeInteger(input.expectedPackageRevision) || input.expectedPackageRevision < 0)) {
+      fail(400, 'An edit needs a valid package ID and revision.', { code: 'INVALID_EDIT_CONTEXT' });
+    }
+    if (input.expectedPackageRevision !== undefined && input.expectedPackageId === undefined) {
+      fail(400, 'An edit revision needs its package ID.', { code: 'INVALID_EDIT_CONTEXT' });
     }
     const iterationScope = normalizedIterationScope(input.iterationScope);
     const requestedTargets = normalizedTargets(input.targets);
@@ -1124,6 +1145,10 @@ export function createProjectChat({
         const conflict = recoverLocked(id);
         if (conflict) fail(409, 'RECOVERY_CONFLICT', { code: 'RECOVERY_CONFLICT', recoveryConflict: conflict });
         session = read(id) ?? { id, revision: 0, messages: [], plan: null, phase: 'chatting', projectId: null, projectRevision: null };
+        if (input.expectedPackageId && ((session.projectId && session.projectId !== input.expectedPackageId)
+          || (input.adoptPackageId && input.adoptPackageId !== input.expectedPackageId))) {
+          fail(409, 'The conversation belongs to a different project.', { code: 'EDIT_PACKAGE_MISMATCH' });
+        }
         if (input.turnId && input.turnId === session.lastTurnId) {
           replay = response(session, Boolean(session.lastTurnBuilt));
           return;
@@ -1142,13 +1167,14 @@ export function createProjectChat({
         }
         if (session.messages.length >= 1000 || JSON.stringify(session.messages).length > 4000000) fail(400, 'This conversation is full. Start a new chat to continue.');
         baseRevision = session.revision;
-        if (input.adoptPackageId !== undefined) {
+        const adoptionId = input.adoptPackageId ?? (!session.projectId ? input.expectedPackageId : undefined);
+        if (adoptionId !== undefined) {
           // Adoption is a one-way binding for a new or still-unbound conversation.
           // Replay is handled above, so a retried committed turn remains idempotent.
           if (session.projectId) {
             fail(409, 'This conversation is already bound to a package.', { code: 'PACKAGE_ADOPTION_NOT_ALLOWED' });
           }
-          const adopted = store.read(input.adoptPackageId);
+          const adopted = store.read(adoptionId);
           if (!adopted) fail(404, 'The package to adopt was not found.', { code: 'PACKAGE_NOT_FOUND' });
           session = {
             ...session,
@@ -1164,6 +1190,14 @@ export function createProjectChat({
         // the next turn, so only the conversation revision is a concurrency lock.
         // PackageStore.save still compare-and-swaps capturedPackageRevision below.
         current = session.projectId ? store.read(session.projectId) : null;
+        if (session.projectId && !current) {
+          fail(404, 'The bound package was not found; an edit cannot create a replacement.', { code: 'PACKAGE_NOT_FOUND' });
+        }
+        if (input.expectedPackageId && current?.revision !== input.expectedPackageRevision) {
+          fail(409, 'The project changed before the edit. Reload before continuing.', {
+            code: 'EDIT_PACKAGE_STALE', currentRevision: current?.revision,
+          });
+        }
         capturedPackageRevision = current ? current.revision : null;
         simCurrent = current;
         clipProposals = Array.isArray(session.clipProposals)
@@ -1271,6 +1305,13 @@ export function createProjectChat({
         }
 
         rebased = rebaseChatPlans(session.plan, session.previousPlan, simCurrent);
+        if (session.adoptionPending && !rebased.plan && simCurrent) {
+          const projected = chatPlanFromPackage(simCurrent, {
+            brief: simCurrent.title || 'Existing video', audience: 'General audience',
+          });
+          const parsed = conversationPlanSchema.safeParse(projected);
+          if (parsed.success) rebased.plan = parsed.data;
+        }
       });
       if (replay) return replay;
 
@@ -1305,11 +1346,8 @@ export function createProjectChat({
           proposal.correction = built.correction;
           const bound = production?.findBound?.(simCurrent) ?? null;
           if (bound && typeof production?.proposeCorrection === 'function') {
-            const saved = store.save(simCurrent.id, built.package, capturedPackageRevision);
-            simCurrent = saved;
-            capturedPackageRevision = saved.revision;
             proposal.status = 'plan_pending';
-            boundCorrections.push({ proposal, productionId: bound.id });
+            boundCorrections.push({ proposal, productionId: bound.id, staged: built.package, baseline: simCurrent });
             continue;
           }
           let result;
@@ -1363,8 +1401,10 @@ export function createProjectChat({
         try {
           const planned = await production.proposeCorrection({
             productionId,
-            pkg: simCurrent,
+            pkg: boundCorrections[0].staged,
+            baseline: boundCorrections[0].baseline,
             sceneIds: boundCorrections.map(item => correctionSceneId(simCurrent, item.proposal)),
+            corrections: boundCorrections.map(item => ({ assetId: item.proposal.assetId, correction: item.proposal.correction })),
             commandId: `cmd_chat_${input.turnId ?? randomUUID()}`,
             userEventId: `ue_${input.turnId ?? randomUUID()}`,
           });
@@ -1546,6 +1586,40 @@ export function createProjectChat({
       if (input.action === 'build' && !session.plan) fail(400, 'Write a draft before building');
 
       let pendingBuild = null;
+      const drawingEdits = new Map();
+      const drawing = simCurrent?.scenes?.some(scene => scene.drawing) ? {
+        read(sceneId) {
+          const scene = simCurrent.scenes.find(item => item.id === sceneId);
+          if (!scene?.drawing) throw new Error(`Scene ${sceneId} has no procedural drawing`);
+          return { sceneId, preferredFrames: scene.preferredFrames, drawing: clone(drawingEdits.get(sceneId) ?? scene.drawing) };
+        },
+        edit(sceneId, replacements) {
+          const scene = simCurrent.scenes.find(item => item.id === sceneId);
+          if (!scene?.drawing) throw new Error(`Scene ${sceneId} has no procedural drawing`);
+          if (scene.locked) throw new Error(`Scene ${sceneId} is locked`);
+          // A drawing element is not yet mapped to the viewer's spatial, time,
+          // or preserve constraints. Refuse rather than broaden that scope.
+          if (iterationScope) throw new Error('Drawing edits are not available with an element-scoped request; remove the scope or use an unscoped chat.');
+          if (production?.findBound?.(simCurrent.id) && !productionContext) throw new Error('A production-bound drawing edit requires an available production and a turn ID');
+          if (requestedTargets && !requestedTargets.shotIds.includes(sceneId)) throw new Error(`Scene ${sceneId} is outside the requested shot targets`);
+          const next = clone(drawingEdits.get(sceneId) ?? scene.drawing);
+          const seen = new Set();
+          for (const { index, element } of replacements) {
+            if (seen.has(index)) throw new Error(`Duplicate drawing element index ${index}`);
+            seen.add(index);
+            const old = next.elements[index];
+            if (!old) throw new Error(`Drawing element ${index} does not exist`);
+            if (!element || element.type !== old.type) throw new Error(`Drawing element ${index} must retain its type`);
+            next.elements[index] = clone(element);
+          }
+          const candidate = clone(simCurrent);
+          candidate.scenes.find(item => item.id === sceneId).drawing = next;
+          const validation = validatePackage(candidate);
+          if (!validation.valid) throw new InvalidPackageError(validation.errors);
+          drawingEdits.set(sceneId, next);
+          return { ok: true, staged: true, sceneId, indices: [...seen], instruction: 'Call project_build to apply these changes.' };
+        },
+      } : null;
       const predictedRevision = () => (simCurrent ? simCurrent.revision + 1 : ((pendingBuild?.revision ?? 1)));
       const user = {
         role: 'user',
@@ -1562,7 +1636,9 @@ export function createProjectChat({
           placements: castPlacements,
           files: characterFilesForBuild(libraryStore, cast),
         } : null;
-        const candidate = await buildChatProject({
+        // A drawing-only edit must not recompile the draft: doing so can
+        // normalize an existing package's duration and unrelated metadata.
+        const candidate = drawingEdits.size && simCurrent && isDeepStrictEqual(plan, rebased.plan) ? clone(simCurrent) : await buildChatProject({
           plan,
           previous: simCurrent,
           previousPlan: lastBuiltPlan,
@@ -1573,6 +1649,14 @@ export function createProjectChat({
           ...(referenceStore ? { references: referenceStore } : {}),
           ...(castBuild ? { characters: castBuild } : {}),
         });
+        for (const [sceneId, editedDrawing] of drawingEdits) {
+          const scene = candidate.scenes.find(item => item.id === sceneId);
+          if (!scene?.drawing || scene.locked) throw new Error(`Drawing scene ${sceneId} is missing or locked`);
+          scene.drawing = clone(editedDrawing);
+        }
+        if (simCurrent && candidate.id !== simCurrent.id) {
+          fail(409, 'An edit cannot replace the bound package.', { code: 'EDIT_PACKAGE_MISMATCH' });
+        }
         signal.throwIfAborted();
         // The store validates on write; validate the candidate here so an invalid
         // package fails inside the turn instead of after the model reports success.
@@ -1600,6 +1684,7 @@ export function createProjectChat({
         await build(rebased.plan);
         return { plan: rebased.plan, built: true, reply: `Built “${rebased.plan.title}” into the project. You can preview it or keep chatting to revise it. Narration is a script; audio, GPU generation and export are separate steps.`, trace: { promptVersion: CONVERSATION_PROMPT_VERSION, skills: [], steps: 0, repairs: 0, usage: { input: 0, output: 0 }, tools: [{ name: 'project_build', ok: true }], omittedMessages: 0, elapsedMs: 0, stop: 'explicit-build' } };
       })() : await runConversationTurn({
+        systemSuffix: MODEL_CONTRIBUTION_PROMPT + ' In project_update_plan/project_patch_plan, use mediaType:image with a relevant visual direction for at least one visible scene/plate. For existing projects preserve genuine generated assets. A draft/build is not approved GPU generation or a final export.',
         model, sessionId: id, signal, skillsEnabled,
         mode: input.mode, messages: [...session.messages, ...(scopeMessage ? [scopeMessage] : []), user], plan: rebased.plan,
         brandContext: brand?.kit,
@@ -1608,6 +1693,7 @@ export function createProjectChat({
         references,
         clips,
         characters,
+        drawing,
         ...(productionContext ? { production: productionContext } : {}),
         projectContext: simCurrent ? {
           id: simCurrent.id, revision: simCurrent.revision, title: simCurrent.title, format: simCurrent.format,
@@ -1618,6 +1704,7 @@ export function createProjectChat({
             visual: scene.notes, locked: scene.locked, seconds: scene.preferredFrames / simCurrent.format.fps,
             data: scene.data, code: scene.code, media: scene.media, background: scene.background,
             motion: scene.motion, transitionOut: scene.transitionOut, foreground: scene.foreground,
+            ...(scene.drawing ? { drawing: { renderedInsteadOfLayoutCopy: true, labels: (scene.drawing.elements ?? []).filter(element => element.type === 'text').map(element => element.text) } } : {}),
           })),
         } : null,
         build,

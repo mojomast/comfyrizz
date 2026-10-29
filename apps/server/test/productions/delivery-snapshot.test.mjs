@@ -18,6 +18,7 @@ import {
   stageDeliverySnapshot,
 } from '../../src/productions/delivery-snapshot.mjs';
 import { createDeliveryStore } from '../../src/productions/delivery.mjs';
+import { collectMockContribution, recordMockRender } from '../helpers/comfy-contribution.mjs';
 
 const repo = new URL('../../../..', import.meta.url).pathname;
 const seed = JSON.parse(readFileSync(join(repo, 'examples', 'launch-demo', 'package.json'), 'utf8'));
@@ -53,6 +54,7 @@ function sceneId(pkg) {
 }
 
 function snapshotFor(pkg, packageDir, overrides = {}) {
+  collectMockContribution(pkg, packageDir);
   return createDeliverySnapshot({
     pkg,
     packageDir,
@@ -73,6 +75,28 @@ function errorCode(fn) {
   }
   assert.fail('expected the snapshot action to be refused');
 }
+
+test('narration must exist for final delivery but a draft reports it as pending', (t) => {
+  const { packageDir } = workspace(t);
+  const pkg = basePackage();
+  pkg.voice = { enabled: true, engine: 'kokoro' };
+  let final = preflightDelivery(snapshotFor(pkg, packageDir));
+  assert.equal(final.final, false);
+  assert.ok(final.blockers.some(item => item.code === 'NARRATION_PENDING'));
+  const draft = preflightDelivery(snapshotFor(pkg, packageDir, { intent: 'draft' }));
+  assert.equal(draft.ok, true);
+  assert.ok(draft.warnings.some(item => item.code === 'NARRATION_PENDING'));
+
+  pkg.assets.a_narration = { kind: 'audio', status: 'ready', file: 'audio/narration.norm.wav' };
+  pkg.scenes[0].narration_asset = 'a_narration';
+  final = preflightDelivery(snapshotFor(pkg, packageDir));
+  assert.ok(final.blockers.some(item => item.code === 'NARRATION_PENDING'), 'a ready declaration without bytes is not delivery');
+  mkdirSync(join(packageDir, 'audio'), { recursive: true });
+  writeFileSync(join(packageDir, 'audio/narration.norm.wav'), 'audio bytes');
+  final = preflightDelivery(snapshotFor(pkg, packageDir));
+  assert.equal(final.blockers.some(item => item.code === 'NARRATION_PENDING'), false);
+  assert.ok(preflightDelivery(snapshotFor(pkg, packageDir), { mixAudio: false }).blockers.some(item => item.code === 'NARRATION_MUTED'));
+});
 
 test('UX15: the snapshot fingerprint binds package, editor, selection, timing and intent', (t) => {
   const work = workspace(t);
@@ -191,8 +215,15 @@ test('UX15: publication is atomic, versioned and failed writes keep the prior bu
   const work = workspace(t);
   const snapshot = snapshotFor(basePackage(), work.packageDir);
 
+  for (const text of ['first video bytes', 'second video bytes']) {
+    const file = join(work.packageDir, 'mock.mp4');
+    writeFileSync(file, text);
+    recordMockRender(snapshot.package, work.packageDir, file, snapshot.timeline);
+  }
+
   const store = createDeliveryStore({ runtimeDir: root, clock: () => '2026-10-26T12:00:00.000Z' });
   const first = store.publishBundle({
+    packageDir: work.packageDir,
     productionId: 'prod_ux15',
     packageId: snapshot.packageId,
     snapshot,
@@ -222,6 +253,7 @@ test('UX15: publication is atomic, versioned and failed writes keep the prior bu
     },
   });
   assert.throws(() => failing.publishBundle({
+    packageDir: work.packageDir,
     productionId: 'prod_ux15',
     packageId: snapshot.packageId,
     snapshot,

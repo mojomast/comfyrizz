@@ -64,7 +64,7 @@ import { createClipStore, mountRenderBar, withRenderOverride, type RenderBarHand
 import { previewPackage, type PreviewClip } from './takes/preview-takes.ts';
 import { mountSceneTimeline, type SceneTimelineHandle } from './editor/timeline/mount';
 import type { ClipChip } from './editor/timeline/clip-state.ts';
-import { openInitialProject, type OpenedProject } from './default-project.ts';
+import { DEFAULT_PACKAGE_ID, openInitialProject, type OpenedProject } from './default-project.ts';
 import { assetRowHtml, hydrateAssetThumbs, type AssetThumbsHandle } from './assets/asset-row.ts';
 import { createThumbsClient, type ThumbsClient, type ThumbResult } from './thumbs/client.ts';
 import { mountAssetViewer } from './viewer/asset-viewer.ts';
@@ -790,6 +790,15 @@ function resetPreviewMedia(nextPkg: PackageV1): void {
       previewMediaKeys.delete(file);
     }
   }
+  for (const font of nextPkg.theme?.fonts ?? []) {
+    const file = font.file;
+    const key = `font:${nextPkg.revision ?? 0}:${file}`;
+    if (file && previewMediaSources[file] && previewMediaKeys.get(file) !== key) {
+      revokePreviewUrl(file);
+      delete previewMediaSources[file];
+      previewMediaKeys.delete(file);
+    }
+  }
 }
 
 async function hydratePreviewAudio(requests: PreviewAudioRequest[]): Promise<void> {
@@ -797,13 +806,16 @@ async function hydratePreviewAudio(requests: PreviewAudioRequest[]): Promise<voi
   const generation = previewMediaGeneration;
   if (!packageId || requests.length === 0) return;
   let changed = false;
+  let staleFont = false;
   await Promise.all(requests.map(async request => {
     const failed = previewMediaFailed.get(request.file);
-    if (previewMediaSources[request.file] || previewMediaFlights.has(request.file)
+    const flightKey = `${request.file}\u0000${request.cacheKey}`;
+    if (previewMediaSources[request.file] || previewMediaFlights.has(flightKey)
       || (failed && failed.key === request.cacheKey && Date.now() - failed.at < 30_000)) return;
     const flight = (async () => {
       try {
-        const response = await apiFetch(`/api/package/${encodeURIComponent(packageId)}/media?path=${encodeURIComponent(request.file)}`);
+        const route = request.kind === 'font' ? 'font' : 'media';
+        const response = await apiFetch(`/api/package/${encodeURIComponent(packageId)}/${route}?path=${encodeURIComponent(request.file)}`);
         if (!response.ok) {
           previewMediaFailed.set(request.file, { key: request.cacheKey, at: Date.now() });
           return;
@@ -813,6 +825,12 @@ async function hydratePreviewAudio(requests: PreviewAudioRequest[]): Promise<voi
           URL.revokeObjectURL(url);
           return;
         }
+        if (request.kind === 'font' && (!pkg.theme?.fonts?.some(font => font.file === request.file)
+          || request.cacheKey !== `font:${pkg.revision ?? 0}:${request.file}`)) {
+          URL.revokeObjectURL(url);
+          staleFont = true;
+          return;
+        }
         previewMediaSources[request.file] = url;
         previewMediaKeys.set(request.file, request.cacheKey);
         previewMediaFailed.delete(request.file);
@@ -820,13 +838,13 @@ async function hydratePreviewAudio(requests: PreviewAudioRequest[]): Promise<voi
       } catch {
         previewMediaFailed.set(request.file, { key: request.cacheKey, at: Date.now() });
       } finally {
-        previewMediaFlights.delete(request.file);
+        previewMediaFlights.delete(flightKey);
       }
     })();
-    previewMediaFlights.set(request.file, flight);
+    previewMediaFlights.set(flightKey, flight);
     await flight;
   }));
-  if (changed && generation === previewMediaGeneration && String(pkg.id ?? '') === packageId) {
+  if ((changed || staleFont) && generation === previewMediaGeneration && String(pkg.id ?? '') === packageId) {
     updatePreview(pkg, timeline, generatedAssets);
   }
 }
@@ -2328,9 +2346,12 @@ async function productionRenderFields(productionId: string | null | undefined): 
   return { commandId: `render:${commandId}`, expected: { productionRevision: revision } };
 }
 
-async function renderExportBlob(overrideReason?: string, options: { productionId?: string | null } = {}): Promise<{ blob: Blob; revision: number; renderId?: string }> {
+async function renderExportBlob(overrideReason?: string, options: { productionId?: string | null; persistedRevision?: number } = {}): Promise<{ blob: Blob; revision: number; renderId?: string }> {
   let body: Record<string, unknown> = { package: pkg };
-  if (token) {
+  if (token && options.persistedRevision !== undefined) {
+    if (!options.productionId || state.dirty || pkg.revision !== options.persistedRevision) throw new Error('The saved package changed. Review and approve the current version before exporting.');
+    body = { packageId: pkg.id, baseRevision: options.persistedRevision };
+  } else if (token) {
     // C2: persist with a base revision, then render that exact revision.
     const saved = await apiFetch(`/api/package/${encodeURIComponent(pkg.id)}`, { method: 'PATCH', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ baseRevision: pkg.revision, package: pkg }) });
     const savedBody = await saved.json().catch(() => ({}));
@@ -2853,6 +2874,7 @@ function init(opened: OpenedProject): void {
     onFrame();
     logActivity('Remotion Player ready: compiled timeline mounted');
   });
+  updatePreview(pkg, timeline, generatedAssets);
 
   const easyRoot = document.getElementById('easy-root');
   if (easyRoot) {
@@ -2862,7 +2884,7 @@ function init(opened: OpenedProject): void {
     // than pretending a saved download is recoverable.
     const easyHost = {
       apiFetch, editorStore, previewTake, refreshClips, adoptBuiltPackage, seekToScene,
-      hasToken: () => Boolean(sessionToken()), getPackage: () => pkg, renderMp4: (options?: { productionId?: string | null }) => renderExportBlob(undefined, options),
+      hasToken: () => Boolean(sessionToken()), getPackage: () => pkg, renderMp4: (options?: { productionId?: string | null; persistedRevision?: number }) => renderExportBlob(undefined, options),
       clips: () => clipStore.all(), subscribeClips: (listener: () => void) => clipStore.subscribe(() => listener()), takesApi,
       clipGate: () => studioClipGate(clipStore.all(), pkg.assets as never), applySceneChip: applySceneChipFlow, aiSelection: () => agentSettings.selection(),
       openAgentSettings: () => document.getElementById('agent-settings-open')?.dispatchEvent(new MouseEvent('click', { bubbles: true })),
@@ -3257,6 +3279,12 @@ function init(opened: OpenedProject): void {
 
   projectChat = mountProjectChat({
     apiFetch: chatApiFetch,
+    getEditContext: () => {
+      // A bare launch demo is a starting point for a new conversation. Once
+      // Super Easy opens a real package, Advanced chat must edit that package.
+      if (opened.source !== 'requested' && pkg.id === DEFAULT_PACKAGE_ID) return null;
+      return { packageId: pkg.id, revision: pkg.revision };
+    },
     getAgentProgress: async sessionId => {
       const response = await chatApiFetch(`/api/agent/progress?sessionId=${encodeURIComponent(sessionId)}`);
       if (!response.ok) throw new Error(`Progress HTTP ${response.status}`);

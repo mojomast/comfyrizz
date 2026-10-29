@@ -166,10 +166,10 @@ test('tools: propose + edit package, SVG result, planned FLUX job', async () => 
   assert.equal(image.output_aspect, '16:9');
   assert.equal(image.asset.gen.workflow, 'workflows/flux3_klein_t2i.api.json');
 
-  const refEdit = await tools['assets.generate_image'].run({ scene_id: 's1', intent: 'restyle the flow diagram', refs: ['a_svg_flow'] }) as any;
+  const refEdit = await tools['assets.generate_image'].run({ scene_id: 's1', intent: 'restyle the flow diagram', refs: [svg.asset.id] }) as any;
   assert.equal(refEdit.reference_edit, true);
   assert.equal(refEdit.asset.gen.workflow, 'workflows/flux3_klein_ref_edit.api.json');
-  assert.equal(refEdit.asset.gen.inputs.reference, 'a_svg_flow');
+  assert.equal(refEdit.asset.gen.inputs.reference, svg.asset.id);
   assert.equal(refEdit.asset.gen.inputs.text, true);
   assert.match(refEdit.asset.gen.inputs.prompt, /Restyle this restyle the flow diagram as clay/);
   assert.match(refEdit.asset.gen.inputs.prompt, /Keep the exact layout, positions, colours and all labels exactly as written/);
@@ -300,11 +300,11 @@ test('agent circuit-breaks a repeated invalid call instead of spending more mode
   assert.equal(result.ok, false);
   assert.equal(result.stopped, 'repair_limit');
   assert.match(result.error ?? '', /repeated invalid tool call/);
-  assert.equal(result.toolCalls.length, 2);
+  assert.equal(result.toolCalls.length, 3);
   assert.equal(result.toolCalls[1].error, 'duplicate_invalid_call');
 });
 
-test('runCpuSlice returns an incomplete live motion-graphics plan for server fallback', async () => {
+test('runCpuSlice accepts a live native layout plan with zero SVG assets', async () => {
   const { runCpuSlice } = await import('../src/cpu-slice.js');
   const brief = 'A calm launch video with an icon, a diagram, a pattern and animated bars, plus a nebula illustration.';
   const model = new ScriptedModel(step => step === 0
@@ -312,6 +312,8 @@ test('runCpuSlice returns an incomplete live motion-graphics plan for server fal
     : [{ type: 'text', delta: 'done' }]);
   const slice = await runCpuSlice({ brief, model, generateSvg: () => ({ svg: SVG }) });
   assert.equal(slice.live, true);
+  assert.equal(slice.ok, true, 'native layouts can complete without generated SVG assets');
+  assert.deepEqual(slice.problems, []);
   assert.equal(slice.svgAssets.length, 0);
   assert.equal(slice.package.title, 'Calm launch');
 });
@@ -319,7 +321,7 @@ test('runCpuSlice returns an incomplete live motion-graphics plan for server fal
 test('runCpuSlice builds a six-scene package with four SVG assets and one GPU plan', async () => {
   const { runCpuSlice } = await import('../src/cpu-slice.js');
   const slice = await runCpuSlice({
-    brief: 'A calm launch video with an icon, a diagram, a pattern and animated bars, plus a nebula illustration.',
+    brief: 'Icon, diagram, pattern, bars; nebula launch.',
     now: () => '2026-10-18T00:00:00.000Z',
     generateSvg: intent => ({
       svg: SVG,

@@ -105,8 +105,74 @@ test('narration reports small drift and rejects changes beyond the acceptance ba
   writeFileSync(join(packageDir, 'audio', 'durations.json'), JSON.stringify(durations(30)));
   await assert.rejects(
     () => prepareRunNarration({ pkg, workDir, outputDir, packageDir }),
-    /acceptable range is .* seconds; shorten or rebalance/,
+    error => {
+      assert.match(error.message, /acceptable range is .* seconds; shorten or rebalance/);
+      assert.equal(error.code, 'NARRATION_TOO_LONG');
+      assert.equal(error.details.scenes[0].sceneId, sceneId);
+      assert.equal(error.details.scenes[0].measuredSeconds, 30);
+      assert.ok(error.details.scenes[0].targetWords < error.details.scenes[0].words);
+      return true;
+    },
   );
+});
+
+test('exact-duration measured overflow returns actionable scene slots without staging audio', async t => {
+  const root = mkdtempSync(join(tmpdir(), 'comfyrizz-exact-fit-'));
+  t.after(() => rmSync(root, { recursive: true, force: true }));
+  const workDir = join(root, 'work');
+  const outputDir = join(root, 'out');
+  const packageDir = join(root, 'package');
+  mkdirSync(workDir, { recursive: true });
+  mkdirSync(join(packageDir, 'audio'), { recursive: true });
+  const pkg = narratedPackage();
+  pkg.duration = { mode: 'target', targetFrames: 1350, exact: true };
+  pkg.assets.a_narration = { kind: 'audio', status: 'ready', file: 'audio/narration.norm.wav' };
+  const sceneId = pkg.scenes[0].id;
+  writeFileSync(join(packageDir, 'audio', 'narration.norm.wav'), 'wav');
+  writeFileSync(join(packageDir, 'audio', 'durations.json'), JSON.stringify({
+    paddingSeconds: 0.5, scenes: { [sceneId]: { seconds: 60, chunks: [{ text: pkg.scenes[0].narration, seconds: 60 }] } },
+  }));
+  await assert.rejects(() => prepareRunNarration({ pkg, workDir, outputDir, packageDir }), error => {
+    assert.equal(error.code, 'NARRATION_TOO_LONG');
+    assert.equal(error.status, 422);
+    assert.equal(error.details.targetFrames, 1350);
+    assert.ok(error.details.minimumFrames > 1350);
+    assert.equal(error.details.excessFrames, error.details.minimumFrames - 1350);
+    const scene = error.details.scenes[0];
+    assert.equal(scene.sceneId, sceneId);
+    assert.equal(scene.measuredFrames, 1815);
+    assert.equal(scene.excessFrames, scene.measuredFrames - scene.availableFrames);
+    assert.ok(scene.targetWords < scene.words);
+    assert.equal(existsSync(join(outputDir, 'audio')), false);
+    return true;
+  });
+});
+
+test('fresh synthesis checks exact fit before the narration script can fail with a subprocess stack', async t => {
+  const root = mkdtempSync(join(tmpdir(), 'comfyrizz-fresh-exact-fit-'));
+  t.after(() => rmSync(root, { recursive: true, force: true }));
+  const workDir = join(root, 'work');
+  mkdirSync(workDir, { recursive: true });
+  const pkg = narratedPackage();
+  pkg.duration = { mode: 'target', targetFrames: 1350, exact: true };
+  const calls = [];
+  const runCommand = async (_command, args) => {
+    calls.push(args);
+    assert.ok(args.some(arg => arg.endsWith('synth.py')));
+    mkdirSync(join(workDir, 'audio'), { recursive: true });
+    writeFileSync(join(workDir, 'audio', 'durations.json'), JSON.stringify({
+      paddingSeconds: 0.5, scenes: { [pkg.scenes[0].id]: { seconds: 60, chunks: [{ text: pkg.scenes[0].narration, seconds: 60 }] } },
+    }));
+  };
+  await assert.rejects(() => prepareRunNarration({ pkg, workDir, outputDir: join(root, 'out'), packageDir: join(root, 'package'), runCommand }), error => {
+    assert.equal(error.code, 'NARRATION_TOO_LONG');
+    assert.equal(error.status, 422);
+    assert.ok(error.details.excessFrames > 0);
+    assert.equal(error.details.scenes[0].sceneId, pkg.scenes[0].id);
+    return true;
+  });
+  assert.equal(calls.length, 1);
+  assert.equal(existsSync(join(root, 'out', 'audio')), false);
 });
 
 test('final media merge retains new measured narration without overriding live edits', () => {

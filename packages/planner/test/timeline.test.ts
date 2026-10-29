@@ -34,6 +34,46 @@ test('six 150-frame scenes with five 15-frame fades compile to 825 frames', () =
   assert.deepEqual(timeline.scenes.map(s => s.transitionOutFrames), [15, 15, 15, 15, 15, 0]);
 });
 
+test('exact targets retime compiled overlaps in both directions without changing fps', () => {
+  for (const seconds of [12, 40, 45]) {
+    const source = pkg(Array.from({ length: 10 }, (_, i) => scene(`s${i}`, { preferredFrames: 150, transitionOut: { type: i === 9 ? 'cut' : 'fade', frames: i === 9 ? 0 : 15 } })));
+    source.duration = { mode: 'target', targetFrames: seconds * 30, exact: true };
+    const timeline = compileTimeline(source);
+    assert.equal(timeline.durationInFrames, seconds * 30);
+    assert.equal(timeline.fps, 30);
+    assert.equal(timeline.scenes.at(-1)!.from + timeline.scenes.at(-1)!.durationInFrames, seconds * 30);
+    assert.equal(timeline.target.requiresAcceptance, false);
+    assert.equal(source.scenes[0].preferredFrames, 150);
+  }
+});
+
+test('exact retiming protects measured narration, overlap, explicit cues, locks and edited trim', () => {
+  const source = pkg([
+    scene('a', { preferredFrames: 180, motion: { cue_seconds: [3] }, transitionOut: { type: 'fade', frames: 30 } }),
+    scene('b', { preferredFrames: 150, locked: true, transitionOut: { type: 'fade', frames: 20 } }),
+    scene('c', { preferredFrames: 150, audio_trim: { startSeconds: 0, endSeconds: 2 }, transitionOut: { type: 'cut', frames: 0 } }),
+  ]);
+  source.duration = { mode: 'target', targetFrames: 400, exact: true };
+  const options = { narration: { a: [{ text: 'Speech', seconds: 3 }] }, narrationPaddingSeconds: 0 };
+  const timeline = compileTimeline(source, options);
+  assert.equal(timeline.durationInFrames, 400);
+  assert.equal(timeline.scenes[1].durationInFrames, 150);
+  assert.ok(timeline.scenes[0].durationInFrames >= 120);
+  assert.ok(timeline.scenes[2].durationInFrames >= 150);
+  source.duration.targetFrames = 300;
+  assert.throws(() => compileTimeline(source, options), (error: unknown) => error instanceof TimelineError && error.code === 'exact-duration-impossible' && /Shorten narration/.test(error.message));
+});
+
+test('exact retiming refuses to extend or shorten video footage and preserves approximate targets', () => {
+  const source = pkg([scene('a', { background: { asset: 'video' }, transitionOut: { type: 'cut', frames: 0 } })]);
+  source.assets = { video: { kind: 'video' } };
+  source.duration = { mode: 'target', targetFrames: 120, exact: true };
+  assert.throws(() => compileTimeline(source), /Exact target.*cannot fit/);
+  source.duration = { mode: 'target', targetFrames: 120 };
+  assert.equal(compileTimeline(source).durationInFrames, 150);
+  assert.equal(compileTimeline(source).target.requiresAcceptance, true);
+});
+
 test('a cut is a hard cut even if it carries frames', () => {
   const timeline = compileTimeline(pkg([
     scene('s1', { transitionOut: { type: 'cut', frames: 15 } }),

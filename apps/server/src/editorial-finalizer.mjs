@@ -51,6 +51,15 @@ export function finalizeGeneratedFilmEditorial(pkg, { intent, brief = '', assets
   const scenes = (Array.isArray(next.scenes) ? next.scenes : []).map(scene => applyProductionIntentToScene(scene, intent));
   next.scenes = applyGeneratedFilmPresentation(scenes, intent, next.title ?? 'Untitled film');
 
+  if (intent.silent) {
+    next.voice = { enabled: false, engine: 'none' };
+    // An explicit empty mix also disables the renderer's legacy audio fallback.
+    next.audio = { ambience: { enabled: false } };
+    for (const asset of Object.values(next.assets ?? {})) {
+      if (asset?.kind === 'video') asset.media = { ...asset.media, audio: 'muted' };
+    }
+  }
+
   let narrationEnabled = false;
   if (!intent.wordless && hasNarration(next) && (next.voice?.enabled !== true || next.voice?.engine === 'none' || !next.voice?.engine)) {
     next.voice = { ...DEFAULT_NARRATION_VOICE };
@@ -58,13 +67,13 @@ export function finalizeGeneratedFilmEditorial(pkg, { intent, brief = '', assets
   }
 
   let ambienceEnabled = false;
-  if (hasH3Footage(next) && next.audio?.ambience === undefined) {
+  if (!intent.silent && hasH3Footage(next) && next.audio?.ambience === undefined) {
     next.audio = { ...(next.audio ?? {}), ambience: { gain_db: -8 } };
     ambienceEnabled = true;
   }
 
   let musicAdded = false;
-  if (intent.musicRequested && !readyConfiguredMusic(next) && typeof next.audio?.music?.asset !== 'string') {
+  if (!intent.silent && intent.musicRequested && !readyConfiguredMusic(next) && typeof next.audio?.music?.asset !== 'string') {
     if (!assetsDir) throw new Error('assetsDir is required to finalize requested music');
     const audioIdentity = createHash('sha256').update(`${next.id ?? ''}:${brief}`).digest('hex').slice(0, 12);
     next = applyProceduralFinishingAudio(next, {

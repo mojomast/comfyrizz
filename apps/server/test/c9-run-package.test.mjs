@@ -139,8 +139,8 @@ test('colab: brief -> package -> spend confirm -> run -> collected plate -> MP4 
   }
   const runtime = mkdtempSync(join(tmpdir(), 'comfyrizz-c9-colab-'));
   scratchRoots.push(runtime);
-  const platePath = join(runtime, 'remote', 'comfyrizz', 'out', 'assets', 'a_data_still.png');
-  mkdirSync(join(runtime, 'remote', 'comfyrizz', 'out', 'assets'), { recursive: true });
+  const platePath = join(runtime, 'remote', 'out', 'assets', 'a_data_still.png');
+  mkdirSync(join(runtime, 'remote', 'out', 'assets'), { recursive: true });
   const plate = realPlate(platePath);
   const manifest = {
     v: 1,
@@ -193,10 +193,10 @@ test('colab: brief -> package -> spend confirm -> run -> collected plate -> MP4 
     const started = await httpJson(server, 'POST', '/api/run', { backendId: 'colab', packageId: pkgId, budgetUnits: 50, approved: true });
     assert.equal(started.status, 200);
     const finished = await app.runs.wait(started.json.runId);
-    assert.equal(finished.status, 'done');
+    assert.equal(finished.status, 'done', JSON.stringify(finished.result?.verification));
     assert.equal(finished.teardown.state, 'stopped', 'the VM was stopped and verified');
     const phases = finished.events.filter((event) => event.event === 'run_phase').map((event) => event.phase);
-    assert.deepEqual(phases, ['planned', 'allocating', 'up', 'bootstrapping', 'bootstrapped', 'checking_health', 'generating', 'ran', 'applied', 'gated', 'stopping', 'teardown']);
+    assert.deepEqual(phases, ['planned', 'allocating', 'up', 'bootstrapping', 'bootstrapped', 'checking_health', 'generating', 'ran', 'verified', 'verify', 'applied', 'gated', 'stopping', 'teardown']);
     assert.equal(finished.applied.length, 1);
     assert.equal(finished.applied[0].asset, 'a_data_still');
 

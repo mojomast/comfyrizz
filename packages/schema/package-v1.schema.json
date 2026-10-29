@@ -110,6 +110,10 @@
           "maximum": 108000,
           "description": "Required for mode target. Integer frames at format.fps."
         },
+        "exact": {
+          "type": "boolean",
+          "description": "Require the compiled timeline to match targetFrames exactly, including transition overlaps."
+        },
         "minFrames": {
           "type": "integer",
           "minimum": 1,
@@ -666,6 +670,41 @@
             },
             "duck": {
               "$ref": "#/$defs/audioDuck"
+            },
+            "trim": {
+              "type": "object",
+              "required": ["startSeconds", "endSeconds"],
+              "unevaluatedProperties": false,
+              "description": "Optional finite source window for the music bed. Semantic validation requires startSeconds < endSeconds; music-video adoption also bounds it to the probed song.",
+              "properties": {
+                "startSeconds": {
+                  "type": "number",
+                  "minimum": 0,
+                  "maximum": 36000
+                },
+                "endSeconds": {
+                  "type": "number",
+                  "exclusiveMinimum": 0,
+                  "maximum": 36000
+                }
+              }
+            },
+            "reactive": {
+              "type": "object",
+              "required": ["style", "intensity"],
+              "unevaluatedProperties": false,
+              "description": "Optional illustrative music-reactive treatment. It does not claim beat, lyric or song-section analysis.",
+              "properties": {
+                "style": {
+                  "type": "string",
+                  "enum": ["waveform", "bars"]
+                },
+                "intensity": {
+                  "type": "number",
+                  "minimum": 0,
+                  "maximum": 1
+                }
+              }
             }
           }
         },
@@ -695,6 +734,19 @@
           "description": "Short sound effects at scene seams, timed to the MS3 transition. Each names a ready audio asset and the scene it belongs to.",
           "items": {
             "$ref": "#/$defs/audioSfx"
+          }
+        },
+        "lyricsStyle": {
+          "type": "string",
+          "enum": ["off", "caption", "reel"],
+          "description": "Music-video lyric presentation. Absent means off; this field intentionally has no schema default so normalising an old package does not mutate its audio block."
+        },
+        "lyrics": {
+          "type": "array",
+          "maxItems": 512,
+          "description": "Optional canonical lyric cues in original-song seconds. Cue ends are exclusive; an omitted end is bounded by the next cue for semantic word validation.",
+          "items": {
+            "$ref": "#/$defs/lyricCue"
           }
         }
       }
@@ -764,6 +816,52 @@
           "minimum": -60,
           "maximum": 12,
           "default": -6
+        }
+      }
+    },
+    "lyricCue": {
+      "type": "object",
+      "required": ["startSeconds", "text"],
+      "unevaluatedProperties": false,
+      "description": "One canonical lyric cue. Times are original-song seconds and endSeconds is exclusive.",
+      "properties": {
+        "startSeconds": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 36000
+        },
+        "endSeconds": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 36000
+        },
+        "text": {
+          "type": "string",
+          "maxLength": 160
+        },
+        "words": {
+          "type": "array",
+          "maxItems": 64,
+          "items": {
+            "$ref": "#/$defs/lyricWord"
+          }
+        }
+      }
+    },
+    "lyricWord": {
+      "type": "object",
+      "required": ["startSeconds", "text"],
+      "unevaluatedProperties": false,
+      "description": "One explicitly timed enhanced-LRC segment. No duration is fabricated for a word.",
+      "properties": {
+        "startSeconds": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 36000
+        },
+        "text": {
+          "type": "string",
+          "maxLength": 80
         }
       }
     },
@@ -1272,6 +1370,16 @@
         "note": {
           "type": "string",
           "maxLength": 256
+        },
+        "csv_query": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["id", "sha256", "description"],
+          "properties": {
+            "id": {"type": "string", "maxLength": 80},
+            "sha256": {"type": "string", "pattern": "^[a-f0-9]{64}$"},
+            "description": {"type": "string", "maxLength": 8000}
+          }
         }
       }
     },
@@ -1494,8 +1602,28 @@
         }
       }
     },
+    "drawingElement": {
+      "type": "object", "required": ["type", "color", "start", "end"], "unevaluatedProperties": false,
+      "properties": {
+        "type": {"enum": ["path", "polygon", "text", "rect", "circle"]},
+        "color": {"type": "string", "pattern": "^#[0-9a-fA-F]{6}$"},
+        "opacity": {"type": "number", "minimum": 0, "maximum": 1},
+        "start": {"type": "integer", "minimum": 0, "maximum": 108000},
+        "end": {"type": "integer", "minimum": 0, "maximum": 108000}
+      },
+      "oneOf": [
+        {"properties": {"type": {"const": "path"}, "points": {"type": "array", "minItems": 2, "maxItems": 200, "items": {"type": "array", "minItems": 2, "maxItems": 2, "items": {"type": "number", "minimum": 0, "maximum": 1000}}}, "width": {"type": "number", "minimum": 0.5, "maximum": 50}, "erase": {"type": "boolean"}, "marker": {"type": "boolean"}}, "required": ["points", "width"]},
+        {"properties": {"type": {"const": "polygon"}, "points": {"type": "array", "minItems": 3, "maxItems": 200, "items": {"type": "array", "minItems": 2, "maxItems": 2, "items": {"type": "number", "minimum": 0, "maximum": 1000}}}}, "required": ["points"]},
+        {"properties": {"type": {"const": "text"}, "x": {"$ref": "#/$defs/drawingCoordinate"}, "y": {"$ref": "#/$defs/drawingCoordinate"}, "text": {"type": "string", "minLength": 1, "maxLength": 200}, "size": {"type": "number", "minimum": 5, "maximum": 200}}, "required": ["x", "y", "text", "size"]},
+        {"properties": {"type": {"const": "rect"}, "x": {"$ref": "#/$defs/drawingCoordinate"}, "y": {"$ref": "#/$defs/drawingCoordinate"}, "width": {"$ref": "#/$defs/drawingCoordinate"}, "height": {"$ref": "#/$defs/drawingCoordinate"}}, "required": ["x", "y", "width", "height"]},
+        {"properties": {"type": {"const": "circle"}, "x": {"$ref": "#/$defs/drawingCoordinate"}, "y": {"$ref": "#/$defs/drawingCoordinate"}, "radius": {"$ref": "#/$defs/drawingCoordinate"}}, "required": ["x", "y", "radius"]}
+      ]
+    },
+    "drawingCoordinate": {"type": "number", "minimum": 0, "maximum": 1000},
     "scene": {
       "type": "object",
+      "if": { "properties": { "headline_size": {} }, "required": ["headline_size"] },
+      "then": { "properties": { "layout": { "const": "title" } } },
       "required": [
         "id",
         "layout"
@@ -1539,8 +1667,22 @@
           "minimum": 1,
           "maximum": 108000
         },
+        "drawing": {
+          "type": "object", "required": ["background", "elements"], "additionalProperties": false,
+          "properties": {
+            "background": {"type": "string", "pattern": "^#[0-9a-fA-F]{6}$"},
+            "elements": {"type": "array", "minItems": 1, "maxItems": 500, "items": {"$ref": "#/$defs/drawingElement"}},
+            "source": {"type": "object", "additionalProperties": false, "required": ["id", "sha256", "description"], "properties": {"id": {"type": "string", "maxLength": 80}, "sha256": {"type": "string", "pattern": "^[a-f0-9]{64}$"}, "description": {"type": "string", "maxLength": 8000}}}
+          }
+        },
         "copy": {
           "$ref": "#/$defs/copy"
+        },
+        "headline_size": {
+          "type": "integer",
+          "minimum": 24,
+          "maximum": 512,
+          "description": "Title layout only: headline font size in composition pixels. Omit for the existing 104px (outro 76px) default; explicit size uses 1.05 line-height. Width depends on font and copy, not auto-fit."
         },
         "data": {
           "oneOf": [
@@ -1870,6 +2012,18 @@
         "codec": {
           "type": "string",
           "maxLength": 32
+        },
+        "sampleRate": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 768000,
+          "description": "Audio sample rate in Hz, measured from the stored file."
+        },
+        "channels": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 256,
+          "description": "Number of audio channels, measured from the stored file."
         },
         "crop": {
           "type": "object",

@@ -6,6 +6,21 @@ import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { fixture } from './pipeline-fixture.mjs';
 
+test('worker reports that music background auditions have no automatic sync diagnostic even with SyncNet configured', async t => {
+  const f = fixture(t);
+  const file = join(f.spec.workDir, 'package.json');
+  const pkg = JSON.parse(readFileSync(file));
+  const scene = pkg.scenes[0];
+  pkg.audio = { music: { asset: 'a_song', trim: { startSeconds: 0, endSeconds: 10 } } };
+  pkg.assets.a_audition = { kind: 'video', origin: 'generated', status: 'pending', gen: { generator: 'ltx25-a2v', inputs: { audio: 'a_excerpt' } } };
+  scene.background = { asset: 'a_audition' };
+  writeFileSync(file, JSON.stringify(pkg));
+  await executePipeline(f.spec, f.adapters);
+  const warning = f.events.find(event => event.code === 'MUSIC_AUDITION_SYNC_UNSUPPORTED');
+  assert.equal(warning?.sceneId, scene.id);
+  assert.match(warning.message, /do not run/);
+});
+
 test('all nine stages enforce voice → measured timing → media shutdown → sync → render → export', async t => {
   const f = fixture(t);
   const code = await executePipeline(f.spec, f.adapters);

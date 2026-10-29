@@ -221,6 +221,23 @@ test('LTX uses pinned i2v, retains start-frame refs and requires finishing sound
   assert.ok(plan.jobs.some((job: any) => job.asset === composition));
 });
 
+test('full silence creates no finishing stem for LTX/Klein and mutes H3 native audio', async () => {
+  for (const model of ['ltx', 'klein', 'h3'] as const) {
+    const writes: string[] = [];
+    const { tools, getDraft, identity, composition } = await filmTools(model, undefined, id => writes.push(id), 'Create a silent generated film. No audio.');
+    const result = await tools['assets.generate_video'].run(direction(identity, composition, { motion_model: model })) as any;
+    const pkg = getDraft();
+    assert.equal(pkg.audio?.music, undefined);
+    assert.equal(pkg.assets.a_finishing_mix, undefined);
+    assert.ok(!writes.includes('a_finishing_mix'));
+    if (model === 'h3') {
+      assert.equal(result.asset.media.audio, 'muted');
+      assert.match(result.asset.gen.direction.soundscape, /Full silence/);
+    } else assert.match(result.finishing_sound, /Full silence/);
+    assert.throws(() => tools['assets.generate_video'].run(direction(identity, composition, { wordless: false, dialogue: { text: 'Hello', speaker: 'c1' } })), /brief prohibits speech/);
+  }
+});
+
 test('auto mixes camera-led LTX and character-action H3 without model fallback', async () => {
   const { tools, getDraft, identity, composition } = await filmTools('auto', [shot('shot1'), shot('shot2')]);
   const establishing = await tools['assets.generate_video'].run(direction(identity, composition, {

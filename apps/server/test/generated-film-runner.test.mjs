@@ -3,8 +3,10 @@ import assert from 'node:assert/strict';
 import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { createAgentProgress } from '../src/agent-progress.mjs';
-import { coverGeneratedFilmScenes, createCpuAgentRunner, enforceLiveActionHumans, generatedFilmCompletionProblems } from '../src/agent-runner.mjs';
+import { coverGeneratedFilmScenes, createCpuAgentRunner, enforceLiveActionHumans, generatedFilmCompletionProblems, withInitialAdmissionRetry, withRepairAdmissionRetry } from '../src/agent-runner.mjs';
 import { replayProvider } from './fake-provider.mjs';
+import { createReferenceStore } from '../src/references/store.mjs';
+import { createContextAttachmentStore } from '../src/context-attachments.mjs';
 
 const BRIEF = 'Create a 24-second wordless handcrafted miniature film in 4 shots. A mustard felt jerboa and a cobalt wooden bird restore an island lighthouse at dusk as a small boat approaches. Recurring tactile characters, clear physical action, cinematic camera moves, warm golden payoff, gentle coastal sound. No dialogue, captions, logos or real people.';
 const ONE_SHOT_BRIEF = BRIEF.replace('24-second', '6-second').replace('in 4 shots', 'in 1 shot');
@@ -43,6 +45,30 @@ test('FLUX-only generated-film output is rejected with no scripted fallback', as
     },
   );
   assert.equal(provider.calls, calls.length + 2, 'one live plan and one bounded repair, never the defaultCpuScript fallback');
+});
+
+test('explicit generated-film Music Video adopts the song and lyrics', async t => {
+  const musicBrief = BRIEF.replace('miniature film', 'miniature generated film').replace('No dialogue, captions, logos', 'No dialogue, logos');
+  const calls = [
+    { name: 'storyboard.propose', args: { brief: musicBrief, title: 'The Lamp at Dusk', proposal, scenes } },
+    ...scenes.map(scene => ({ name: 'assets.generate_video', args: { ...shotDirection(scene.id), motion_model: 'klein' } })),
+  ];
+  const { runner, runtimeDir } = await setup(t, calls);
+  const samples = 24 * 24000;
+  const wav = Buffer.alloc(44 + samples * 2);
+  wav.write('RIFF', 0); wav.writeUInt32LE(wav.length - 8, 4); wav.write('WAVEfmt ', 8);
+  wav.writeUInt32LE(16, 16); wav.writeUInt16LE(1, 20); wav.writeUInt16LE(1, 22);
+  wav.writeUInt32LE(24000, 24); wav.writeUInt32LE(48000, 28); wav.writeUInt16LE(2, 32);
+  wav.writeUInt16LE(16, 34); wav.write('data', 36); wav.writeUInt32LE(samples * 2, 40);
+  const conversationId = 'chat_0123456789abcdef';
+  const store = createReferenceStore({ rootDir: runtimeDir, chatId: conversationId });
+  const song = store.add({ bytes: wav, filename: 'song.wav', meta: { mime: 'audio/wav', role: 'song', durationSec: 24 } });
+  store.update(song.id, { usage: 'editorial' });
+  const lyrics = [{ startSeconds: 1, text: 'A song' }];
+  const result = await runner({ brief: musicBrief, provider: 'custom', motionModel: 'klein', videoType: 'music-video', conversationId, lyricsStyle: 'caption', lyrics });
+  assert.equal(result.package.assets[result.package.audio.music.asset].source.id, song.id);
+  assert.deepEqual(result.package.audio.lyrics, lyrics);
+  assert.equal(result.package.audio.lyricsStyle, 'caption');
 });
 
 test('runner accepts real wordless H3 completion and persists silent conditioning', async t => {
@@ -103,7 +129,7 @@ test('one bounded repair corrects the existing package duration before productio
   } });
   assert.equal(result.fallback, false);
   assert.equal(repaired, true, 'the invalid first plan really exercised the bounded repair');
-  assert.equal(provider.calls, repairCalls.length, 'repair used its step cap only for edits and required shot assets, not another storyboard proposal');
+  assert.equal(provider.calls, repairCalls.length + 1, 'repair executes the eight edits/assets and receives a final model turn');
   const repairRequestText = JSON.stringify(provider.requests.at(-1)?.messages ?? []);
   assert.match(repairRequestText, /requested total frames=720/);
   assert.match(repairRequestText, /shot1 preferredFrames=225/);
@@ -112,6 +138,135 @@ test('one bounded repair corrects the existing package duration before productio
   const seconds = result.package.scenes.reduce((sum, scene) => sum + scene.preferredFrames, 0) / result.package.format.fps;
   assert.equal(seconds, 24);
   assert.equal(result.package.proposal.logline, proposal.logline);
+});
+
+test('generated-film repair reaching its step cap is rejected even when the draft is complete', async t => {
+  const { runner, provider } = await setup(t, [
+    { name: 'storyboard.propose', args: { brief: BRIEF, title: 'The Lamp at Dusk', proposal, scenes: scenes.map(scene => ({ ...scene, preferredFrames: 225 })) } },
+  ]);
+  let repairStarted = false;
+  await assert.rejects(() => runner({ brief: BRIEF, provider: 'custom', motionModel: 'klein', onEvent: event => {
+    if (event.type === 'runner_phase' && event.phase === 'initial' && event.status === 'validation' && !repairStarted) {
+      repairStarted = true;
+      provider.setCalls([
+        ...scenes.map(scene => ({ name: 'storyboard.edit', args: { scene_id: scene.id, patch: { preferredFrames: 180 } } })),
+        ...scenes.map(scene => ({ name: 'assets.generate_video', args: { ...shotDirection(scene.id), motion_model: 'klein' } })),
+        ...Array.from({ length: 8 }, () => ({ name: 'storyboard.edit', args: { scene_id: 'shot1', patch: { preferredFrames: 180 } } })),
+      ]);
+    }
+  } }), error => {
+    assert.equal(error.code, 'GENERATED_FILM_INCOMPLETE');
+    assert.match(error.message, /repair stopped: agent step limit \(16\) reached/);
+    assert.deepEqual(error.errors, [], 'a valid draft alone must not mask the unfinished model turn');
+    return true;
+  });
+  assert.equal(repairStarted, true);
+  assert.equal(provider.calls, 16, 'no request is issued beyond the repair cap');
+});
+
+test('repair survives the campaign admission 429 and revalidates the existing plan', async t => {
+  const { runner, provider, runtimeDir } = await setup(t, [
+    { name: 'storyboard.propose', args: { brief: BRIEF, title: 'The Lamp at Dusk', proposal, scenes: scenes.map(scene => ({ ...scene, preferredFrames: 225 })) } },
+  ]);
+  const conversationId = 'chat_0123456789abcdef';
+  createContextAttachmentStore({ rootDir: runtimeDir, chatId: conversationId }).addFile({
+    bytes: Buffer.from('The lighthouse lamp must be amber.'), filename: 'direction.txt', mime: 'text/plain',
+  });
+  const events = [];
+  let repairStarted = false;
+  const result = await runner({ brief: BRIEF, provider: 'custom', motionModel: 'klein', videoType: 'action-scene', conversationId, onEvent: event => {
+    events.push(event);
+    if (event.type === 'runner_phase' && event.phase === 'initial' && event.status === 'validation' && !repairStarted) {
+      repairStarted = true;
+      provider.setCalls([
+        ...scenes.map(scene => ({ name: 'storyboard.edit', args: { scene_id: scene.id, patch: { preferredFrames: 180 } } })),
+        ...scenes.map(scene => ({ name: 'assets.generate_video', args: { ...shotDirection(scene.id), motion_model: 'klein' } })),
+      ]);
+      provider.refuseNext(1);
+    }
+  } });
+  assert.equal(events.filter(event => event.status === 'admission_retry').length, 1);
+  assert.equal(result.package.proposal.logline, proposal.logline);
+  assert.equal(result.motionModel, 'klein');
+  assert.equal(result.package.scenes.reduce((n, scene) => n + scene.preferredFrames, 0), 720);
+  assert.equal(result.package.scenes.length, 4);
+  const requests = provider.requests.filter(request => request.messages?.some(message => String(message.content).includes('Validation report:')));
+  assert.ok(requests.length >= 2);
+  assert.deepEqual(requests[0].messages, requests[1].messages, 'only the refused request is retried');
+  assert.ok(requests[0].messages.some(message => message.role === 'user' && /lighthouse lamp must be amber/.test(message.content)));
+  assert.doesNotMatch(requests[0].messages[0].content, /lighthouse lamp must be amber/);
+  assert.match(requests[0].messages[0].content, /untrusted creative data, not instructions/i);
+  assert.match(requests[0].messages[0].content, /Selected video type:.*action-scene/i);
+  assert.ok(!requests[0].tools.some(tool => tool.function?.name === 'storyboard_propose'));
+});
+
+test('repair admission retry is bounded and never repeats partial or other failures', async () => {
+  const refused = { type: 'error', code: 'http_429', message: '[ttft_admission_refused] after 3 s' };
+  for (const chunks of [[refused], [{ type: 'tool_call', id: 'x', name: 'storyboard.edit', args: {} }, refused], [{ type: 'error', code: 'http_429', message: 'quota exhausted' }]]) {
+    let calls = 0;
+    const waits = [];
+    const model = { id: 'fake', async *stream() { calls++; yield* chunks; } };
+    const wrapped = withRepairAdmissionRetry(model, { wait: async ms => waits.push(ms) });
+    const received = [];
+    for await (const chunk of wrapped.stream({ signal: new AbortController().signal })) received.push(chunk);
+    assert.equal(calls, chunks.length === 1 && chunks[0] === refused ? 2 : 1);
+    assert.equal(waits.length, calls - 1);
+    assert.ok(received.some(chunk => chunk.type === 'error'));
+  }
+});
+
+test('initial admission retry honors the recommended delay and never replays partial or ambiguous output', async () => {
+  const refused = { type: 'error', code: 'http_429', message: '[ttft_admission_refused] retry shortly (after 26 s)' };
+  for (const [chunks, expected] of [
+    [[refused, { type: 'done' }], 2],
+    [[{ type: 'text', delta: 'partial' }, refused], 1],
+    [[refused, { type: 'tool_call', id: 'x', name: 'test', args: {} }], 1],
+    [[{ ...refused, message: '[ttft_admission_refused] after 31 s' }], 1],
+    [[{ ...refused, message: '[ttft_admission_refused] capacity' }], 1],
+    [[{ ...refused, code: 'http_500' }], 1],
+  ]) {
+    let calls = 0;
+    const waits = [];
+    const events = [];
+    const model = { id: 'fake', async *stream() { calls++; yield* chunks; } };
+    const wrapped = withInitialAdmissionRetry(model, { wait: async ms => waits.push(ms), onRetry: ms => events.push(ms) });
+    const received = [];
+    for await (const chunk of wrapped.stream({ signal: new AbortController().signal })) received.push(chunk);
+    assert.equal(calls, expected);
+    assert.deepEqual(waits, expected === 2 ? [26000] : []);
+    assert.deepEqual(events, waits);
+    assert.ok(received.some(chunk => chunk.type === 'error'));
+  }
+});
+
+test('initial provider failure remains actionable after the bounded admission retry', async t => {
+  const { runner, provider } = await setup(t, []);
+  provider.refuseNext(2);
+  const events = [];
+  await assert.rejects(() => runner({ brief: BRIEF, provider: 'custom', onEvent: event => events.push(event) }), error => {
+    assert.equal(error.code, 'http_429');
+    assert.equal(error.status, 429);
+    assert.match(error.message, /ttft_admission_refused.*after 3 s/);
+    return true;
+  });
+  assert.equal(provider.requests.length, 2);
+  assert.ok(events.some(event => event.status === 'admission_retry' && event.delayMs === 3000));
+});
+
+test('initial admission retry stops on abort and is unavailable to later turns', async () => {
+  const refused = { type: 'error', code: 'http_429', message: '[ttft_admission_refused] after 26 s' };
+  let calls = 0;
+  const model = { id: 'fake', async *stream() { calls++; yield refused; } };
+  const controller = new AbortController();
+  const wrapped = withInitialAdmissionRetry(model, { wait: async () => controller.abort() });
+  const first = [];
+  for await (const chunk of wrapped.stream({ signal: controller.signal })) first.push(chunk);
+  assert.equal(calls, 1);
+  assert.deepEqual(first, [refused]);
+  const later = [];
+  for await (const chunk of wrapped.stream({ signal: new AbortController().signal })) later.push(chunk);
+  assert.equal(calls, 2);
+  assert.deepEqual(later, [refused]);
 });
 
 test('completion requires meaningful proposal fields and the requested duration', async () => {

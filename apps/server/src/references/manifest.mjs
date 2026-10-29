@@ -105,8 +105,10 @@ function buildEntry(reference, noteCap, includeFrames, assignedTo) {
   };
   if (truncated) entry.truncated = true;
 
-  entry.width = reference.width;
-  entry.height = reference.height;
+  if (reference.kind !== 'audio') {
+    entry.width = reference.width;
+    entry.height = reference.height;
+  }
   if (typeof reference.durationSec === 'number' && Number.isFinite(reference.durationSec)) {
     entry.durationSec = reference.durationSec;
   }
