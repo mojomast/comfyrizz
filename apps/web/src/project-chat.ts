@@ -192,7 +192,18 @@ export type Conversation = {
   castProposals?: CastProposal[];
   cast?: ProjectCastEntry[];
   castPlacements?: unknown[];
+  packageEdit?: { request: { packageId: string; expectedRevision: number }; diff: PackageEditDiff[] } | null;
+  lastPackageEdit?: { appliedRevision: number; diff: PackageEditDiff[] };
 };
+type PackageEditDiff = { path: string; before: unknown; after: unknown };
+
+export function renderPackageEditReview(conversation: Conversation | null): string {
+  const pending = conversation?.packageEdit;
+  const edit = pending ?? conversation?.lastPackageEdit;
+  if (!edit?.diff?.length) return '';
+  const value = (item: unknown) => item === null ? '(absent)' : typeof item === 'string' ? item : JSON.stringify(item);
+  return `<details class="project-plan-details" data-package-edit-review open><summary>${pending ? `Review package edits · revision ${pending.request.expectedRevision}` : `Applied package edits · revision ${conversation?.lastPackageEdit?.appliedRevision}`}</summary><ul>${edit.diff.map(change => `<li><b>${esc(change.path)}</b><div><del>${esc(value(change.before))}</del> → <ins>${esc(value(change.after))}</ins></div></li>`).join('')}</ul>${pending ? '<button type="button" id="project-package-edit-build" class="btn btn-sm btn-primary">Apply reviewed edits</button>' : ''}</details>`;
+}
 export type ChatProject = {
   package: PackageV1; revision: number; timeline: Timeline;
   generatedAssets: Record<string, InlineAsset>; pendingGpu: unknown[]; svgAssets: string[];
@@ -679,9 +690,11 @@ function mountProjectChatController(options: ProjectChatControllerOptions) {
     const contextHtml = renderTurnContextChips(turnContextChips());
     const recoveryHtml = recovery ? recoveryPanelHtml(recovery, esc) : '';
     const recoveryHintHtml = recoveryHint ? `<p class="hint">${esc(recoveryHint)}</p>` : '';
+    const packageReview = recovery ? '' : renderPackageEditReview(conversation);
     if (!plan) {
       panel.hidden = false;
       panel.innerHTML = `${contextHtml}${errorText ? `<p role="alert">${esc(errorText)}</p>` : recovery ? '' : '<p class="hint chat-welcome">Chat with the agent to develop your video.</p>'}${recovery ? recoveryHtml : `${renderSuggestedPrompts()}${proposalsHtml()}${clipProposalsHtml()}${castProposalsHtml()}<div class="project-plan-actions"><button type="button" id="project-new" class="btn btn-sm btn-ghost quiet">Start a new video</button>${pending && !conflict ? '<button type="button" id="project-retry" class="btn btn-sm btn-secondary">Retry this message</button>' : ''}${conflict ? '<button type="button" id="project-reload" class="btn btn-sm btn-secondary">Load latest conversation</button>' : ''}</div>`}${recoveryHintHtml}`;
+      if (packageReview) panel.innerHTML = packageReview + panel.innerHTML;
       bindActions();
       return;
     }
@@ -689,7 +702,7 @@ function mountProjectChatController(options: ProjectChatControllerOptions) {
     const built = conversation?.phase === 'built';
     panel.hidden = false;
     panel.innerHTML = `
-      ${contextHtml}
+      ${contextHtml}${packageReview}
       <div class="project-plan-head">
         <div><b>${esc(plan.title)}</b><span class="hint">${plan.scenes.length} scenes · ${seconds.toFixed(0)}s · ${esc(plan.aspect)} · ${esc(plan.stylePreset)}</span></div>
         <span class="plan-state badge ${built ? 'badge-ok' : ''}">${built ? '✓ in project' : 'draft'}</span>
@@ -717,6 +730,9 @@ function mountProjectChatController(options: ProjectChatControllerOptions) {
   }
 
   function bindActions(): void {
+    panel.querySelector('#project-package-edit-build')?.addEventListener('click', () => {
+      void send('Apply the reviewed saved-package edits exactly as shown.', 'express', 'build');
+    });
     panel.querySelector('#project-new')?.addEventListener('click', reset);
     panel.querySelector('#project-retry')?.addEventListener('click', () => { if (pending && !busy) void perform(pending); });
     panel.querySelector('#project-reload')?.addEventListener('click', () => { if (!busy) void load(); });

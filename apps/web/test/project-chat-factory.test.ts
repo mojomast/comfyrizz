@@ -618,3 +618,38 @@ test('an explicit new-video action leaves edit mode, while opening another packa
     assert.equal(bodies[1].expectedPackageRevision, 2);
   } finally { dom.restore(); }
 });
+
+test('a cold saved package displays its exact edit diff and applies through the revision-bound Build action', async () => {
+  const dom = installDom();
+  try {
+    const host = dom.doc.createElement('div'); dom.doc.body.appendChild(host);
+    const bodies = [], applied = [];
+    const diff = [{ path: 'voice.enabled', before: true, after: false }, { path: 'scenes.s1.copy.kicker', before: '<unwanted>', after: null }];
+    const staged = conversation({ plan: null, phase: 'draft', projectId: 'pkg_existing', projectRevision: 41,
+      packageEdit: { request: { packageId: 'pkg_existing', expectedRevision: 41 }, diff } });
+    const chat = create(host, {
+      getEditContext: () => ({ packageId: 'pkg_existing', revision: 41 }),
+      applyProject: project => applied.push(project.package.id),
+      apiFetch: async (_url, init = {}) => {
+        const body = JSON.parse(init.body); bodies.push(body);
+        return jsonResponse(body.action === 'build'
+          ? { conversation: conversation({ ...staged, phase: 'built', revision: 2, projectRevision: 42, packageEdit: null, lastPackageEdit: { diff, appliedRevision: 42 } }), built: true, reply: 'Applied reviewed edits.', project: { package: { id: 'pkg_existing', revision: 42 }, revision: 42 } }
+          : { conversation: staged, built: false, reply: 'Review the staged package edits.' });
+      },
+    });
+    await chat.ready;
+    await chat.send('Stage the requested cleanup.', 'plan');
+    const review = host.querySelector('[data-package-edit-review]');
+    assert.ok(review); assert.match(host.querySelector('[data-project-chat-panel]').innerHTML, /voice.enabled/);
+    assert.match(host.querySelector('[data-project-chat-panel]').innerHTML, /&lt;unwanted&gt;/);
+    assert.deepEqual(applied, []);
+    host.querySelector('#project-package-edit-build').dispatchEvent({ type: 'click', bubbles: true });
+    await waitFor(() => applied.length === 1, 'the reviewed edit was applied');
+    assert.equal(bodies[1].action, 'build');
+    assert.equal(bodies[1].expectedPackageId, 'pkg_existing');
+    assert.equal(bodies[1].expectedPackageRevision, 41);
+    assert.equal(bodies[1].baseRevision, staged.revision);
+    assert.equal(host.querySelector('#project-package-edit-build'), null);
+    assert.match(host.querySelector('[data-project-chat-panel]').innerHTML, /Applied package edits · revision 42/);
+  } finally { dom.restore(); }
+});

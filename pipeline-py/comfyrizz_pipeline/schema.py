@@ -457,7 +457,11 @@ def _check_scenes(scenes, assets, datasets, errors) -> None:
             copy = scene.get("copy") if _is_obj(scene.get("copy")) else {}
             if not has_drawing and spec.get("requiresData") and not (_is_obj(scene.get("data")) and _is_str(scene["data"].get("dataset"))):
                 errors.append(_err("SEM_LAYOUT_REQUIRES_DATA", f"{at}/data", f"layout {layout} requires data.dataset"))
-            if not has_drawing and spec.get("requiresHeadline") and not _non_empty(copy.get("headline")):
+            media_only_with_media = scene.get("media_only") is True and (
+                (isinstance(scene.get("background"), dict) and isinstance(scene["background"].get("asset"), str))
+                or (isinstance(scene.get("foreground"), list) and len(scene["foreground"]) > 0)
+            )
+            if not has_drawing and not media_only_with_media and spec.get("requiresHeadline") and not _non_empty(copy.get("headline")):
                 errors.append(_err("SEM_COPY_REQUIRED", f"{at}/copy/headline", f"layout {layout} requires copy.headline"))
             if not has_drawing and layout == "list" and scene.get("variant") == "bullets":
                 items = copy.get("items")

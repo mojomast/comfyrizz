@@ -381,7 +381,11 @@ function checkScenes(scenes, assets, datasets, errors) {
       if (!hasDrawing && spec.requiresData && !(isObj(scene.data) && isStr(scene.data.dataset))) {
         errors.push(error("SEM_LAYOUT_REQUIRES_DATA", `${at}/data`, `layout ${layout} requires data.dataset`));
       }
-      if (!hasDrawing && spec.requiresHeadline && !nonEmpty(copy.headline)) {
+      // Media-only shots skip the layout entirely (and may retain a lower
+      // third). Their required media is checked below; inventing invisible
+      // headline copy should not be necessary to validate a video shot.
+      const mediaOnlyWithMedia = scene.media_only === true && ((isObj(scene.background) && isStr(scene.background.asset)) || (Array.isArray(scene.foreground) && scene.foreground.length > 0));
+      if (!hasDrawing && !mediaOnlyWithMedia && spec.requiresHeadline && !nonEmpty(copy.headline)) {
         errors.push(error("SEM_COPY_REQUIRED", `${at}/copy/headline`, `layout ${layout} requires copy.headline`));
       }
       if (!hasDrawing && layout === "list" && scene.variant === "bullets" && (!Array.isArray(copy.items) || copy.items.length < 2)) {

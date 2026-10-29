@@ -139,6 +139,8 @@ editorStore.subscribe(() => {
   if (!session.previewing && doc.package !== projectedPackage) {
     projectedPackage = doc.package;
     pkg = structuredClone(doc.package) as unknown as PackageV1;
+    const projectName = document.getElementById('project-name');
+    if (projectName) projectName.textContent = pkg.title;
   }
 });
 const shellToasts = createShellToastController();

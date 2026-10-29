@@ -958,3 +958,26 @@ run/production/budget files** remain unchanged; original receipt stores remain
 absent and missing sidecars remain missing. New recovery provenance is kept in its
 own operation. Owned 4672 server/browser and temporary credentials were cleaned
 up; other workers and existing shares were untouched.
+
+**Saved-project correction repaired:** `project_edit_package` now offers a bounded
+edit surface against the authoritative saved package even when the chat has no
+compatible draft. It stages an exact persistent before/after review and applies
+only through explicit reviewed Build, existing CAS/journal/recovery and production
+scope/intent checks. It cannot replace assets, conditioning, generation inputs,
+fps or compiled shot windows. Narrow JS/Python schema parity permits media-only
+shots with actual media to omit invisible layout headlines.
+
+An isolated copy of the actual speaking project passed normal HTTP chat with a
+local fake provider, **r41 → r42**: seven H3 shots and every asset object retained,
+six conditioning WAVs plus silence bytes unchanged, native backgrounds unmuted,
+detached voice disabled, and only the requested narration/copy/foreground cleanup
+applied. Exact **1080 frames / 24 fps / 45 seconds** and every compiled window were
+preserved. Original runtime hashes remain unchanged. **262 server/schema/agent
+checks, 16 UI checks and seven final focused HTTP checks passed**, plus agent build
+and web typecheck. Evidence:
+`/tmp/opencode/saved-package-chat-exact-final/result.json`.
+
+The stale Pip header was a separate once-only paint defect, not an incorrectly
+bound conversation. The canonical document subscriber now refreshes the project
+name. These correction tests use a fake provider and do not establish a generated
+speaking film; native-source audio rendering/readiness work remains in progress.
