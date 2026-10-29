@@ -768,3 +768,57 @@ while the sole GPU worker continues the new show films. No live revised-export
 success is inferred from the HTTP tests. Broad server/web checks are also running;
 the initial full-web invocation exceeded its 120-second harness limit and was
 terminated, so it is not counted as a completed pass.
+
+**Broad checks completed:** the bounded full web rerun passed **1,645 tests with
+one optional real-Neon fixture skip**; the full server suite passed **2,132 tests
+with four skips**, zero failures. This supersedes the earlier timeout and pending
+broad-server result for those tested fixes. Subsequent collection/recovery changes
+require their own verification.
+
+### 45-second credits: all GPU outputs generated, collection evidence incomplete
+
+The live credits retry reached valid **1350-frame / 45-second** review, supported
+native entrance correction, re-review and normal paid approval. Six Klein stills
+and six LTX clips succeeded, one candidate each; **all 12 media files were locally
+collected and match the remote manifest hashes**. Collection then timed out on a
+captured workflow JSON, leaving three required workflow files missing. No trusted
+generation receipts, final render or Download were produced. The speaking case
+was not started after that paid failure.
+
+Report: `/tmp/opencode/easy-colab-acceptance/presentation-show-films/PARENT-HANDOFF.md`.
+Run `run_dd976809e84b`, package `pkg_0308223b2828e7c6`, production
+`prod_208e51b87ae6ac0da6c4bd57`. Quote/internal unverified settlement **2.472**;
+actual account delta **2.32 credits**, 210.28 → 207.96. Campaign **5.15 spent /
+0 reserved / 54.85 remaining**; character/credits batch **2.32 spent / 15.68
+remaining**. VM/watchdog/harnesses stopped, zero sessions/assignments and 0.00/hr.
+Original media/manifest/partial capture evidence remains unchanged.
+
+The missing captures may be recoverable from the actual ComfyUI `prompt` metadata
+embedded in the downloaded MP4s. A parent read-only comparison found the embedded
+graph differs from an available separate capture only by ComfyUI's runtime
+`is_changed` image-hash annotation. Verification and a supported server-owned
+CPU-only recovery path are under development. No reconstructed template graph,
+fabricated receipt or manually imported finished film is accepted as recovery.
+
+**Future collection throughput fixed:** larger output trees now use a bounded
+CPU-created stored ZIP on the same runtime, followed by one verified download and
+private extraction. SHA-256, exact inventory, sizes and CRCs are checked; traversal,
+symlinks, collisions, unsupported compression and oversized collections fail.
+Subsequent named media/workflow requests reuse locally rehashed bytes. Missing
+submitted-workflow captures still block import/receipts. Small collections retain
+individual transfers. Collection/teardown reserves remain unchanged, and bounded
+download attempts leave time for reconnect without replaying inference.
+
+The six-image/six-video two-batch regression uses **six collection CLI calls**
+instead of roughly 56. **230 backend tests passed, one Windows-only skip**,
+including 23 new bundle/retry/security/deadline cases. A 60 MiB synthetic local
+pack/copy/extract/verify took 1.804 seconds; this is not a network benchmark.
+The exact 2.472-credit budget fixture passes normal and first-download-timeout
+cases. Log: `/tmp/opencode/colab-bundle-backends-bounded.log`.
+
+One new **speaking-only** attempt is authorized under
+`/tmp/opencode/easy-colab-acceptance/presentation-speaking-bundled/`, using the
+completed runner/conditioning fixes plus verified bundled collection. It retains
+the exact 45-second multi-shot brief and nine-credit all-in ceiling. Credits
+recovery and Neon re-export remain CPU-only, separate from this sole GPU worker.
+No successful new output or spending is inferred from the assignment.

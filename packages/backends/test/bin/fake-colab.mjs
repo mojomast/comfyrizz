@@ -186,6 +186,7 @@ if (command === "exec") {
   const builtIn = {
     "hf_token_dir.py": { mkdirs: ["/content/.hf", "/content/comfyrizz", "/content/comfyrizz/out", "/content/comfyrizz/workflows"], output: "vm dirs ready: /content/.hf mode 700, /content/comfyrizz and /content/comfyrizz/out present" },
     "list_out.py": { walk: "/content/comfyrizz/out" },
+    "collection-bundle.py": { cpuBundle: true },
     "drop_token.py": { remove: ["/content/.hf/token"], output: "token file removed: True (it was there: True)" },
   };
   let configured = (state.scripts || {})[script];
@@ -232,6 +233,15 @@ if (command === "exec") {
     fs.writeFileSync(destination, materialised.content);
   }
   if (spec.lost) process.exit(spec.code ?? 1); // a killed exec: no output, no evidence
+  if (spec.cpuBundle && !spec.noSentinel) {
+    // Execute the actual generated packer, changing only its VM filesystem root.
+    // This tests real ZIP bytes and the same kernel-cell (exit-0-on-crash) contract.
+    const source = fs.readFileSync(resolved, "utf8").replaceAll("/content/comfyrizz", state.remoteDir);
+    const real = spawnSync(process.env.FAKE_COLAB_PYTHON || "python3", ["-c", source], { encoding: "utf8", timeout: 120000 });
+    if (real.stdout) process.stdout.write(real.stdout);
+    if (real.stderr) process.stderr.write(real.stderr);
+    process.exit(0);
+  }
   if (spec.runForReal) {
     // G5-1 parity: `colab exec` runs the file's source as an IPython kernel cell - `__name__` is
     // "__main__" and the process argv is ipykernel's, not the script's. Reproducing that here is what
