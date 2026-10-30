@@ -326,7 +326,9 @@ function recordStarted(takeStore, pkgId, entries, result) {
   const runId = typeof result?.runId === 'string' && result.runId.trim() ? result.runId : null;
   for (const item of entries) {
     const entry = ensureEntry(doc, item.assetId);
-    if (runId) entry.lastJob = { runId, state: result.status ?? 'starting' };
+    // A fast run can finish and be ingested before this acknowledgement is
+    // written. Never replace an already-recorded outcome for the same run.
+    if (runId && entry.lastJob?.runId !== runId) entry.lastJob = { runId, state: result.status ?? 'starting' };
     delete entry.queued;
   }
   takeStore.write(pkgId, doc);

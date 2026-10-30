@@ -135,6 +135,7 @@ function fakeController() {
       const runId = `pipe_ux03_${counter}`;
       const run = {
         runId,
+        packageId: pkg.id,
         status: 'running',
         origin: {
           productionId: options.origin?.productionId,

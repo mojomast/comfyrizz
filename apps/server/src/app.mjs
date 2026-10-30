@@ -295,6 +295,9 @@ export function createApp({
   // and only after the same python + kokoro_onnx probe the pipeline worker
   // uses succeeds; a failed probe keeps the route at 503.
   auditionSynth = null,
+  // Injectable only so a test can prove the unavailable path on a machine that
+  // happens to have kokoro_onnx installed; production uses the real probe.
+  auditionProbe = probeKokoroRuntime,
   inviteLedger = null,
   publicBaseUrl = process.env.COMFYRIZZ_PUBLIC_BASE_URL || undefined,
   localNarrationPrepare,
@@ -1426,7 +1429,7 @@ export function createApp({
     let synth = null;
     let probe = null;
     return async (request) => {
-      if (probe === null) probe = probeKokoroRuntime();
+      if (probe === null) probe = auditionProbe();
       if (!(await probe)) {
         return { ok: false, code: 'AUDITION_UNAVAILABLE', message: 'Kokoro is not available on this server' };
       }
