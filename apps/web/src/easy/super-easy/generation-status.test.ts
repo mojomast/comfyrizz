@@ -6,6 +6,7 @@ import { renderGenerationStatus } from './generation-status-view.ts';
 import { pollFinalRun } from './run.ts';
 import { createSuperEasySession } from './session.ts';
 import { createEasyStore } from '../store.ts';
+import { createEasyApi } from '../api.ts';
 
 const runId = 'run_123456789abc', productionId = 'prod_activity', packageId = 'pkg_activity';
 const base = { runId, productionId, packageId, status: 'running', startedAt: '2026-10-30T10:00:00Z', jobs: 2,
@@ -133,4 +134,33 @@ test('terminal timestamps are never fabricated from the observation clock', () =
   const status = generationStatusOf({ status: 'failed', startedAt: base.startedAt }, null, 'hosted-result');
   assert.equal(status.finishedAt, null);
   assert.match(renderGenerationStatus({ generationStatus: status }), /Completion time not reported/);
+});
+
+test('failed hosted reload reads the sanitized guest result without owner APIs or replaying work', async () => {
+  const calls = [];
+  const api = createEasyApi(async (path, init) => {
+    calls.push([init.method, path]);
+    assert.equal(init.method, 'GET');
+    assert.equal(path, `/api/invites/productions/${productionId}/result`);
+    return new Response(JSON.stringify({ runId, status: 'failed', stage: 'render', completedJobs: 31, totalJobs: 31,
+      startedAt: base.startedAt, finishedAt: failed.finishedAt, updatedAt: failed.finishedAt,
+      stopState: 'stopped', error: 'The render stage failed. Completed media is retained.',
+      accounting: { status: 'unresolved', reservedEstimateCu: 4.066, actualSpendCu: null } }),
+    { status: 200, headers: { 'content-type': 'application/json' } });
+  });
+  const store = createEasyStore({ storage: { getItem: () => null, setItem() {}, removeItem() {} } });
+  store.patch({ packageId, productionId, compute: 'cpu', spendCap: 0, generate: { status: 'running' } });
+  let stops = 0;
+  const session = createSuperEasySession({ hostedInvite: true, api, store, host: {}, go() {},
+    watch: () => () => { stops++; } });
+  session.resumeGeneration(journal()); await settle();
+  assert.equal(session.status(), 'error'); assert.equal(session.failure().retryable, false);
+  assert.equal(session.snapshot().generationStatus.completed, 31);
+  assert.equal(session.snapshot().generationStatus.stop, 'stopped');
+  assert.equal(session.snapshot().shots.length, 1);
+  assert.equal(await session.retry(), null);
+  session.resumeGeneration(journal());
+  assert.equal(calls.length, 1); assert.equal(stops, 1);
+  assert.match(renderGenerationStatus(session.snapshot()), /Usage indeterminate; CU reserved/);
+  session.stop(); store.flush();
 });

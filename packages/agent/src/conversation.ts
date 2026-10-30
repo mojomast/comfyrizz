@@ -647,6 +647,22 @@ export async function runConversationTurn(options: {
     const refused = await guardOrdinaryMutation(production, { tool, before, after, turnStart: turnStartPlan });
     if (refused) throw Object.assign(new Error(refused.message), { policyRefusal: true, ...(refused.code ? { code: refused.code } : {}) });
   };
+  const refuseSavedDrawing = async (tool: 'project_patch_plan' | 'project_build', ids: Iterable<string>) => {
+    const base = options.projectContext;
+    if (!options.packageEditor || !isPlainObject(base) || !Array.isArray(base.scenes)) throw new Error('No saved package is available for drawing edits');
+    const scenes = base.scenes;
+    const selected = new Set(ids);
+    if ([...selected].some(id => !scenes.some((scene: unknown) => isPlainObject(scene) && scene.id === id))) throw new Error('The drawing scene is not in the saved package');
+    const marked = { ...base, scenes: scenes.map((scene: unknown) => isPlainObject(scene) && selected.has(scene.id as string)
+      ? { ...scene, visual: `${scene.visual ?? ''}\n[drawing changed]` } : scene) };
+    // A saved drawing need not have a representable chat draft. Compare the
+    // same saved-project projection at both ends, retaining the shared context
+    // (and its production_read memory) for scope, lock and revision checks.
+    const prior = production?.builtPlan;
+    if (production) production.builtPlan = base;
+    try { await refuseOrdinary(tool, base, marked); }
+    finally { if (production) production.builtPlan = prior; }
+  };
   const finish = (reply: string, stop = 'final', warning?: string) => {
     trace.repairs = repairs; trace.elapsedMs = Date.now() - started; trace.stop = stop;
     options.onEvent?.({ type: 'done', stop, usage: { ...trace.usage } });
@@ -657,7 +673,7 @@ export async function runConversationTurn(options: {
       : !built && drawingScenes.size ? 'The drawing edits were not applied because the project was not built. Please ask me to try again.' : reply;
     return { reply: honestReply, plan, built, trace, ...(warning ? { warning } : {}) };
   };
-  const buildSummary = () => packageEditPending ? 'The reviewed package edits were saved. Existing media and timing were preserved.' : `The project now contains “${plan!.title}”: ${plan!.scenes.length} scenes with on-screen copy, narration script and visual directions. You can preview it now or tell me what to change. Audio, GPU generation and MP4 export are separate steps.`;
+  const buildSummary = () => packageEditPending ? 'The reviewed package edits were saved. Existing media and timing were preserved.' : !plan && drawingScenes.size ? 'The drawing edits were saved to the existing project.' : `The project now contains “${plan!.title}”: ${plan!.scenes.length} scenes with on-screen copy, narration script and visual directions. You can preview it now or tell me what to change. Audio, GPU generation and MP4 export are separate steps.`;
   let completed: ReturnType<typeof finish> | undefined;
   let modelStarted = 0;
   let usageBefore: ConversationTrace['usage'] = { input: 0, output: 0 };
@@ -757,8 +773,11 @@ export async function runConversationTurn(options: {
           result = options.drawing.read(args.scene_id);
         } else if (options.drawing && call.name === 'project_edit_drawing') {
           const args = z.object({ scene_id: z.string().regex(sceneId), replacements: z.array(z.object({ index: z.number().int().min(0).max(119), element: z.record(z.unknown()) }).strict()).min(1).max(12) }).strict().parse(call.args);
-          if (!plan || !plan.scenes.some(scene => scene.id === args.scene_id)) throw new Error('The drawing scene is not in the current draft');
-          await refuseOrdinary('project_patch_plan', plan, drawingMarkedPlan(plan, [args.scene_id]));
+          if (packageEditPending) throw new Error('Review and apply the staged package edits before editing drawings.');
+          if (plan) {
+            if (!plan.scenes.some(scene => scene.id === args.scene_id)) throw new Error('The drawing scene is not in the current draft');
+            await refuseOrdinary('project_patch_plan', plan, drawingMarkedPlan(plan, [args.scene_id]));
+          } else await refuseSavedDrawing('project_patch_plan', [args.scene_id]);
           result = options.drawing.edit(args.scene_id, args.replacements);
           drawingScenes.add(args.scene_id);
           drawingEditFailed = false;
@@ -796,14 +815,17 @@ export async function runConversationTurn(options: {
         } else if (call.name === 'project_build') {
           if (options.repairOnly && !packageEditPending) throw Object.assign(new Error('Self-repair must stage an evidence-backed source trim before build.'), { policyRefusal: true, code: 'REPAIR_SCOPE' });
           if (!call.args || typeof call.args !== 'object' || Array.isArray(call.args) || Object.keys(call.args).length) throw new Error('project_build takes an empty object');
-          if (!plan && !packageEditPending) throw new Error('Stage saved-package edits or write a complete draft before building');
+          if (!plan && !packageEditPending && !drawingScenes.size) throw new Error('Stage saved-package edits or write a complete draft before building');
           if (packageEditFailed) throw new Error('The package edit failed; repair it before building.');
           if (drawingEditFailed) throw new Error('The drawing edit failed; repair it before building.');
           // The host guards package edits against the full authoritative package,
           // including fields the conversation draft cannot represent.
-          if (!packageEditPending) await refuseOrdinary('project_build', plan, drawingMarkedPlan(plan!, drawingScenes));
+          if (!packageEditPending) {
+            if (plan) await refuseOrdinary('project_build', plan, drawingMarkedPlan(plan, drawingScenes));
+            else await refuseSavedDrawing('project_build', drawingScenes);
+          }
           options.signal.throwIfAborted();
-          const buildResult = packageEditPending ? await options.packageEditor!.build() : await options.build(plan!);
+          const buildResult = packageEditPending || !plan ? await options.packageEditor!.build() : await options.build(plan);
           result = { ok: true, ...buildResult };
           built = true;
         } else throw new Error(`Unknown tool: ${call.name}`);

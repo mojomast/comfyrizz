@@ -349,6 +349,10 @@ function harness(options = {}) {
 
 test('hosted Super Easy uses the invite budget and dispatches only through the production outbox', async () => {
   const { api, host, calls, store } = harness({ hosted: true });
+  const forbidden = [];
+  for (const method of ['proposeActionPlan', 'startRun', 'colabStatus', 'getAgentProgress', 'cancelAgent', 'getRun', 'getRunVideo']) {
+    api[method] = async () => { forbidden.push(method); throw Error(`Owner API forbidden: ${method}`); };
+  }
   host.aiSelection = async () => { throw new Error('Guests cannot read owner provider settings'); };
   const result = await runSuperEasy({ prompt: PROMPT, hostedInvite: true }, { api, host, store, go: () => {} });
   assert.equal(result.ok, true, JSON.stringify(result));
@@ -356,6 +360,7 @@ test('hosted Super Easy uses the invite budget and dispatches only through the p
   assert.equal(store.get().spendCap, 1.2);
   assert.equal(calls.filter(call => call.kind === 'dispatch').length, 1);
   assert.equal(calls.some(call => call.kind === 'run' || call.kind === 'colab-status'), false);
+  assert.deepEqual(forbidden, [], 'server-authored hosted plans never enter the owner final-plan or run APIs');
 });
 
 test('hosted Super Easy refuses before planning when the invite session is unavailable', async () => {
@@ -403,6 +408,10 @@ test('hosted constructor preserves explicit CPU shared-film edits through revise
     const pkg = { id: 'pkg_shared', revision: 6, title: 'Shared film', format: { fps: 30 }, scenes: [{ id: 's1', preferredFrames: 90 }], assets: {} };
     const { api, host, store, calls } = harness({ builtPackage: pkg, session: invite,
       actions: [{ id: 'act_cpu_final', kind: 'final', upperBound: 0, backendId: 'cpu' }] });
+    const forbidden = [];
+    for (const method of ['proposeActionPlan', 'startRun', 'colabStatus', 'getAgentProgress', 'cancelAgent', 'getRun', 'getRunVideo']) {
+      api[method] = async () => { forbidden.push(method); throw Error(`Owner API forbidden: ${method}`); };
+    }
     host.adoptBuiltPackage({ package: pkg });
     host.aiSelection = async () => { throw Error('Owner provider settings are forbidden'); };
     host.editorStore.saveState = () => ({ status: 'saved', acknowledgedRevision: host.getPackage().revision, editSequence: 0, acknowledgedSequence: 0 });
@@ -426,6 +435,7 @@ test('hosted constructor preserves explicit CPU shared-film edits through revise
     assert.equal(calls.filter(call => call.kind === 'dispatch').length, 1);
     assert.equal(calls.find(call => call.kind === 'dispatch').body.payload.actionId, 'act_cpu_final');
     assert.equal(calls.some(call => call.kind === 'spend-cap' && call.body.ceiling > 0), false);
+    assert.deepEqual(forbidden, [], 'CPU edits, reload and retry stay within hosted permissions');
     reopened.stop(); session.stop(); store.flush();
   }
 });

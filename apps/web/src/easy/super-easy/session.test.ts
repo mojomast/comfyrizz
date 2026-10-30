@@ -9,6 +9,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 
 import { COPY } from './copy.ts';
+import { buildGalleryModel } from './gallery-model.ts';
 import { createSuperEasySession } from './session.ts';
 import { proposalForPackage, renderSuperEasyProposal } from './proposal.ts';
 import { createEasyStore, planInputsHash } from '../store.ts';
@@ -645,14 +646,18 @@ test('watch callbacks move the stages and fill the gallery', async () => {
   assert.notEqual(after, before);
   assert.match(after, /data-stage-status="running"/u);
   assert.match(after, /data-super-easy-gallery-item="character:char_mira"/u);
-  assert.match(after, /src="\/media\/mira\.png"/u);
+  assert.match(after, /<img\b[^>]*data-gallery-media="character:char_mira"/u);
+  assert.equal(buildGalleryModel(h.session.snapshot()).items.find(item => item.id === 'character:char_mira').url, '/media/mira.png');
+  assert.doesNotMatch(after, /src="\/media\//u, 'protected media must be hydrated through authenticated fetch');
   assert.match(after, /data-super-easy-gallery-item="shot:shot_1"/u);
   assert.equal(h.views.at(-1).html, after, 'the latest view is pushed to the progress sink');
 
   h.watchOptions().onState(nextSnapshot());
   const next = h.session.progressHtml();
   assert.match(next, /data-super-easy-gallery-item="shot:shot_2"/u);
-  assert.match(next, /src="\/media\/shot-2\.png"/u);
+  assert.match(next, /<img\b[^>]*data-gallery-media="shot:shot_2"/u);
+  assert.equal(buildGalleryModel(h.session.snapshot()).items.find(item => item.id === 'shot:shot_2').url, '/media/shot-2.png');
+  assert.doesNotMatch(next, /src="\/media\//u);
   assert.match(next, /aria-valuenow="60"/u);
   assert.notEqual(next, after);
 });
@@ -708,14 +713,17 @@ test('the final video marks the run done and stops the watch', async () => {
   const html = h.session.progressHtml();
   assert.equal(h.store.state.generate.status, 'done');
   assert.match(html, new RegExp(`>${COPY.done.title}<`, 'u'));
-  assert.match(html, /src="\/media\/final\.mp4"/u);
+  assert.match(html, /<video\b[^>]*data-gallery-media="final"/u);
+  assert.equal(buildGalleryModel(h.session.snapshot()).final.url, '/media/final.mp4');
+  assert.doesNotMatch(html, /<video\b[^>]*src="\/media\//u);
   assert.match(html, /data-super-easy-stage="render" data-stage-status="done"/u);
   assert.equal(h.stopCalls(), 1, 'the final frame ends polling');
   assert.equal(h.dones.length, 1);
 
   h.session.stop();
   assert.equal(h.stopCalls(), 1, 'a later Stop does not cancel twice');
-  assert.match(h.session.progressHtml(), /src="\/media\/final\.mp4"/u);
+  assert.equal(buildGalleryModel(h.session.snapshot()).final.url, '/media/final.mp4');
+  assert.match(h.session.progressHtml(), /<video\b[^>]*data-gallery-media="final"/u);
 });
 
 test('an already-final run marks done without starting a production watch', async () => {
@@ -780,7 +788,9 @@ test('the run finishing its preview does not mark the whole video done', async (
   assert.equal(h.store.state.generate.status, 'running', 'the production is still being watched');
   h.watchOptions().onState(finalSnapshot());
   assert.equal(h.store.state.generate.status, 'done');
-  assert.match(h.session.progressHtml(), /src="\/media\/final\.mp4"/u);
+  assert.equal(buildGalleryModel(h.session.snapshot()).final.url, '/media/final.mp4');
+  assert.match(h.session.progressHtml(), /<video\b[^>]*data-gallery-media="final"/u);
+  assert.doesNotMatch(h.session.progressHtml(), /<video\b[^>]*src="\/media\//u);
 });
 
 test('a failed run reports the error and never starts a watch', async () => {

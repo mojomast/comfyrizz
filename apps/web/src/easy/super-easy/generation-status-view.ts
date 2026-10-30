@@ -37,10 +37,10 @@ export function syncGenerationStatus(root: HTMLElement, snapshot: unknown, now =
   const existing = root.querySelector<HTMLElement>('[data-generation-status]');
   if (!html) {
     existing?.remove();
-    for (const element of root.querySelectorAll<HTMLElement>('[data-generation-hidden]')) {
+    for (const element of root.querySelectorAll?.<HTMLElement>('[data-generation-hidden]') ?? []) {
       element.hidden = false; delete element.dataset.generationHidden;
     }
-    for (const element of root.querySelectorAll<HTMLElement>('[data-generation-original-text]')) {
+    for (const element of root.querySelectorAll?.<HTMLElement>('[data-generation-original-text]') ?? []) {
       element.textContent = element.dataset.generationOriginalText ?? ''; delete element.dataset.generationOriginalText;
     }
     return;
@@ -55,7 +55,7 @@ export function syncGenerationStatus(root: HTMLElement, snapshot: unknown, now =
     ? 'This run has ended. Completed media is available below.' : 'Following actual server activity. Timings describe the last reported update.';
   // Inferred stage percentages are not execution evidence. Keep the gallery,
   // actions and agent console, while replacing these gauges with actual counts.
-  for (const element of root.querySelectorAll<HTMLElement>('[data-super-easy-chrome], [data-super-easy-live]')) {
+  for (const element of root.querySelectorAll?.<HTMLElement>('[data-super-easy-chrome], [data-super-easy-live]') ?? []) {
     if (!element.hidden) { element.dataset.generationHidden = ''; element.hidden = true; }
   }
   if (existing) { const holder = root.ownerDocument.createElement('div'); holder.innerHTML = html; existing.replaceWith(holder.firstElementChild!); }

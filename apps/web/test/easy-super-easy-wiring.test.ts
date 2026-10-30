@@ -794,7 +794,9 @@ test('watch callbacks move the mounted stages and fill the gallery', async () =>
     const partial = shell.root.innerHTML;
     assert.notEqual(partial, before);
     assert.match(partial, /data-super-easy-gallery-item="character:char_mira"/u);
-    assert.match(partial, /src="\/media\/mira\.png"/u);
+    assert.match(partial, /<img\b[^>]*data-gallery-media="character:char_mira"/u);
+    assert.match(partial, /data-gallery-item-key="character:char_mira\|character\|ready\|\/media\/mira\.png\|/u);
+    assert.doesNotMatch(partial, /<img\b[^>]*src="\/media\//u, 'protected image loading is deferred to authenticated hydration');
     assert.match(partial, /data-super-easy-gallery-item="shot:shot_1"/u);
     assert.match(partial, /data-super-easy-stage="characters" data-stage-status="running"/u);
     // The This-computer preview is further along than the journal's 40% render.
@@ -805,7 +807,9 @@ test('watch callbacks move the mounted stages and fill the gallery', async () =>
     shell.watch().onState(finalWatchState());
     const done = shell.root.innerHTML;
     assert.match(done, /data-super-easy-gallery-item="final"/u);
-    assert.match(done, /src="\/media\/final\.mp4"/u);
+    assert.match(done, /<video\b[^>]*data-gallery-media="final"/u);
+    assert.match(done, /data-gallery-item-key="final\|final\|ready\|\/media\/final\.mp4\|/u);
+    assert.doesNotMatch(done, /<video\b[^>]*src="\/media\//u);
     assert.notEqual(done, partial);
   } finally {
     shell.dispose();
@@ -1040,7 +1044,9 @@ test('navigation away and back preserves the same watch and finished work', asyn
     assert.equal(shell.stopCalls(), 0, 'mode/navigation changes must not cancel the parked watch');
     shell.watch().onState(finalWatchState());
     assert.match(shell.root.innerHTML, /data-super-easy-gallery-item="final"/u);
-    assert.match(shell.root.innerHTML, /src="\/media\/final\.mp4"/u);
+    assert.match(shell.root.innerHTML, /<video\b[^>]*data-gallery-media="final"/u);
+    assert.match(shell.root.innerHTML, /data-gallery-item-key="final\|final\|ready\|\/media\/final\.mp4\|/u);
+    assert.doesNotMatch(shell.root.innerHTML, /<video\b[^>]*src="\/media\//u);
   } finally {
     shell.dispose();
     shell.restore();

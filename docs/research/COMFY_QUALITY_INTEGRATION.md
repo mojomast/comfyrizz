@@ -96,3 +96,66 @@ setup, concurrent hosted generation, and editing/CPU rendering after invite
 credits are exhausted. Its merge and affected-surface verification are part of
 this same release; earlier test counts above are not presented as validation of
 those later changes.
+
+## Generation observability and demo navigation
+
+The subsequent user report exposed a real ten-shot mapping case: all 31 media
+jobs completed, but only the two scenes with foreground stills showed previews.
+The gallery now resolves scene backgrounds, media and foreground placement, and
+labels conditioning previews separately from generated clips. The authenticated
+asset inspector exposes available exact prompts, model/workflow metadata, size,
+duration and seed, with scoped media loading and cleanup.
+
+Execution status now comes from the saved run or a sanitized, invite-bound result:
+stage, job/model, completed count, observed timestamps, terminal failure and
+shutdown state. A failed export cannot remain an apparently running generation.
+See [the read-only run diagnosis](GENERATION_OBSERVABILITY.md).
+
+Five Chromium flows passed after integration: desktop/mobile ten-shot asset
+inspection, verified/missing bounded-repair output, and failed-export reload with
+31/31 media jobs complete and verified shutdown. These use scripted backend
+responses and do not constitute human audiovisual acceptance.
+
+The user then prioritized demo-ready project continuity: gallery → selected
+project → chat/Super Easy/Easy/editor, including reload and browser navigation.
+Verification of those later navigation changes is recorded separately; the five
+flows above do not establish that coverage.
+
+## Hosted admission and accounting
+
+Pipeline capacity refusals cannot adopt another invite's run. Successful
+admission verifies origin and package identity. A proven non-submission releases
+only the matching reservation; uncertain submission retains it. The assembled
+correction-adapter/spend-guard path is covered, not just the raw adapter.
+
+Parallel work requires server-verified invite ownership; private-owner work
+remains exclusive. A reference-counted operation lease survives cancellation of
+one parallel run. Account authentication is excluded during active execution,
+reconciliation, unconfirmed shutdown and durable unresolved holds.
+
+Account-wide balance changes are not attributable concurrent-run usage. Hosted
+settlement requires final session-bound usage evidence and verified shutdown.
+The current CLI does not supply that receipt, so allocated hosted runs normally
+retain their CU reservations even after successful delivery. The gallery and
+dashboard explicitly show **Usage indeterminate; CU reserved**. Historical
+reservation-based charges remain labeled estimates; genuine CPU-only editing is
+zero-CU. This is an operational limitation, not verified actual reconciliation.
+
+## Additional verification notes
+
+- Renderer full run after fixes: **339 passed, 2 failed, 2 skipped**. Both remaining
+  failures were intermittent `QA_FLASH` findings and passed in the focused run;
+  their investigation remains separate from a green full-suite claim.
+- The preceding server broad run had **2,363 passed, 12 failed, 8 skipped**.
+  Follow-up staging/reference fixes and saved-drawing CAS coverage addressed the
+  remaining failures; hosted HTTP checks passed **3/3** on the merged branch.
+  A fresh full run is required before recording a green integration result.
+- Saved-drawing changes passed **42 agent checks** and **4 finished-package chat
+  checks**, including preserving concurrent edits on CAS conflict.
+- Release scan passed after integration; final navigation changes require another
+  scan before release.
+
+Research and fixture verification above used no paid inference. The user later
+authorized a separate **10-credit cumulative maximum** for demo end-to-end
+testing, including failed attempts. Authorization is not a claim of execution or
+spend; any live run must have its own reservation, evidence and verified shutdown.

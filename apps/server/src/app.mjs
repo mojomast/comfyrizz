@@ -296,7 +296,6 @@ export function createApp({
   // uses succeeds; a failed probe keeps the route at 503.
   auditionSynth = null,
   inviteLedger = null,
-  guestRunnerFactory,
   publicBaseUrl = process.env.COMFYRIZZ_PUBLIC_BASE_URL || undefined,
   localNarrationPrepare,
   speechInspector = createLocalSpeechInspector(),

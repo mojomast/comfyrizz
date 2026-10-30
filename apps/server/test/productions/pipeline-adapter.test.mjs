@@ -23,6 +23,7 @@ import {
   mapPipelineStatus,
 } from '../../src/productions/pipeline-adapter.mjs';
 import { createProductionStore } from '../../src/productions/store.mjs';
+import { createCorrectionAdapter } from '../../src/productions/correction-adapter.mjs';
 import { createInviteProductionSpendGuard } from '../../src/invites/production-spend-guard.mjs';
 import { reconcileInvitePipeline } from '../../src/invites/production-reconcile.mjs';
 import { createDurableInviteLedger } from '../../../../packages/backends/src/durable-invite-ledger.mjs';
@@ -259,7 +260,7 @@ test('concurrent invite dispatches reserve once and start one attributed run', a
 });
 
 for (const scenario of ['capacity', 'staging_error', 'unknown_error', 'legacy_409', 'wrong_origin', 'wrong_package', 'legacy_success']) {
-  test(`invite admission boundary: ${scenario}`, async t => {
+  test(`composed correction wrapper + invite spend guard admission boundary: ${scenario}`, async t => {
     const { runtimeDir, store } = seed(t);
     const ledger = createDurableInviteLedger({ path: join(runtimeDir, 'admission-ledger.sqlite') });
     t.after(() => ledger.close());
@@ -282,7 +283,7 @@ for (const scenario of ['capacity', 'staging_error', 'unknown_error', 'legacy_40
       controller.runs.set(own.runId, own);
       return own;
     };
-    const adapter = createPipelineAdapter({ store, controller });
+    const adapter = createCorrectionAdapter({ store, runs: {}, pipeline: createPipelineAdapter({ store, controller }) });
     const guard = createInviteProductionSpendGuard({ ledger, spendEnabled: () => true, adapter });
     const result = await guard.admit({ productionId: PRODUCTION_ID, actionId: ACTION_ID, pkg: PACKAGE, input: { backendId: 'colab', budgetUnits: 0.7 }, sourceDir: '.' });
     const definite = ['capacity', 'staging_error'].includes(scenario);
@@ -354,7 +355,8 @@ test('real controller capacity counts a staging invite without attributing the r
     launch: (_spec, receive, exit) => { const worker = { receive, exit, cancelled: false }; workers.push(worker); return { cancel() { worker.cancelled = true; }, kill() {} }; },
   });
   t.after(() => controller.close());
-  const guard = createInviteProductionSpendGuard({ ledger, spendEnabled: () => true, adapter: createPipelineAdapter({ store, controller }) });
+  const adapter = createCorrectionAdapter({ store, runs: {}, pipeline: createPipelineAdapter({ store, controller }) });
+  const guard = createInviteProductionSpendGuard({ ledger, spendEnabled: () => true, adapter });
   const args = [];
   for (let index = 0; index < 3; index++) {
     const productionId = index === 0 ? PRODUCTION_ID : `prod_capacity_${index}`;
