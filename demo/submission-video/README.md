@@ -1,8 +1,55 @@
-**v4:** title and end cards are now static holds (the slow zoom-in was removed). No music. Same timings.
+# Comfyrizz submission demo: "Mira's Light"
 
-**v3 (10:15 AM ET):** music bed removed. The audio is now the narration only, plus the film's own audio while the film plays full-screen (0:58–1:10). Integrated loudness -15.7 LUFS. Same timings.
+**Current cut: v5**, [`film/DEMO_DRAFT.mp4`](film/DEMO_DRAFT.mp4): **1:57** (117.07 s), 1920×1080, H.264 + AAC.
+Thumbnail: [`film/thumbnail.jpg`](film/thumbnail.jpg) · preview clip: [`film/preview.gif`](film/preview.gif).
+Built by `scripts/assemble2.py` (ffmpeg). Google Colab spend: **2.67 CU** in total (original film plus the shot-4 retake). The cuts after v1 used no new spend.
 
-# v2 (Oct 30, ~10:10 AM ET): corrected edit story, new voice
+## What's in the v5 cut
+
+| | |
+|---|---|
+| **Title and end cards** | Static holds, no zoom |
+| **Music** | None. Narration only, plus the film's own audio while it plays full-screen (0:58–1:10) |
+| **Voice** | Kokoro v1.0 (open weights, local CPU), voice **af_heart** at 0.96×. **Kyle's own recording is planned** over the same timings (`vo/durations.json`) |
+| **Duplicate Mira** | Removed. The Klein still `a_img_ac76142ca8b2d684` is hidden in the gallery, and the film segment skips FILM_BEFORE 6.0–7.7 s, where shot 2 opens with a second Mira |
+| **Blank/broken tiles** | Painted out (gallery Video/Shot tiles, result thumbnail row, review placeholders, plan Preview). The gallery fast-forwards from 3499 s, after all stills have landed |
+| **Chat text** | **Reconstructed** to match what the real shot-4 retake changed (see below) |
+
+**Timeline:** title 0:00–0:09 · prompt –0:22 · proposal –0:34 · gallery –0:52 · result –0:58 · film –1:10 · chat –1:25 · regenerate + take 2 –1:43 · before/after –1:51 · end –1:57.
+
+## What's real and what's edited
+
+| Item | Status |
+|---|---|
+| Super Easy prompt → proposal → **Make this film** → live gallery → result → chat → approve → regenerate | **Real UI**, captured with Playwright against a local server |
+| 9 Klein stills, 4 LTX-2.5 clips, 24 s film | **Real.** Generated live by ComfyUI on Google Colab (`run_7a4b0ff5d9fe`). Workflow JSON sits next to each still in `stills/` |
+| Shot 4 take 2 | **Real.** The chat correction ran as a live LTX-2.5 job on Google Colab (`run_2568c14f704b`) |
+| Chat panel text (1:10–1:31) | **Redrawn** with Pillow in the app's font and colours (`scripts/chat_overlay.py` → `chat-overlay/`). The real session asked for "stormy night, red raincoat", but LTX image-to-video kept the original keyframe, so the overlay describes what take 2 actually shows: the boat drifts far out to a tiny light and Mira turns toward the camera. **Disclose this if asked.** |
+| Before/after, title/end cards, captions | Composited in ffmpeg / Pillow (`scripts/cards.py`) |
+
+**Known limitation:** a chat correction re-animates the existing Klein keyframe. It does not repaint it. Colour or wardrobe changes need a Klein regeneration or a ref-edit step before LTX.
+
+## Files
+
+`film/` (DEMO_DRAFT.mp4, thumbnail, preview GIF) · `stills/` (Klein PNG + ComfyUI workflow JSON) · `cards/` · `chat-overlay/` · `ui-stills/` · `vo/` (current Kokoro af_heart lines) · `vo_v1/` (old am_michael) · `scripts/` · `edl.json` · `NARRATION.md`.
+The full 93-minute UI capture (~470 MB) and the intermediate segments are not committed, because the repo has no LFS. Script paths point at the original box layout (`<demo-workdir>/...`), so adjust them before reuse.
+
+---
+
+## Change history
+
+### v5: cleanup
+- **Duplicate Mira:** Klein still `a_img_ac76142ca8b2d684` ("Visual reference 8") shows Mira twice. It is hidden in the gallery: the real VR9 tile is moved into its slot. **Film shot 2** (lantern room) opens with a second Mira behind her (FILM_BEFORE 6.0–7.7 s). `06_film` now plays 0–6 s (shot 1, unchanged), then 7.7–13.7 s (rest of shot 2 and the start of shot 3). It is still 12 s, and the film audio uses the same cuts.
+- **Blank/broken tiles:** These are painted with the page background (#0a0a12). That covers the Video tile and the Shot 1–4 tiles in the gallery, the thumbnail row under the result player, the "Shots 1–4" placeholders on the review screen (07/08), and the plan-page Preview box. The gallery now fast-forwards from 3499 s, after all the stills have arrived (323 s at about 18×).
+- Timings, VO offsets and the total (1:57.07) are unchanged. There is no music and no new Google Colab spend. The raw still stays in `stills/` for the record but is not shown.
+
+### v4
+Title and end cards are now static holds (the slow zoom-in was removed). Same timings.
+
+### v3
+Music bed removed. Integrated loudness -15.7 LUFS. Same timings.
+
+### v2 (Oct 30, ~10:10 AM ET): corrected edit story, new voice
 
 **Current cut:** `film/DEMO_DRAFT.mp4`, 1:57.0, built by `scripts/assemble2.py`. The previous cut is kept as `film/DEMO_DRAFT_v1.mp4`. No new Google Colab spend (still 2.67 CU in total).
 
@@ -30,17 +77,17 @@ The real session asked for a stormy night and a red raincoat. LTX image-to-video
 **v2 timeline:** title 0:00–0:09 · prompt –0:22 · proposal –0:34 · gallery –0:52 (fast-forward from when the stills land) · result –0:58 · film –1:10 · chat –1:25 · regenerate + take 2 –1:43 · before/after –1:51 · end –1:57.
 
 ---
-# Comfyrizz submission demo: draft cut + assets (Oct 30, 2026, ~3:35 AM ET)
+### v1: Comfyrizz submission demo: draft cut + assets (Oct 30, 2026, ~3:35 AM ET)
 
 **Draft:** `out/DEMO_DRAFT.mp4`: 1:52.9, 1920×1080, 30 fps, H.264 + AAC (Kokoro VO + film soundtrack).
 **Rebuild:** `python3 scripts/assemble.py` (ffmpeg only, threads=2, skips segments that already exist; use `REBUILD=1` or delete `out/seg/*.mp4` to redo them).
 
-## Concept: "Mira's Light"
+#### Concept: "Mira's Light"
 A young lighthouse keeper in a yellow raincoat climbs the tower at golden hour, lights the lamp and sends a glowing paper boat out to sea. It's 24 s and 4 shots.
 Why this concept: one recurring character, strong colour (yellow coat, amber light, blue sea), and readable motion, so an edit is easy to see.
 Chat edit: "Change all four shots to a stormy blue night with rain and lightning, and make Mira's raincoat red."
 
-## What's real and what isn't
+#### What's real and what isn't
 | Item | Status |
 |---|---|
 | Super Easy prompt, proposal, gallery, result playback, chat, approval | **Real UI.** Captured with Playwright against a local server (branch `feat/agent-self-review-and-repair` @ 0039ae6, detached worktree `repo/`) |
@@ -52,16 +99,16 @@ Chat edit: "Change all four shots to a stormy blue night with rain and lightning
 
 **Known limitation (important):** the chat edit only re-animates shot 4 with LTX image-to-video from the **original yellow-coat keyframe**. The new take has different motion and an ocean with no lamp-glow on the boat. **It is not red and not stormy.** The VO and captions avoid claiming a red coat. The on-screen chat text still asks for it. Real fix: a chat path that regenerates the Klein keyframe (or uses the Klein ref-edit workflow) before LTX.
 
-## Google Colab spend
+#### Google Colab spend
 Before 195.01 → after 192.34 = **2.67 CU** (original film ~1.92, shot 4 retake ~0.75). Cap was 10. Active sessions at the end: **0**, rate 0.00/hr.
 
-## Local demo-environment changes (worktree only; not committed or pushed)
+#### Local demo-environment changes (worktree only; not committed or pushed)
 - `apps/server/src/index.mjs`: agent planning timeout from env `SUBMISSION_DEMO_AGENT_TIMEOUT_MS` (1,800,000 used).
 - `packages/agent/src/conversation.ts`: chat step limit from env `SUBMISSION_DEMO_CHAT_STEPS` (14 used; the default is 6).
 - Planner LLM: the OpenCode Go monthly limit is used up, and OpenRouter has no credits. **The planner was `nvidia/nemotron-3-ultra-550b-a55b:free` via OpenRouter.** beam-free timed out and missed the duration.
 - The production spend cap was raised from 4 to 6 through the app's `/spend-cap` API, because the first run's estimate (2.36) blocked the retake reservation.
 
-## EDL (`out/edl.json`)
+#### EDL (`out/edl.json`)
 | # | In–Out | Segment | Source | VO |
 |---|---|---|---|---|
 | 1 | 0:00–0:07 | Title | cards/title.png | vo01 |
@@ -76,7 +123,7 @@ Before 195.01 → after 192.34 = **2.67 CU** (original film ~1.92, shot 4 retake
 | 10 | 1:47–1:53 | End card | cards/end.png | vo09 |
 SESSION_FULL.webm t=0 ≈ 05:53:13 UTC. Event timestamps are in `assets/ui-raw/timeline.log`.
 
-## Asset index (`assets/`)
+#### Asset index (`assets/`)
 - `ui-raw/SESSION_FULL.webm`: the whole 93-minute session. Viewport 1600×900, top-left of a 1920×1080 frame; crop `1600:900:0:0`. It includes failed planning attempts (good B-roll for "honest errors"). `setup-side-tab.webm` is unused.
 - `ui-stills/*.png`: 26 timed screenshots.
 - `film-before/FILM_BEFORE.mp4`, `clips/*.plate.mp4` (4 LTX), `stills/*.png` + `*.workflow.api.json` (9 Klein, with ComfyUI workflows for provenance).
@@ -84,23 +131,19 @@ SESSION_FULL.webm t=0 ≈ 05:53:13 UTC. Event timestamps are in `assets/ui-raw/t
 - `cards/` (title, end, cap01–07 lower-thirds, the_end_overlay); `brand/` (logos, symbol, social card).
 - `NARRATION.md`: the original script plan. **The final spoken lines are in `vo/durations.json`.** Audio is in `vo/vo01–09.wav`.
 
-## Suggested next edits
+#### Suggested next edits
 1. Record Kyle's own VO over the timings above (or keep Kokoro).
 2. Decide on the edit story: (a) keep it honest as "new take" (current), or (b) spend ~2–3 CU re-running Super Easy with "stormy night, red raincoat" in the prompt and present it as the after film. Option (b) is not a chat edit, so caption it accordingly.
 3. Segment 4 has a few seconds of empty tiles. Start the fast-forward closer to 3430 s, when the stills arrive.
 4. Caption 6 ("re-rendered film") overstates things a little, because the after film is my ffmpeg composite. Reword it, or export from the app once Review/Keep works.
 5. Add a music bed under the UI sections (currently VO only).
 
-## In this PR (`demo/submission-video/`)
-`film/` (DEMO_DRAFT 1:53, FILM_BEFORE, FILM_AFTER) · `clips/` (4 LTX plates + shot-4 take 1/2) · `stills/` (9 Klein PNGs + ComfyUI workflow JSON) · `cards/` · `vo/` · `ui-stills/` · `scripts/` · `edl.json` · `timeline.log`. Brand assets are already in `/brand`. Script paths point at the box layout (`/workspace/submission-demo/assets/...`); adjust them before reuse.
+#### In this PR (`demo/submission-video/`)
+`film/` (DEMO_DRAFT 1:53, FILM_BEFORE, FILM_AFTER) · `clips/` (4 LTX plates + shot-4 take 1/2) · `stills/` (9 Klein PNGs + ComfyUI workflow JSON) · `cards/` · `vo/` · `ui-stills/` · `scripts/` · `edl.json` · `timeline.log`. Brand assets are already in `/brand`. Script paths point at the box layout (`<demo-workdir>/assets/...`); adjust them before reuse.
 
 **Excluded (too large, repo has no LFS). These are on the box:**
-- `/workspace/submission-demo/assets/ui-raw/SESSION_FULL.webm` (~470 MB, the full 93-minute UI capture that the EDL cuts from)
-- `/workspace/submission-demo/out/seg/*.mp4` (intermediate segments; regenerate with assemble.py)
+- `<demo-workdir>/assets/ui-raw/SESSION_FULL.webm` (~470 MB, the full 93-minute UI capture that the EDL cuts from)
+- `<demo-workdir>/out/seg/*.mp4` (intermediate segments; regenerate with assemble.py)
 
 **Local code tweaks** (planning timeout env, chat step limit 6→14 env) are in a separate, clearly labelled commit on this branch. Both default to the old behaviour when the env var is unset.
 
-## v5 (cleanup: no broken tiles, no duplicate Mira)
-- **Duplicate Mira:** Klein still `a_img_ac76142ca8b2d684` ("Visual reference 8") shows Mira twice. It is hidden in the gallery: the real VR9 tile is moved into its slot. **Film shot 2** (lantern room) opens with a second Mira behind her (FILM_BEFORE 6.0–7.7 s). `06_film` now plays 0–6 s (shot 1, unchanged), then 7.7–13.7 s (rest of shot 2 and the start of shot 3). It is still 12 s, and the film audio uses the same cuts.
-- **Blank/broken tiles:** These are painted with the page background (#0a0a12). That covers the Video tile and the Shot 1–4 tiles in the gallery, the thumbnail row under the result player, the "Shots 1–4" placeholders on the review screen (07/08), and the plan-page Preview box. The gallery now fast-forwards from 3499 s, after all the stills have arrived (323 s at about 18×).
-- Timings, VO offsets and the total (1:57.07) are unchanged. There is no music and no new Google Colab spend. The raw still stays in `stills/` for the record but is not shown.

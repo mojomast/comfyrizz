@@ -9,8 +9,10 @@ The plugin bundles the `comfyrizz-film` skill and starts the `comfyrizz` MCP ser
 [`packages/comfyrizz-mcp`](../packages/comfyrizz-mcp). This page covers the MCP contract,
 installing it for Hermes, and attaching the same server to Cursor or another MCP client.
 
-**Status: local install only, v0.1.0.** There is no Hermes plugin catalog entry and no catalog PR
-has been opened. Install from a checkout; nothing here depends on a catalog listing.
+**Status: v0.1.0.** A portable build, [mojomast/comfyrizz-hermes](https://github.com/mojomast/comfyrizz-hermes),
+is listed in the Hermes plugin catalog via
+[NousResearch/hermes-agent#146230](https://github.com/NousResearch/hermes-agent/pull/146230) (merged 2026-10-29).
+This page covers the in-repo plugin, installed from a checkout.
 
 ## What Hermes loads
 
@@ -228,7 +230,7 @@ as a plugin failure.
 - `COMFYRIZZ_ENGINE_URL` and the optional MCP HTTP listener are loopback only.
 - The engine must be running for non-stub tools; stubbed responses never generate or spend.
 - Google Colab and Comfy Cloud spend always requires explicit acceptance; see above.
-- There is no hermes-agent catalog PR for this plugin. Installation is from this repository only.
+- The catalog lists the portable plugin (mojomast/comfyrizz-hermes); this in-repo copy installs from a checkout.
 
 ## See also
 
