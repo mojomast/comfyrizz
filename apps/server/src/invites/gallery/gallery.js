@@ -7,8 +7,8 @@
   if (incoming) { sessionStorage.setItem(key, token); history.replaceState(null, '', location.pathname); }
   let next = null, busy = false;
   const el = (tag, cls, text) => { const n = document.createElement(tag); n.className = cls; if (text !== undefined) n.textContent = text; return n; };
-  async function api(path) {
-    const r = await fetch(path, { headers: { 'x-comfyrizz-token': token }, cache: 'no-store', redirect: 'error' });
+  async function api(path, method = 'GET') {
+    const r = await fetch(path, { method, headers: { 'x-comfyrizz-token': token }, cache: 'no-store', redirect: 'error' });
     if (r.status === 401) { sessionStorage.removeItem(key); token = ''; throw new Error('Your session ended. Open your original invite link again.'); }
     const data = await r.json();
     if (!r.ok) throw new Error(data.error || 'The gallery could not be loaded.');
@@ -39,7 +39,15 @@
     const models = el('div', 'models', `Models used: ${used || 'Not recorded for this older generation.'}`);
     if (!used && planned) models.append(el('p', '', `Planned models (not verified usage): ${planned}`));
     if (row.planner) models.append(el('p', '', `Planning: ${row.planner.name}${row.planner.provider ? ` · ${row.planner.provider}` : ''}`));
-    body.append(play, prompt, models); article.append(video, body); return article;
+    const edit = el('button', '', 'Edit with agent'); edit.type = 'button';
+    edit.addEventListener('click', async () => {
+      edit.disabled = true;
+      try {
+        const result = await api(row.editApiPath, 'POST');
+        location.href = `${result.openPath}#token=${encodeURIComponent(token)}`;
+      } catch (error) { $('notice').textContent = error.message; edit.disabled = false; }
+    });
+    body.append(play, edit, prompt, models); article.append(video, body); return article;
   }
   async function load(reset = true) {
     if (busy) return;
@@ -47,7 +55,7 @@
     busy = true; $('refresh').disabled = true; $('more').disabled = true;
     try {
       const [session, gallery] = await Promise.all([api('/api/invites/session'), api(`/api/demo/generations?offset=${reset ? 0 : next || 0}`)]);
-      $('budget').textContent = `${session.budgetUnits.toFixed(3)} CU remaining · Shared invite budget${session.spendEnabled ? '' : ' · Generation is currently paused'}`;
+      $('budget').textContent = `${session.budgetUnits.toFixed(3)} CU remaining · Shared invite budget · CPU edits remain available${session.spendEnabled ? '' : ' · Colab generation is paused'}`;
       $('easy').href = `${session.easyPath}#token=${encodeURIComponent(token)}`; $('easy').hidden = false;
       if (reset) { for (const v of $('films').querySelectorAll('video')) { v.pause(); v.removeAttribute('src'); v.load(); } $('films').replaceChildren(); }
       $('films').append(...gallery.items.map(card)); next = gallery.nextOffset;

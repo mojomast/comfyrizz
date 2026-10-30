@@ -83,7 +83,7 @@ test('hosted invite rejects alternate origins and paid guest bypasses, and survi
     const builtBody = await built.json();
     assert.equal(builtBody.provider, 'fixture');
     assert.equal(ledger.resourceOwner('package', builtBody.package.id), data.invite.id);
-    assert.equal((await request(`/api/package/${builtBody.package.id}`, { credential: guest })).status, 403);
+    assert.equal((await request(`/api/package/${builtBody.package.id}`, { credential: guest })).status, 200);
     const created = await request('/api/productions', { method: 'POST', credential: guest, body: {
       kind: 'production.create', commandId: 'guest_create_1', idempotencyKey: 'guest_create_1',
       expected: { productionRevision: 0 }, payload: { packageId: builtBody.package.id, conversationId: null },

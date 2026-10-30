@@ -512,19 +512,20 @@ export async function runSuperEasy(input: RunSuperEasyInput, deps: RunSuperEasyD
   const hosted = input.hostedInvite === true;
   const getProduction = (id: string): Promise<unknown> => hosted && deps.api.getProductionWithEvents
     ? deps.api.getProductionWithEvents(id) : deps.api.getProduction(id);
-  const compute = hosted ? 'colab' : (input.compute ?? 'cpu');
+  let compute = hosted ? 'colab' : (input.compute ?? 'cpu');
   let budgetUnits: number | undefined;
   if (hosted) {
     try {
       const session = await deps.api.inviteSession?.();
       if (session?.role !== 'guest' || session.backendId !== 'colab'
-          || session.spendEnabled === false || (session.invite?.status !== undefined && session.invite.status !== 'active')
-          || typeof session.budgetUnits !== 'number' || !Number.isFinite(session.budgetUnits) || session.budgetUnits <= 0) {
-        return failure('INVITE_UNAVAILABLE', 'compute', 'This invite is unavailable or has no compute remaining.');
+          || ['expired', 'revoked'].includes(session.invite?.status ?? '')
+          || typeof session.budgetUnits !== 'number' || !Number.isFinite(session.budgetUnits) || session.budgetUnits < 0) {
+        return failure('INVITE_UNAVAILABLE', 'compute', 'This invite is unavailable.');
       }
-      budgetUnits = session.budgetUnits;
+      compute = input.compute === 'cpu' || session.spendEnabled === false || session.invite?.status === 'exhausted' || session.budgetUnits === 0 ? 'cpu' : 'colab';
+      budgetUnits = compute === 'cpu' ? 0 : session.budgetUnits;
     } catch {
-      return failure('INVITE_UNAVAILABLE', 'compute', 'This invite is unavailable or has no compute remaining.');
+      return failure('INVITE_UNAVAILABLE', 'compute', 'This invite is unavailable.');
     }
   }
 

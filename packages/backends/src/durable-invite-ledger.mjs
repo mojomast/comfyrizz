@@ -63,7 +63,8 @@ export function createDurableInviteLedger({ path, now, publicBaseUrl } = {}) {
       const existing = findResource.get(kind, resourceId);
       if (existing && existing.inviteId !== inviteId) throw new Error('resource already belongs to another invite');
       const invite = ledger().get(inviteId);
-      if (!invite || invite.status !== 'active') throw new Error('invite not active');
+      // Owning/editing local resources does not spend CU or consume a film slot.
+      if (!invite || ['expired', 'revoked'].includes(invite.status)) throw new Error('invite not active');
       if (!existing) insertResource.run(kind, resourceId, inviteId);
       db.exec('COMMIT');
       return { inviteId, kind, resourceId, created: !existing };

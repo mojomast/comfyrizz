@@ -7,9 +7,11 @@ import { join } from 'node:path';
 import { createApp } from '../../src/app.mjs';
 import { createDurableInviteLedger } from '../../../../packages/backends/src/durable-invite-ledger.mjs';
 import { sessionNameFor } from '../../../../packages/backends/src/colab-plan.mjs';
+import { createHash } from 'node:crypto';
 import { createEasyApi } from '../../../web/src/easy/api.ts';
 import { createEasyStore } from '../../../web/src/easy/store.ts';
 import { runSuperEasy } from '../../../web/src/easy/super-easy/run.ts';
+import { createSuperEasySession } from '../../../web/src/easy/super-easy/session.ts';
 import { guestPlannerFixture } from './planner-fixture.mjs';
 
 test('two users of one link run together; shared gallery, models, private admin playback and revocation', async () => {
@@ -24,6 +26,7 @@ test('two users of one link run together; shared gallery, models, private admin 
   const ownerToken = 'owner-test-only-not-a-secret';
   const app = createApp({ token: ownerToken, runtimeDir: join(dir, 'runtime'), inviteLedger: ledger,
     guestRunnerFactory: options => async input => {
+      if (input.proposalRevision) return { edits: { edits: [{ id: input.proposalRevision.package.scenes[0].id, copy: { headline: 'Edited without Colab' } }] }, live: true, model: 'fixture-planner', provider: 'fixture' };
       const result = await guestPlannerFixture(options)(input);
       // Exercise aggregation: a whole-film worker must launch once, not once per scene.
       result.package.scenes.push({ ...structuredClone(result.package.scenes[0]), id: 's_second' });
@@ -81,6 +84,16 @@ test('two users of one link run together; shared gallery, models, private admin 
     ledger.bindResource(link.invite.id, 'production', 'prod_over_limit');
     assert.equal(ledger.reserveAction({ inviteId: link.invite.id, productionId: 'prod_over_limit', actionId: 'act_extra', backendId: 'colab', units: 0.1 }).reason, 'film_limit');
     for (const [index, worker] of workers.entries()) {
+      const completed = packages[index];
+      for (const [id, asset] of Object.entries(completed.assets)) {
+        if (asset.status !== 'pending') continue;
+        asset.status = 'ready'; asset.file = `assets/${id}.png`;
+        asset.bytes = Buffer.byteLength('simulated ready image');
+        asset.sha256 = createHash('sha256').update('simulated ready image').digest('hex');
+        mkdirSync(join(worker.spec.workDir, 'assets'), { recursive: true });
+        writeFileSync(join(worker.spec.workDir, asset.file), 'simulated ready image');
+      }
+      writeFileSync(join(worker.spec.workDir, 'package.json'), JSON.stringify(completed));
       const target = join(worker.spec.runDir, 'exports', packages[index].id);
       mkdirSync(target, { recursive: true }); writeFileSync(join(target, 'video.mp4'), `video-${index}`);
       for (const stage of worker.spec.plan.stages) worker.message({ kind: 'stage', stageId: stage.id, status: 'completed' });
@@ -117,6 +130,60 @@ test('two users of one link run together; shared gallery, models, private admin 
     const summary = await (await get('/api/invites', ownerToken, true)).json();
     assert.equal(summary.totals.readyCount, 2);
     assert.ok(summary.totals.visits >= 4);
+    // Exhaustion is a Colab boundary, not an editing or CPU boundary.
+    const beforeCpu = ledger.get(link.invite.id);
+    assert.equal(beforeCpu.status, 'exhausted');
+    delete process.env.COMFYRIZZ_INVITE_SPEND_ENABLED;
+    const guestFetch = (path, init = {}) => fetch(base + path, { ...init,
+      headers: { ...init.headers, origin: base, 'x-comfyrizz-token': guests[0] } });
+    const cpuApi = createEasyApi(guestFetch);
+    const editResponse = await guestFetch(`/api/demo/generations/${item.id}/edit`, { method: 'POST' });
+    assert.equal(editResponse.status, 200, await editResponse.clone().text());
+    const edit = await editResponse.json();
+    let pkg = (await (await guestFetch(`/api/package/${edit.packageId}`)).json()).package;
+    assert.ok(Object.values(pkg.assets).every(asset => asset.status !== 'pending'));
+    assert.equal(ledger.resourceOwner('package', pkg.id), link.invite.id);
+    assert.notEqual(pkg.id, packages[0].id);
+    assert.equal((await get(`/api/package/${pkg.id}`, viewer)).status, 403);
+    const foreignEdit = await fetch(base + '/api/agent', { method: 'POST', headers: { origin: base, 'content-type': 'application/json', 'x-comfyrizz-token': viewer },
+      body: JSON.stringify({ brief: 'Edit a film', proposalRevision: { packageId: pkg.id, baseRevision: pkg.revision, note: 'Change logline' } }) });
+    assert.equal(foreignEdit.status, 403);
+    const cpuStore = createEasyStore({ storage: { getItem: () => null, setItem() {} }, key: 'cpu-edit' });
+    const session = createSuperEasySession({ api: cpuApi, store: cpuStore, go() {}, watch: () => () => {},
+      host: { getPackage: () => pkg, adoptBuiltPackage: body => { pkg = body.package; },
+        aiSelection: async () => { throw new Error('Owner provider settings are forbidden'); }, editorStore: {}, refreshClips() {} } });
+    session.reviewExisting();
+    const edited = await session.reviseProposal('Change the first headline to Edited without Colab');
+    assert.equal(edited.ok, true, JSON.stringify(edited));
+    assert.equal(pkg.scenes[0].copy.headline, 'Edited without Colab');
+    assert.ok(packages.every(source => source.scenes[0].copy?.headline !== 'Edited without Colab'));
+    const staleEdit = await guestFetch('/api/agent', { method: 'POST', headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ brief: 'Edit this film', proposalRevision: { packageId: pkg.id, baseRevision: 1, note: 'A stale edit' } }) });
+    assert.equal(staleEdit.status, 409);
+    const cpuResult = await session.approveProposal();
+    assert.equal(cpuResult.ok, true, JSON.stringify(cpuResult));
+    const cpuDeadline = Date.now() + 5000;
+    while (workers.length < 3 && Date.now() < cpuDeadline) await new Promise(resolve => setTimeout(resolve, 20));
+    assert.equal(workers.length, 3, JSON.stringify(app.pipelines.list()));
+    const worker = workers[2];
+    assert.equal(worker.spec.plan.options.backendId, 'cpu');
+    assert.equal(worker.spec.plan.options.budgetUnits, 0);
+    assert.equal(worker.spec.plan.remoteVoice, false);
+    assert.equal(worker.spec.plan.gpuMedia, false);
+    assert.equal(worker.spec.plan.remoteRender, false);
+    assert.equal(readFileSync(join(worker.spec.workDir, pkg.assets.a_data_still.file), 'utf8'), 'simulated ready image');
+    const target = join(worker.spec.runDir, 'exports', pkg.id);
+    mkdirSync(target, { recursive: true }); writeFileSync(join(target, 'video.mp4'), 'cpu video');
+    for (const stage of worker.spec.plan.stages) worker.message({ kind: 'stage', stageId: stage.id, status: 'completed' });
+    worker.message({ kind: 'result', result: { models: [], files: [{ name: 'video.mp4' }] } }); worker.exit(0, null);
+    assert.equal(ledger.get(link.invite.id).filmsCompleted, beforeCpu.filmsCompleted);
+    assert.equal(ledger.get(link.invite.id).spentEstimateCu, beforeCpu.spentEstimateCu);
+    assert.equal(ledger.get(link.invite.id).committedEstimateCu, 0);
+    assert.match(ledger.listGenerations(link.invite.id).find(row => row.runId === worker.spec.runId).prompt, /Agent edit: Change the first headline/);
+    const cpuVideo = await (await guestFetch(`/api/invites/productions/${cpuResult.productionId}/result`)).json();
+    assert.equal(cpuVideo.status, 'completed');
+    assert.equal((await get(cpuVideo.url)).status, 200);
+    session.stop();
     ledger.revoke(link.invite.id);
     assert.equal((await get(viewerTicket.url)).status, 401);
     assert.equal((await (await get('/api/demo/generations', viewer)).json()).total, 0);

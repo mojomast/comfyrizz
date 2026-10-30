@@ -84,6 +84,7 @@ import { createInviteProductionSpendGuard } from './invites/production-spend-gua
 import { createInviteProductionOwnership } from './invites/production-ownership.mjs';
 import { reconcileInvitePipeline } from './invites/production-reconcile.mjs';
 import { createGuestPackageBuilder } from './invites/guest-package-builder.mjs';
+import { guestPackageDirectory, openGuestEdit } from './invites/guest-editing.mjs';
 import { guestProductionResult } from './invites/guest-result.mjs';
 import { createGuestShowcase } from './invites/guest-showcase.mjs';
 import { createGenerationGallery } from './invites/generation-gallery.mjs';
@@ -1235,7 +1236,9 @@ export function createApp({
         };
       }
     }
-    return { pkg, input, sourceDir: dirname(store.path(pkg.id)) };
+    const sourceDir = process.env.COMFYRIZZ_HOSTED_INVITES === '1'
+      ? guestPackageDirectory({ ledger: inviteLedger, runtimeDir, store }, pkg.id) : dirname(store.path(pkg.id));
+    return { pkg, input, sourceDir };
   }
 
   // UX21F2: a cancel drain carries no dispatch authority. dispatchEntry sees
@@ -1721,6 +1724,19 @@ export function createApp({
     }
     const ownerOk = actor.role === 'owner';
     const guest = actor.guest;
+    const editGeneration = /^\/api\/demo\/generations\/([A-Za-z0-9_-]+)\/edit$/.exec(url.pathname);
+    const editProduction = /^\/api\/invites\/productions\/([A-Za-z0-9_-]+)\/edit$/.exec(url.pathname);
+    if (guest && (editGeneration || editProduction) && request.method === 'POST') {
+      try {
+        const generationId = editGeneration?.[1] ?? (inviteLedger.resourceOwner('production', editProduction[1]) === guest.inviteId
+          ? inviteLedger.listGenerations(guest.inviteId).findLast(row => row.details?.productionId === editProduction[1] && row.status === 'ready')?.id : null);
+        const pkg = await openGuestEdit({ ledger: inviteLedger, pipelines, runtimeDir, store,
+          inviteId: guest.inviteId, generationId });
+        return pkg ? sendJson(response, 200, { packageId: pkg.id,
+          openPath: `${process.env.COMFYRIZZ_DEMO_APP_PATH || '/'}?demo=1&mode=super-easy&edit=1&package=${pkg.id}` })
+          : sendJson(response, 404, { error: 'film unavailable' });
+      } catch { return sendJson(response, 422, { error: 'Film could not be opened for editing.' }); }
+    }
     if (generationGallery && request.method === 'GET') {
       if (guest && url.pathname === '/api/demo/generations') {
         return sendJson(response, 200, generationGallery.list(guest.inviteId, Object.fromEntries(url.searchParams)));
@@ -1752,7 +1768,6 @@ export function createApp({
       }
       const copyGet = /^\/api\/package\/([A-Za-z0-9_.-]+)$/.exec(url.pathname);
       if (copyGet && request.method === 'GET'
-          && inviteLedger.resourceOwner('showcase_copy', copyGet[1]) === guest.inviteId
           && inviteLedger.resourceOwner('package', copyGet[1]) === guest.inviteId) {
         const pkg = store.read(copyGet[1]);
         return pkg ? sendJson(response, 200, { package: pkg, revision: pkg.revision }) : sendJson(response, 404, { error: 'package not found' });
@@ -1794,7 +1809,11 @@ export function createApp({
       }
       if (request.method === 'POST' && /^\/api\/productions\/[^/]+\/actions$/.test(url.pathname)
           && process.env.COMFYRIZZ_INVITE_SPEND_ENABLED !== '1') {
-        return sendJson(response, 403, { error: 'Google Colab spend is not enabled', code: 'INVITE_SPEND_DISABLED' });
+        const id = url.pathname.split('/')[3];
+        const plan = productionStore.readEvents(id).findLast(event => event.type === 'plan.proposed')?.data;
+        if (!plan?.actions?.length || plan.actions.some(action => action.backendId !== 'cpu' || action.upperBound !== 0)) {
+          return sendJson(response, 403, { error: 'Google Colab spend is not enabled', code: 'INVITE_SPEND_DISABLED' });
+        }
       }
     }
 
@@ -2234,6 +2253,7 @@ export function createApp({
             ...(guestRunnerFactory ? { runnerFactory: guestRunnerFactory } : {}),
             provider, model, resolveProviderConfig: providerSettings?.resolve });
           const result = await build({ inviteId: guest.inviteId, brief: body.brief,
+            proposalRevision: body.proposalRevision, videoType: body.videoType,
             motionModel: ['auto', 'h3', 'ltx', 'klein'].includes(body.motionModel) ? body.motionModel : 'auto',
             signal: AbortSignal.timeout(300000) });
           const timeline = compilePackage(result.package, dirname(store.path(result.package.id)));
@@ -2247,7 +2267,9 @@ export function createApp({
           // Provider failures can include request headers or host configuration.
           // Never reflect them to guests or copy them into public-service logs.
           console.error('[invite-package-build] planning failed');
-          return sendJson(response, 500, { error: 'guest package could not be built' });
+          const status = error.currentRevision !== undefined ? 409 : [403, 409, 422].includes(error.status) ? error.status : 500;
+          return sendJson(response, status,
+            { error: status === 409 ? 'The project changed. Reload it before editing.' : 'The guest plan or edit could not be completed.' });
         }
       }
       if (!agentRunner) return sendJson(response, 503, { error: 'agent runner not configured' });

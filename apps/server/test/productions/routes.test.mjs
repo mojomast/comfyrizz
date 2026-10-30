@@ -96,7 +96,7 @@ function createEnvelope(overrides = {}) {
   };
 }
 
-test('invite productions reject caller-authored plans and non-Colab easy plans', async (t) => {
+test('invite productions reject caller-authored plans and require a real production for CPU plans', async (t) => {
   const { store, handler } = setup(t);
   const routes = createProductionRoutes({
     store, handler,
@@ -109,8 +109,8 @@ test('invite productions reject caller-authored plans and non-Colab easy plans',
   assert.equal(forged.status, 403);
   assert.equal(forged.body.code, 'INVITE_SERVER_PLAN_REQUIRED');
   const cpu = await call(routes, { method: 'POST', url: '/api/productions/prod_1/easy-plan', body: { level: 'draft', compute: 'cpu' } });
-  assert.equal(cpu.status, 403);
-  assert.equal(cpu.body.code, 'INVITE_COLAB_ONLY');
+  assert.equal(cpu.status, 404);
+  assert.equal(cpu.body.code, 'NOT_FOUND');
   const forgedAction = await call(routes, { method: 'POST', url: '/api/productions/prod_1/commands', body: { kind: 'action.dispatch', payload: { id: 'act_fake', state: 'queued' } } });
   assert.equal(forgedAction.status, 403);
   assert.equal(forgedAction.body.code, 'INVITE_COMMAND_FORBIDDEN');

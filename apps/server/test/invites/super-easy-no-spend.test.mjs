@@ -38,10 +38,10 @@ test('hosted Super Easy reaches the disabled spend boundary using real HTTP and 
       host: { adoptBuiltPackage() {}, async aiSelection() { return { provider: 'none' }; }, editorStore: {}, refreshClips() {} },
     });
     assert.equal(result.ok, false, JSON.stringify({ result, calls }));
-    assert.equal(result.stage, 'approval', JSON.stringify({ result, calls }));
-    assert.match(result.message, /spend is not enabled/i);
+    assert.equal(result.stage, 'plan', JSON.stringify({ result, calls }));
+    assert.match(result.message, /CPU rendering needs completed media/i);
     assert.ok(calls.some(call => /\/easy-plan$/.test(call)));
-    assert.ok(calls.some(call => /\/actions$/.test(call)));
+    assert.equal(calls.some(call => /\/actions$/.test(call)), false);
     assert.equal(calls.some(call => call === 'POST /api/run'), false);
     assert.equal(ledger.get(minted.invite.id).committedEstimateCu, 0);
   } finally {

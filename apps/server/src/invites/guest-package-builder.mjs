@@ -7,19 +7,49 @@ import { copyFileSync, lstatSync, mkdirSync, mkdtempSync, rmSync } from 'node:fs
 import { basename, join } from 'node:path';
 import { createCpuAgentRunner } from '../agent-runner.mjs';
 import { reachableAssetIds } from '../../../../packages/jobs/src/reachable.mjs';
+import { applyProposalRevision } from '../proposal-revision.mjs';
+import { inlineGeneratedAssets } from '../../../renderer/scripts/render-package-lib.mjs';
+import { guestPackageDirectory } from './guest-editing.mjs';
 
 export function createGuestPackageBuilder({ runtimeDir, store, ledger, runnerFactory = createCpuAgentRunner, resolveProviderConfig, provider, model } = {}) {
   if (!runtimeDir || !store || !ledger) throw new TypeError('guest package builder requires runtime, store and ledger');
-  return async function build({ inviteId, brief, motionModel, signal } = {}) {
+  return async function build({ inviteId, brief, motionModel, signal, proposalRevision, videoType } = {}) {
     if (typeof brief !== 'string' || brief.trim() === '') throw new TypeError('brief is required');
     const invite = ledger.get(inviteId);
-    if (!invite || invite.status !== 'active') throw new Error('invite not active');
+    if (!invite || ['expired', 'revoked'].includes(invite.status)) throw new Error('invite not active');
     const stagingRoot = join(runtimeDir, 'guest-builds');
     mkdirSync(stagingRoot, { recursive: true, mode: 0o700 });
     const staging = mkdtempSync(join(stagingRoot, 'build-'));
     try {
+      if (proposalRevision !== undefined) {
+        const rev = proposalRevision;
+        if (!rev || typeof rev !== 'object' || Array.isArray(rev)
+            || Object.keys(rev).some(key => !['packageId', 'baseRevision', 'note'].includes(key))
+            || typeof rev.packageId !== 'string' || ledger.resourceOwner('package', rev.packageId) !== inviteId
+            || !Number.isSafeInteger(rev.baseRevision) || typeof rev.note !== 'string' || !rev.note.trim() || rev.note.length > 12000) {
+          throw Object.assign(new Error('Invalid guest edit'), { status: 403 });
+        }
+        const original = store.read(rev.packageId);
+        if (!original || original.revision !== rev.baseRevision) throw Object.assign(new Error('Stale guest edit'), { status: 409 });
+        const metadata = ledger.resourceDetails('package', rev.packageId);
+        const result = await runnerFactory({ runtimeDir: staging, resolveProviderConfig })({ brief, provider, model, signal,
+          sessionId: `guest-edit-${randomUUID()}`, proposalRevision: { package: original,
+            originalBrief: metadata?.originalPrompt ?? metadata?.prompt ?? brief, note: rev.note,
+            source: metadata?.originalPrompt ?? metadata?.prompt ?? brief } });
+        // The model cannot replace assets, paths, ownership, or execution options.
+        const revised = applyProposalRevision(original, result.edits, rev.note);
+        const current = ledger.get(inviteId);
+        if (!current || ['expired', 'revoked'].includes(current.status)) throw Object.assign(new Error('Invite unavailable'), { status: 403 });
+        const saved = store.save(original.id, revised, rev.baseRevision);
+        ledger.setResourceDetails('package', saved.id, { ...metadata,
+          originalPrompt: metadata?.originalPrompt ?? metadata?.prompt ?? brief,
+          prompt: `${metadata?.prompt ?? brief}\n\nAgent edit: ${rev.note}`,
+          planner: { name: model ?? result.model, provider: provider ?? result.provider, role: 'planning' } });
+        return { ...result, package: saved, generatedAssets: inlineGeneratedAssets(saved,
+          guestPackageDirectory({ ledger, runtimeDir, store }, saved.id)), pendingGpu: [] };
+      }
       // Provider/model are host configuration, never accepted from the browser.
-      const result = await runnerFactory({ runtimeDir: staging, resolveProviderConfig })({ brief, provider, model, motionModel, signal,
+      const result = await runnerFactory({ runtimeDir: staging, resolveProviderConfig })({ brief, provider, model, motionModel, videoType, signal,
         sessionId: `guest-plan-${randomUUID()}` });
       const pkg = structuredClone(result.package);
       // The offline agent records image plans without attaching them to its

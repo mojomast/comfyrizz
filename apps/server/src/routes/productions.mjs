@@ -15,6 +15,7 @@
 // request header, query parameter or body, and never invents one.
 
 import { randomUUID } from 'node:crypto';
+import { planPipeline } from '../pipeline-contract.mjs';
 
 import { ActionError } from '../productions/actions.mjs';
 import {
@@ -424,9 +425,6 @@ export function createProductionRoutes(options = {}) {
     }
     const body = assertEasyPlanBody(await readJsonBody(request));
     const context = await commandContext(request);
-    if (inviteOwnership && context?.inviteId && body.compute !== 'colab') {
-      throw new RouteError('INVITE_COLAB_ONLY', 'invite productions require Google Colab', 403);
-    }
     const production = store.read(id);
     if (!production) throw new RouteError('NOT_FOUND', 'production does not exist', 404);
     if (typeof production.packageId !== 'string' || production.packageId === '') {
@@ -454,7 +452,13 @@ export function createProductionRoutes(options = {}) {
       onlyShotIds: body.onlyShotIds,
       chip: body.chip,
     });
-    if (inviteOwnership && context?.inviteId && described.actions.length > 0) {
+    if (inviteOwnership && context?.inviteId && body.compute === 'cpu') {
+      const cpu = planPipeline(pkg, { backendId: 'cpu', budgetUnits: 0, narrationRuntime: 'local', renderLocation: 'local' });
+      if (!cpu.ready || cpu.gpuMedia || cpu.remoteVoice) {
+        throw new RouteError('INVITE_CPU_MEDIA_REQUIRED', 'CPU rendering needs completed media. You can keep editing this proposal, or open a finished film from the gallery to reuse its media.', 422);
+      }
+      described.actions = [{ id: 'act_invite_cpu', kind: 'final', backendId: 'cpu', upperBound: 0 }];
+    } else if (inviteOwnership && context?.inviteId && described.actions.length > 0) {
       // The executor runs the complete film, not a scoped shot. Author a final
       // action on the server and reserve every scene's conservative media
       // estimate plus the pipeline's maximum default remote-narration allowance.

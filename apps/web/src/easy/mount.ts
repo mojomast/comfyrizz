@@ -557,6 +557,9 @@ export function mountEasyStudio(root: HTMLElement, baseHost: EasyHost, deps: Eas
     // Rebuild the review only on return. Later edits must still fail the normal
     // approval revision guard, rather than silently updating what was reviewed.
     proposalReturnWaiting = superEasySession?.refreshProposal?.() === 'waiting';
+    if (hostedInviteView && new URLSearchParams(search()).get('edit') === '1' && !superEasySession) {
+      ensureSuperEasySession().reviewExisting();
+    }
     superEasy = mountSuperEasy({
       root,
       state: () => store.get(),
@@ -621,6 +624,17 @@ export function mountEasyStudio(root: HTMLElement, baseHost: EasyHost, deps: Eas
       },
       onSetup: () => { void openSuperEasySetup(); },
       onChangeAnything: (change = '') => {
+        if (hostedInviteView) {
+          void (async () => {
+            const productionId = store.get().productionId;
+            const opened = await host.apiFetch(`/api/invites/productions/${encodeURIComponent(productionId ?? '')}/edit`, { method: 'POST' });
+            if (!opened.ok) throw new Error('Film could not be opened for editing.');
+            const data = await opened.json();
+            if (change.trim()) view?.sessionStorage.setItem(`guest-edit-note-${data.packageId}`, change.trim());
+            if (view) view.location.href = data.openPath;
+          })().catch(() => { shell?.setStatus('Open the film gallery and choose Edit with agent.'); });
+          return;
+        }
         openStudioFromSuperEasy('review');
         void ask?.openAsk(change);
       },
@@ -645,6 +659,14 @@ export function mountEasyStudio(root: HTMLElement, baseHost: EasyHost, deps: Eas
       },
     });
     if (store.get().productionId) refreshSuperEasySnapshot();
+    if (hostedInviteView && requestedPackage) {
+      const key = `guest-edit-note-${requestedPackage}`;
+      const note = view?.sessionStorage.getItem(key);
+      if (note) {
+        view?.sessionStorage.removeItem(key);
+        void superEasySession?.reviseProposal(note);
+      }
+    }
   }
 
   /** More control lands on the existing studio; Review is the preview handoff. */

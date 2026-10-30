@@ -15,6 +15,7 @@ export function createGenerationGallery({ ledger, pipelines, tickets, adminTicke
         modelEvidence: row.details?.modelEvidence ?? 'not_recorded', planner: row.details?.planner ?? null,
         fromThisInvite: row.inviteId === viewerId,
         videoApiPath: `/api/demo/generations/${encodeURIComponent(row.id)}/video`,
+        editApiPath: `/api/demo/generations/${encodeURIComponent(row.id)}/edit`,
       })) };
   }
   function video(generationId, viewerId, owner = false) {

@@ -269,7 +269,7 @@ test('hosted Super Easy uses the invite budget and dispatches only through the p
 });
 
 test('hosted Super Easy refuses before planning when the invite session is unavailable', async () => {
-  const { api, host, calls, store } = harness({ session: { role: 'guest', backendId: 'colab', budgetUnits: 0 } });
+  const { api, host, calls, store } = harness({ session: { role: 'guest', backendId: 'colab', budgetUnits: 0, invite: { status: 'revoked' } } });
   const result = await runSuperEasy({ prompt: PROMPT, hostedInvite: true }, { api, host, store, go: () => {} });
   assert.equal(result.ok, false);
   assert.equal(result.code, 'INVITE_UNAVAILABLE');
@@ -280,22 +280,23 @@ test('hosted Super Easy uses available invite credits despite a stale local CPU 
   const { api, host, store } = harness({ hosted: true, session: { role: 'guest', backendId: 'colab', budgetUnits: 7.5, spendEnabled: true, invite: { status: 'active' } } });
   store.patch({ compute: 'cpu', spendCap: 500 });
   host.aiSelection = async () => { throw new Error('Owner settings must not be requested'); };
-  const result = await runSuperEasy({ prompt: PROMPT, compute: 'cpu', setupConfirmed: false, hostedInvite: true }, { api, host, store, go: () => {} });
+  const result = await runSuperEasy({ prompt: PROMPT, compute: 'colab', setupConfirmed: false, hostedInvite: true }, { api, host, store, go: () => {} });
   assert.equal(result.ok, true, JSON.stringify(result));
   assert.equal(store.get().compute, 'colab');
   assert.equal(store.get().spendCap, 7.5);
 });
 
-test('hosted Super Easy blocks paused spending and exhausted film quotas before planning', async () => {
+test('hosted Super Easy allows CPU work when spending is paused or the invite is exhausted', async () => {
   for (const session of [
     { role: 'guest', backendId: 'colab', budgetUnits: 7.5, spendEnabled: false, invite: { status: 'active' } },
     { role: 'guest', backendId: 'colab', budgetUnits: 7.5, spendEnabled: true, invite: { status: 'exhausted' } },
   ]) {
     const { api, host, calls, store } = harness({ hosted: true, session });
     const result = await runSuperEasy({ prompt: PROMPT, hostedInvite: true }, { api, host, store, go: () => {} });
-    assert.equal(result.ok, false);
-    assert.equal(result.code, 'INVITE_UNAVAILABLE');
-    assert.deepEqual(kinds(calls), ['invite-session']);
+    assert.equal(result.ok, true, JSON.stringify(result));
+    assert.equal(store.get().compute, 'cpu');
+    assert.equal(store.get().spendCap, 0);
+    assert.equal(calls.some(call => call.kind === 'run' || call.kind === 'colab-status'), false);
   }
 });
 

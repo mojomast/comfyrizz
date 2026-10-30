@@ -35,6 +35,7 @@ export function initialRoute(
   const packageId = params.get('package')?.trim() ?? '';
   const requestedStep = params.get('step')?.trim() ?? '';
   const home = view === 'easy' && packageId === '' && requestedStep === '';
+  if (params.get('demo') === '1') return { step, view: 'superEasy', home };
   const preferStudio = prefs === undefined ? readSuperEasyPrefs().preferStudio : prefs?.preferStudio === true;
   return { step, view: home && !preferStudio ? 'superEasy' : view, home };
 }

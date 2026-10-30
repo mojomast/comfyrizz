@@ -2,8 +2,8 @@
 //
 // The router decides that a bare visit belongs to Super Easy; this module
 // paints the one-prompt home or the progress view for a run that is already
-// under way. It is presentation and navigation only: no network, no player
-// adoption and no generation logic. The studio handoff belongs to the Easy
+// under way. It reads the guest's own allowance but never manages compute or
+// adopts the player. The studio handoff belongs to the Easy
 // mount so there is one owner of the borrowed player.
 
 import { COPY } from './copy.ts';
@@ -254,11 +254,11 @@ export function mountSuperEasy(options: SuperEasyMountOptions): SuperEasyMountHa
       const session = await response.json();
       if (session.role !== 'guest' || session.backendId !== 'colab' || !Number.isFinite(session.budgetUnits)) throw new Error('Invite unavailable');
       const credits = Math.max(0, session.budgetUnits);
-      inviteReady = session.spendEnabled === true && session.invite?.status === 'active' && credits > 0;
+      inviteReady = ['active', 'exhausted'].includes(session.invite?.status);
       message = `${credits.toLocaleString(undefined, { maximumFractionDigits: 3 })} invite credits available`;
-      if (session.invite?.status === 'exhausted') message += ' · Invite limit reached. You can still watch the gallery.';
+      if (session.invite?.status === 'exhausted' || credits === 0) message += ' · CPU work and agent edits available. New Google Colab generation is unavailable.';
       else if (session.invite?.status !== 'active') message += ' · This invite is unavailable.';
-      else if (!session.spendEnabled) message += ' · Generation is paused by the host.';
+      else if (!session.spendEnabled) message += ' · Google Colab generation is paused. CPU work and agent edits remain available.';
     } catch { /* Fail closed; the server also checks the invite at planning and dispatch. */ }
     finally {
       checkingInvite = false;
@@ -957,6 +957,13 @@ export function mountSuperEasy(options: SuperEasyMountOptions): SuperEasyMountHa
       loadAttachments();
     }
     if (hostedInvite) {
+      if (options.state().compute === 'cpu' && options.proposal?.()) {
+        const button = root.querySelector<HTMLButtonElement>('[data-super-easy-approve-proposal]');
+        if (button) button.textContent = 'Render on CPU';
+        const note = root.ownerDocument.createElement('p');
+        note.textContent = 'CPU mode · Agent edits remain available. Rendering reuses completed media and spends no Google Colab credits.';
+        root.prepend(note);
+      }
       root.querySelectorAll('[data-super-easy-setup], [data-super-easy-more-control], [data-super-easy-open-studio], [data-super-easy-open-editor], [data-super-easy-review-edit-plan], [data-super-easy-review]').forEach(element => element.remove());
       root.querySelectorAll('.super-easy-progress-mode-actions').forEach(element => element.remove());
       const generate = root.querySelector<HTMLButtonElement>('[data-super-easy-generate]');

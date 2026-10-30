@@ -71,7 +71,8 @@ guest's saved local compute choice, setup confirmation, and per-video cap do
 not override the invite: planning reads the current server-reported available
 credits and uses that allowance as its cap. The home shows available shared
 credits, refreshes them every 15 seconds without replacing the prompt draft,
-and disables generation for unavailable/exhausted invites or paused spending.
+and keeps CPU work and agent edits available when the shared credits or paid
+film quota are exhausted, or when the host pauses Google Colab spending.
 Guests still approve the creative proposal with “Make this film”; there is no
 separate connection or spending-setup step. Durable server admission checks
 remain authoritative when simultaneous guests consume the shared allowance.
@@ -80,7 +81,39 @@ The automatic-setup UI was verified on the deployed desktop/mobile pages with
 a temporary 7.5-CU invite (revoked afterward) and an exhausted invite. No GPU
 generation was started by those checks. Typecheck, hosted build, and 91 focused
 Super Easy tests passed, including overriding stale local setup and blocking
-paused/exhausted invites before planning.
+unavailable invites before planning (subsequently expanded for exhausted-invite
+CPU work below).
+
+### CPU work and agent edits after exhaustion
+
+Exhaustion blocks new paid allocations, not planning or editing. Expired and
+revoked invites remain inaccessible. Guests can keep planning and revising
+proposals with the host's DeepSeek model. In the gallery, **Edit with agent**
+opens an independent, viewer-owned copy of a completed film, including ready
+media and verified generation receipts. The focused agent revision supports
+existing scene text, proposal loglines and scene ordering; the existing
+revision validator remains authoritative. Originals and other guests' projects
+cannot be mutated. The finished-film **Ask the agent** action uses the same
+private-copy flow and carries the guest's requested edit into it.
+
+**Render on CPU** uses a server-authored zero-CU action through the production
+outbox, forces local rendering/narration, and requires ready media. It neither
+reserves invite CU nor consumes another paid-film slot. Pending generated
+media and remote compute options are refused; guests may continue editing
+such drafts or reuse a finished gallery film's media. Final delivery still
+verifies model contribution and media provenance. CPU results appear in the
+gallery and admin reporting, with their agent-edit prompt and zero-CU cost
+source. Model API usage remains on the host's OpenCode Go account.
+
+Live validation on October 30 used the already-exhausted two-film test invite:
+DeepSeek edited a private copy and pipeline
+`pipe_8bee6d8f207f478ca6dfafbe270f9167` completed an eight-second local CPU
+render. Its runtime-allocation map was empty and its CU ceiling was zero;
+the resulting MP4 served HTTP 206. The invite stayed exhausted with two paid
+films, 15.442 estimated CU spent, and zero outstanding reservations. No
+additional Colab allocation was made by this test. Integration coverage also
+checks cross-invite edit denial, local-only admission, unchanged CU/film quota,
+and access revocation.
 
 Two isolated browser contexts redeemed the same invite, entered the public
 gallery, opened Super Easy, selected Klein-only generation, submitted distinct

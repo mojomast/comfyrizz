@@ -9,10 +9,12 @@ export function reconcileInvitePipeline({ ledger, run, readPackage = () => null 
   const productionId = run.origin?.productionId;
   const actionId = run.origin?.actionId;
   if (!productionId || !actionId) return false;
-  const reservation = ledger.actionReservation(productionId, actionId);
+  const owner = ledger.resourceOwner('production', productionId);
+  const cpu = actionId === 'act_invite_cpu' && run.budget?.ceilingUnits === 0 && owner;
+  const reservation = ledger.actionReservation(productionId, actionId) ?? (cpu ? { inviteId: owner, units: 0 } : null);
   if (!reservation) return false;
   const terminal = ['completed', 'failed', 'cancelled', 'interrupted'].includes(run.status);
-  if (terminal) {
+  if (terminal && !cpu) {
     const result = ledger.settleAction({ productionId, actionId, spent: reservation.units, filmCompleted: run.status === 'completed' });
     if (!result.ok) throw new Error('invite pipeline settlement failed');
   }
@@ -28,7 +30,7 @@ export function reconcileInvitePipeline({ ledger, run, readPackage = () => null 
       spentEstimateCu: terminal ? reservation.units : 0,
       status: run.status === 'completed' ? 'ready' : terminal ? run.status : 'running',
       showcase: run.status === 'completed',
-      details: { status: run.status, costSource: 'reserved_upper_estimate', productionId,
+      details: { status: run.status, costSource: cpu ? 'cpu_no_colab_spend' : 'reserved_upper_estimate', productionId,
         plannedModels: packageModels(pkg), models: run.result?.models ?? [],
         modelEvidence: Array.isArray(run.result?.models) ? 'completed_pipeline' : 'not_recorded',
         planner: metadata?.planner ?? null,
