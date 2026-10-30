@@ -201,6 +201,12 @@ test('LTX uses pinned i2v, retains start-frame refs and requires finishing sound
   assert.equal(start.gen.generator, 'flux3-klein');
   assert.equal(start.gen.inputs.reference, composition);
   assert.equal(start.gen.inputs.reference_2, identity);
+  assert.match(start.gen.inputs.prompt, /composition follows <ref_image_0>/);
+  assert.match(start.gen.inputs.prompt, /identity and materials of <ref_image_1>/);
+  assert.doesNotMatch(start.gen.inputs.prompt, /Picture [12]|<ref_image_2>/);
+  assert.ok(result.asset.gen.inputs.prompt.startsWith(direction(identity, composition).camera));
+  assert.ok(result.asset.gen.inputs.prompt.includes(direction(identity, composition).action));
+  assert.ok(!result.asset.gen.inputs.prompt.includes(direction(identity, composition).finishing_sound));
   assert.ok(!Object.values(pkg.assets).some((asset: any) => asset.gen?.generator === 'fasth3-omni'));
   const { jobs, schema } = await jobsAndSchema();
   assert.equal(schema.validatePackage(pkg).valid, true, JSON.stringify(schema.validatePackage(pkg).errors));
@@ -211,6 +217,10 @@ test('LTX uses pinned i2v, retains start-frame refs and requires finishing sound
   assert.equal(startJob.params.height, undefined);
   assert.ok(startJob.params.megapixels > 0);
   assert.deepEqual(startJob.fileInputs.map((input: any) => input.param), ['reference', '_reference_2']);
+  const { readFileSync } = await import('node:fs');
+  const graph = JSON.parse(readFileSync(new URL(`../../../../${startJob.workflow}`, import.meta.url), 'utf8'));
+  assert.deepEqual(graph['12'].inputs['images.image0'], ['10', 0]);
+  assert.deepEqual(graph['12'].inputs['images.image1'], ['11', 0]);
   assert.ok(startJob.deps.includes(`${identity}.still`));
   assert.ok(startJob.deps.includes(`${composition}.still`));
   const video = plan.jobs.find((job: any) => job.asset === result.asset.id);
@@ -219,6 +229,14 @@ test('LTX uses pinned i2v, retains start-frame refs and requires finishing sound
   assert.ok(video.deps.includes(`${start.id ?? result.asset.gen.inputs.image}.still`));
   assert.ok(plan.jobs.some((job: any) => job.asset === identity));
   assert.ok(plan.jobs.some((job: any) => job.asset === composition));
+});
+
+test('LTX start planning refuses a third implicit cast reference instead of claiming unconnected conditioning', async () => {
+  const { tools, getDraft, identity, composition } = await filmTools('ltx', [shot('shot1')], undefined,
+    RETAINED_FILM_BRIEF + ' Use the same mascot in every scene.');
+  const before = structuredClone(getDraft());
+  await assert.rejects(async () => tools['assets.generate_video'].run(direction(identity, composition, { motion_model: 'ltx' })), /PLAN_KLEIN_REFERENCE_UNSUPPORTED/);
+  assert.deepEqual(getDraft(), before, 'refused reference conditioning must not append a start frame or video');
 });
 
 test('full silence creates no finishing stem for LTX/Klein and mutes H3 native audio', async () => {

@@ -1,5 +1,6 @@
 /**
- * Deterministic FLUX caption expansion for planned image jobs (spec 6.4).
+ * Deterministic FLUX caption constraints for planned image jobs (spec 6.4).
+ * This is not a semantic upsampler; scene richness comes from the planner.
  *
  * GPU test 2 findings baked in (docs/GPU_TEST_2.md):
  *  - Klein draws garbled pseudo-text on screens and stray words, so a still
@@ -27,9 +28,9 @@ export interface CaptionInput {
   styleBlock?: string;
 }
 
-/** Default negative prompt. "no letters" is explicit: Klein writes stray words otherwise. */
-const NEGATIVE = 'no text, no letters, no words, no logos, no watermarks, no UI chrome';
-const KEEP_TEXT = 'legible labels only, no extra text beyond the supplied labels';
+/** Positive surface direction, not an ineffective CFG-1 negative prompt. */
+const PLAIN_SURFACES = 'plain, unmarked surfaces';
+const KEEP_TEXT = 'legible supplied lettering, exact wording and line breaks';
 const STATIC_CAMERA = 'static camera, no camera movement';
 
 const FRAMING: Record<Aspect, string> = {
@@ -70,9 +71,9 @@ export function expandFluxCaption(input: CaptionInput): string {
   const framing = input.framing ?? FRAMING[aspect];
   const cutout = input.cutout ? 'isolated subject on a transparent background, clean silhouette' : 'full-bleed scene';
   const camera = input.labelled ? `; ${STATIC_CAMERA}` : '';
-  const text = input.text || input.labelled ? KEEP_TEXT : NEGATIVE;
+  const text = input.text || input.labelled ? KEEP_TEXT : PLAIN_SURFACES;
   const styleBlock = input.styleBlock ? `; ${input.styleBlock.replace(/[.;]+$/, '')}` : '';
-  return `${input.intent.trim().replace(/[.!?]+$/, '')}. ${style ? `${style}; ` : ''}${palette}; ${framing}; ${cutout}${camera}; ${text}${styleBlock}.`;
+  return `${input.intent.trim()}\n${style ? `${style}; ` : ''}${palette}; ${framing}; ${cutout}${camera}; ${text}${styleBlock}.`;
 }
 
 export interface ReferenceEditCaptionInput {
@@ -92,17 +93,18 @@ export interface ReferenceEditCaptionInput {
  * Preserve identity/materials by default; style and label preservation are opt-in.
  */
 export function expandReferenceEditCaption(input: ReferenceEditCaptionInput): string {
-  const subject = input.intent.trim().replace(/[.!?]+$/, '');
+  const subject = input.intent.trim();
   const style = input.style?.trim();
   const palette = input.palette?.length ? `palette ${input.palette.join(', ')}` : 'the source palette';
   const framing = input.framing ?? FRAMING[input.aspect ?? '16:9'];
   return (
-    (style ? `Restyle this ${subject} as ${style}` : `Edit the supplied reference: ${subject}`) +
-    `; ${palette}; ${framing}. ` +
+    `${subject}\n` +
+    (style ? `Requested rendering style: ${style}; ` : '') +
+    `${palette}; ${framing}. ` +
     (input.text || input.labelled
-      ? 'Keep the exact layout, positions, colours and all labels exactly as written. Do not add or remove elements. '
+      ? 'Preserve supplied lettering verbatim, including line breaks; preserve source layout, positions and identity except for the requested changes. '
       : 'Preserve the reference identity, design and materials except for the requested changes. ') +
-    (input.text || input.labelled ? KEEP_TEXT : NEGATIVE) +
+    (input.text || input.labelled ? KEEP_TEXT : PLAIN_SURFACES) +
     (input.labelled ? `; ${STATIC_CAMERA}` : '') + '.'
   );
 }

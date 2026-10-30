@@ -8,6 +8,7 @@ import { fileURLToPath } from 'node:url';
 import { execFileSync } from 'node:child_process';
 import { isDeepStrictEqual } from 'node:util';
 import { canonical } from './plan.mjs';
+import { kleinReferenceProblem } from './klein-references.mjs';
 import { canonicalJson, compileTimeline } from '../../planner/dist/src/index.js';
 
 const root = fileURLToPath(new URL('../../../', import.meta.url));
@@ -48,13 +49,44 @@ function safeFile(dir, name) {
   try { return realpathSync(file).startsWith(realpathSync(dir) + sep) && statSync(file).isFile() ? file : null; } catch { return null; }
 }
 function eligibleJob(job) {
-  const spec = names[job?.generator];
+  if (job?.generator === 'flux3-klein' && kleinReferenceProblem(job.params, job)) return null;
+  const spec = Object.hasOwn(names, job?.generator ?? '') ? names[job.generator] : null;
   if (!spec || !spec[1].some(name => job.workflow === `workflows/${name}.api.json`)) return null;
   const graph = readFileSync(join(root, job.workflow));
   if (digest(graph) !== job.workflowSha256) return null;
   const nodes = JSON.parse(graph);
   if (!Object.values(nodes).some(n => n.class_type === 'UNETLoader' && n.inputs?.unet_name === spec[2])) return null;
   return { family: spec[0], checkpoint: spec[2], nodes };
+}
+
+// Read compatibility ONLY for completed receipts already in the trusted ledger.
+// Verified from the exact graph bytes at production 804d7c2: each graph's node 1
+// is UNETLoader with this checkpoint. Never consult this table when planning,
+// minting evidence, or recovering a run; those paths require eligibleJob above.
+const historicalLtxReceipts = Object.freeze({
+  'workflows/ltx25_i2v_2stage.api.json': Object.freeze({ generator: 'ltx25', sha256: '97e205ad993996ac937a9a65ef7040973260bdc939041a23c3109184dc48c5e3' }),
+  'workflows/ltx25_t2v_2stage.api.json': Object.freeze({ generator: 'ltx25', sha256: '4975aa404c21e04a470db76327eef2548397ffe893c67475f70e42c9d66c8847' }),
+  'workflows/ltx25_a2v_2stage.api.json': Object.freeze({ generator: 'ltx25-a2v', sha256: '81b7701ecbe172df0e73ca19a3cbc9e236b84842c6ddf5aa928527c0c9e20f70' }),
+});
+const historicalLtxCheckpoint = 'ltx-2.5-22b-distilled-transformer-comfy-int8-convrot.safetensors';
+
+function eligibleCompletedReceipt(receipt) {
+  if (eligibleJob({ generator: receipt.generator, workflow: receipt.workflow, workflowSha256: receipt.workflowSha256,
+    params: receipt.conditioning?.params, fileInputs: receipt.conditioning?.fileInputs })) return true;
+  if (typeof receipt.workflow !== 'string') return false;
+  const pin = Object.hasOwn(historicalLtxReceipts, receipt.workflow ?? '') ? historicalLtxReceipts[receipt.workflow] : null;
+  if (!pin || receipt.generator !== pin.generator || receipt.workflowSha256 !== pin.sha256) return false;
+  // A version pin preserves an old loader identity; it cannot replace a completed
+  // backend receipt. Some older records omit checkpoint, but an explicit claim
+  // must match the loader in the pinned graph (model is only an editable alias).
+  return receipt.schema === MODEL_CONTRIBUTION_POLICY && receipt.status === 'succeeded'
+    && ['colab', 'byo-comfyui'].includes(receipt.backend)
+    && ['runId', 'jobId', 'attemptId', 'plannedJobId'].every(key => typeof receipt[key] === 'string' && receipt[key].trim().length > 0)
+    && ['jobsHash', 'capturedWorkflowSha256', 'outputSha256'].every(key => typeof receipt[key] === 'string' && hashPattern.test(receipt[key]))
+    && Number.isSafeInteger(receipt.bytes) && receipt.bytes > 0
+    && ['width', 'height'].every(key => Number.isFinite(receipt.measured?.[key]) && receipt.measured[key] >= 64)
+    && (!Object.hasOwn(receipt, 'checkpoint') || receipt.checkpoint === historicalLtxCheckpoint)
+    && (!Object.hasOwn(receipt, 'family') || receipt.family === 'LTX 2.5');
 }
 function readReceipt(dir, sha) {
   if (!hashPattern.test(sha ?? '')) return null;
@@ -389,7 +421,7 @@ export function verifyModelContribution({ pkg, packageDir, timeline, media } = {
       const file = safeFile(packageDir, asset.file);
       const receipt = readReceipt(packageDir, asset.sha256);
       if (!file || !receipt || !['colab', 'byo-comfyui'].includes(receipt.backend) || receipt.schema !== MODEL_CONTRIBUTION_POLICY || receipt.status !== 'succeeded' || receipt.outputSha256 !== asset.sha256 || receipt.bytes !== statSync(file).size || digest(readFileSync(file)) !== asset.sha256) continue;
-      if (!eligibleJob({ generator: receipt.generator, workflow: receipt.workflow, workflowSha256: receipt.workflowSha256 }) || !receipt.jobId || !receipt.attemptId) continue;
+      if (!eligibleCompletedReceipt(receipt) || !receipt.jobId || !receipt.attemptId) continue;
       evidence.push({ ...use, receipt });
     }
   }

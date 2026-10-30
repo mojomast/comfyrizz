@@ -8,7 +8,7 @@ import { mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { inlineGeneratedAssets } from '../../renderer/scripts/render-package-lib.mjs';
 import { validatePackage } from '../../../packages/schema/src/index.mjs';
-import { aspectFromSize, extractBrief, isVideoType } from '../../../packages/agent/dist/src/index.js';
+import { aspectFromSize, extractBrief, isVideoType, MODEL_QUALITY_GUIDANCE } from '../../../packages/agent/dist/src/index.js';
 import { classifyAudioIntent } from '../../../packages/agent/dist/src/production-intent.js';
 import { reachableAssetIds } from '../../../packages/jobs/src/reachable.mjs';
 import { sceneShotPlates, plannedShotProblems } from './scene-shot-plates.mjs';
@@ -40,6 +40,7 @@ const SVG_SYSTEM = [
 
 const REPAIR_SYSTEM = [
   'You are Comfyrizz performing one focused repair of an existing generated-film package. The package is already loaded.',
+  MODEL_QUALITY_GUIDANCE,
   'Hard rules: do not call storyboard.propose, rebuild the storyboard, replace or regenerate ready assets, change the story, or change the model route. An under-covered pending shot may be re-planned with sufficient source frames, preserving its existing references and creative direction.',
   'Workflow: read each issue in the user validation report, make only the edit it requires, then stop. Use storyboard.edit for scene fields such as preferredFrames, copy, notes, narration or motion.cue_phrases. If a shot lacks required generated media or references, create only those missing assets with assets.generate_video or assets.generate_image.',
   'Preserve explicit ordered copy lists, natural materials and motion intensity. Do not add feature captions, new styling or generated lettering while repairing duration or placement. A generated source image is not a substitute for its requested visible action clip. Inspect drawings only on scenes that already contain drawing elements; this is not a video inspection tool.',
@@ -56,6 +57,7 @@ const REPAIR_SYSTEM = [
 
 const MOTION_GRAPHICS_REPAIR_SYSTEM = [
   'You are Comfyrizz performing one focused repair of an existing video package. The package is already loaded; it may combine native graphics with generated images or footage.',
+  MODEL_QUALITY_GUIDANCE,
   'Hard rules: do not call storyboard.propose, rebuild the storyboard, replace existing ready assets, change the story, or change the model route.',
   'Workflow: read each issue in the user validation report and make only the required edits. Use storyboard.edit for existing scene fields. Use storyboard.add_scene only when the report requires missing story scenes; use storyboard.draw or storyboard.extend_drawing only for required drawings. Never inspect a drawing on a scene that has none, or turn a footage scene into a drawing to satisfy inspection. Meet the compiled duration including transition overlaps and source coverage; do not stretch short footage. Create assets only when needed to resolve a reported media/coverage issue; never substitute GPU assets for a required drawing.',
   'Preserve explicit ordered copy lists: remove unrequested captions instead of inventing replacement copy; keep required strings verbatim and in order. Preserve natural materials, image-text policy and restrained motion when fixing another field. The selected video-type preset is guidance subordinate to these explicit brief constraints.',

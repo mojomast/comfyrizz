@@ -177,6 +177,20 @@ def test_the_validate_cli_knows_a_plan_from_a_package(tmp_path):
     assert "jobs.json (jobs)" in human.stdout
 
 
+def test_ltx_stage_lattice_and_frames_are_checked_even_when_halves_agree():
+    from conftest import FIXTURES
+    from comfyrizz_pipeline.schema import validate_jobs
+
+    doc = json.loads((FIXTURES / "jobs.json").read_text())
+    plate = next(job for job in doc["jobs"] if job["kind"] == "plate")
+    plate["dims"] = {"width": 960, "height": 544}
+    plate["stage1Dims"] = {"width": 480, "height": 272}
+    plate["frames"] = 100
+    messages = " ".join(error["message"] for error in validate_jobs(doc))
+    assert "positive multiples of 32" in messages
+    assert "frame count must be 8n+1" in messages
+
+
 def test_the_validate_cli_names_a_broken_plan(tmp_path):
     import subprocess
     import sys

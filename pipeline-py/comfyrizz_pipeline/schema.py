@@ -1033,6 +1033,48 @@ def _jobs_validator() -> jsonschema.Draft202012Validator:
     return _JOBS_VALIDATOR_CACHE
 
 
+def _klein_reference_problem(job: dict[str, Any]) -> str | None:
+    """Mirror jobs/src/klein-references.mjs for direct jobs.json admission."""
+    if job.get("generator") != "flux3-klein":
+        return None
+    params = job.get("params") if _is_obj(job.get("params")) else {}
+    files = [entry.get("param") for entry in (job.get("fileInputs") or []) if _is_obj(entry)]
+    def is_ref(key):
+        return isinstance(key, str) and (key in ("image", "images", "reference") or re.match(r"^_?reference_", key))
+    def fail(detail):
+        return f"{detail}; local Klein workflows support at most two connected references; no source may be silently dropped"
+    for key, value in params.items():
+        if not is_ref(key):
+            continue
+        if key == "images" or key not in ("image", "reference", "reference_2", "_reference_2"):
+            return fail(f"unsupported reference input {key}")
+        if not isinstance(value, str) or not value:
+            return fail(f"{key} must name one image")
+    if "image" in params and "reference" in params:
+        return fail("image and reference alias the same first slot; set only one")
+    if "reference_2" in params and "_reference_2" in params:
+        return fail("reference_2 and _reference_2 alias the same second slot; set only one")
+    if ("reference_2" in params or "_reference_2" in params) and not (params.get("image") or params.get("reference")):
+        return fail("the second reference requires a first image or reference")
+    keys = [key for key in [*params, *files] if is_ref(key)]
+    if job.get("paramsSource") and keys:
+        return fail("custom parameter maps cannot certify reference-slot wiring")
+    slots = {
+        "workflows/flux3_klein_ref_edit.api.json": ("image", "reference"),
+        "workflows/flux3_klein_ref2_edit.api.json": ("image", "reference", "_reference_2"),
+        "workflows/flux3_klein_img2img.api.json": ("image",),
+        "workflows/character_lora_klein.api.json": ("image", "reference"),
+        "workflows/character_identity_pulid.api.json": ("image", "reference"),
+    }.get(job.get("workflow"), ())
+    for key in keys:
+        if key not in slots:
+            return fail(f"{key} is not connected by {job.get('workflow')}")
+    refs = [key for key in files if is_ref(key)]
+    if len(refs) > 2 or len(set(refs)) != len(refs) or ("image" in refs and "reference" in refs):
+        return fail("fileInputs repeats or exceeds connected reference slots")
+    return None
+
+
 def validate_jobs(doc: Any) -> list[dict[str, Any]]:
     """Structural problems in a comfyrizz.jobs/v1 document, as [{code, path, message}].
 
@@ -1055,6 +1097,9 @@ def validate_jobs(doc: Any) -> list[dict[str, Any]]:
         for i, job in enumerate(doc.get("jobs", [])):
             if not _is_obj(job):
                 continue
+            reference_problem = _klein_reference_problem(job)
+            if reference_problem:
+                problems.append({"code": "JOBS_KLEIN_REFERENCE_UNSUPPORTED", "path": f"/jobs/{i}", "message": reference_problem})
             for dep in job.get("deps", []) or []:
                 if dep not in known:
                     problems.append(
@@ -1108,6 +1153,17 @@ def validate_jobs(doc: Any) -> list[dict[str, Any]]:
                             "message": f"stage1Dims {actual[0]}x{actual[1]} is not half of dims {dims['width']}x{dims['height']}",
                         }
                     )
+                if not all(_is_number(value) and value >= 32 and value % 32 == 0 for value in actual):
+                    problems.append({
+                        "code": "JOBS_SEMANTIC", "path": f"/jobs/{i}/stage1Dims",
+                        "message": "stage1Dims must be positive multiples of 32 (two-stage output dimensions must be multiples of 64)",
+                    })
+                frames = job.get("frames")
+                if not (_is_number(frames) and frames >= 1 and (frames - 1) % 8 == 0):
+                    problems.append({
+                        "code": "JOBS_SEMANTIC", "path": f"/jobs/{i}/frames",
+                        "message": "LTX frame count must be 8n+1",
+                    })
     return problems
 
 

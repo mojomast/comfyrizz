@@ -59,6 +59,22 @@ Call `comfyrizz_plan`, then present the plan in chat, not as a file dump:
 
 Planning and plan edits are free. Revise with `comfyrizz_plan` and show only the delta plus the updated plan version. Repeat until the user is happy with the creative plan.
 
+Describe each generated shot with framing, subject placement, materials, consistent
+light, one observable action and its end state. Preserve exact dialogue, ordered copy
+and reference identity. A Klein composition describes the finished frame; a bounded
+reference edit states its concrete result and preserved features. Do not invent
+details of references you have not seen. Reference asset IDs record provenance;
+they do not prove that every image is connected to model conditioning. Klein's
+connected reference tokens start at zero, unlike H3 Picture numbering; let the
+engine resolve actual slots rather than guessing tokens in a chat plan.
+
+For this pipeline's LTX shots, use one continuous take and one camera move (or a
+static camera), with a separate concrete finishing-sound plan. This local route
+emits picture only. Keep H3 dialogue and sound on their selected route. Ask the
+planner to enrich model captions from the approved visual direction, not to add
+new narrative, source claims or on-screen copy. Use the MCP tools above; this skill
+does not expose the engine's internal asset-generation tools.
+
 ### 4. Spend card and explicit acceptance
 
 Only when the creative plan is settled, call `comfyrizz_get_spend_card` and show it in chat before any paid work:

@@ -10,7 +10,7 @@ export const WORKFLOW_SHA256: Record<string, string> = {
   'workflows/flux3_klein_ref2_edit.api.json': '0f01b4525609f7f72fa71cc77b1324551f5c99d577059ba2378eeffe0e53cfb1',
   'workflows/flux3_klein_ref_edit.api.json': 'ecf1b281737c8f3bad5afe7be79e76d7aa3595146b97a8df3e8098c21c080e09',
   'workflows/flux3_klein_t2i.api.json': 'e83ba017e5be8e16c72474af4702b862a286e94bf7947edaa2beac7afe967689',
-  'workflows/ltx25_a2v_2stage.api.json': '81b7701ecbe172df0e73ca19a3cbc9e236b84842c6ddf5aa928527c0c9e20f70',
-  'workflows/ltx25_i2v_2stage.api.json': '97e205ad993996ac937a9a65ef7040973260bdc939041a23c3109184dc48c5e3',
-  'workflows/ltx25_t2v_2stage.api.json': '4975aa404c21e04a470db76327eef2548397ffe893c67475f70e42c9d66c8847',
+  'workflows/ltx25_a2v_2stage.api.json': 'ad0df3525517b8c0429a8f5f4882715c5eb11704e0466d144f7fb661ae6e0723',
+  'workflows/ltx25_i2v_2stage.api.json': '6089301e2b6c86de132890e2009e8accdfc84da4f26bbd95d377130333313d79',
+  'workflows/ltx25_t2v_2stage.api.json': '1d5710bceb405fb5d29d6cb5de9e825495ba99b7b4a57e5c6b1fa43ab207710f',
 };

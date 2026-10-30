@@ -163,7 +163,15 @@ def graph_node_class(graph: dict, node_id: str) -> str:
 def plan(package_path: Path, target: Path) -> dict:
     if NODE is None:
         pytest.skip("node is required to run the planner")
-    result = subprocess.run([NODE, str(PLANNER), str(package_path), "--out", str(target)], capture_output=True, text=True, check=False)
+    # This is an all-workflow contract fixture, including assets not placed in a scene.
+    # Explicit roots exercise every graph without weakening production reachability.
+    script = """
+import { readFileSync, writeFileSync } from 'node:fs';
+import { planJobs } from './packages/jobs/src/plan.mjs';
+const pkg = JSON.parse(readFileSync(process.argv[1], 'utf8'));
+writeFileSync(process.argv[2], JSON.stringify(planJobs(pkg, { assets: Object.keys(pkg.assets) })));
+"""
+    result = subprocess.run([NODE, "--input-type=module", "-e", script, str(package_path), str(target)], cwd=REPO_ROOT, capture_output=True, text=True, check=False)
     assert result.returncode == 0, result.stderr
     return json.loads(target.read_text(encoding="utf-8"))
 
@@ -237,15 +245,19 @@ def test_two_reference_edit_injects_area_and_both_real_image_inputs(tmp_path: Pa
 def test_the_two_stage_maps_render_half_the_planned_size():
     """GPU test 2, issues 3 and 4: the graph's stage 1 is half the finished frame, and the i2v
     image scale is wired to the same value, so a planned size comes back as the planned size."""
-    planned = {"width": 960, "height": 544, "frames": 97, "fps": 24, "prompt": "x", "seed": 42, "stage2_seed": 43}
-    for name, nodes in (("ltx25_i2v_2stage", ["8", "31"]), ("ltx25_t2v_2stage", ["8"])):
+    planned = {"width": 1024, "height": 576, "frames": 97, "fps": 30, "prompt": "x", "seed": 42, "stage2_seed": 43}
+    for name, nodes in (("ltx25_i2v_2stage", ["8", "31"]), ("ltx25_t2v_2stage", ["8"]), ("ltx25_a2v_2stage", ["8", "31"])):
         graph_path = WORKFLOWS / f"{name}.api.json"
         graph = json.loads(graph_path.read_text(encoding="utf-8"))
         inject_params(graph, load_params_map(graph_path), dict(planned))
         for node in nodes:
-            assert graph[node]["inputs"]["width"] == 480, f"{name}: node {node} renders stage 1"
-            assert graph[node]["inputs"]["height"] == 272, f"{name}: node {node} renders stage 1"
+            assert graph[node]["inputs"]["width"] == 512, f"{name}: node {node} renders stage 1"
+            assert graph[node]["inputs"]["height"] == 288, f"{name}: node {node} renders stage 1"
         assert graph["8"]["inputs"]["length"] == 97, f"{name}: no temporal upsampling, frames unchanged"
+        assert graph["7"]["inputs"]["frame_rate"] == graph["42"]["inputs"]["fps"] == 30
+        if "9" in graph:
+            assert graph["9"]["inputs"]["frames_number"] == 97
+            assert graph["9"]["inputs"]["frame_rate"] == 30
 
     # the committed fixture plan states the same lattice, so the plan and the map cannot drift apart
     doc = json.loads((FIXTURES / "jobs.json").read_text(encoding="utf-8"))
@@ -258,6 +270,32 @@ def test_the_two_stage_maps_render_half_the_planned_size():
     inject_params(graph, load_params_map(graph_path), dict(job["params"]))
     assert graph["8"]["inputs"]["width"] == job["stage1Dims"]["width"]
     assert graph["8"]["inputs"]["height"] == job["stage1Dims"]["height"]
+
+
+def test_ltx_template_defaults_are_valid_without_parameter_injection():
+    for graph_path in WORKFLOWS.glob("ltx25_*_2stage.api.json"):
+        graph = json.loads(graph_path.read_text())
+        base = graph["8"]["inputs"]
+        assert (base["width"], base["height"]) == (512, 288)
+        assert base["width"] % 32 == base["height"] % 32 == 0
+        assert base["length"] % 8 == 1
+        if "31" in graph:
+            assert graph["31"]["inputs"]["width"] == base["width"]
+            assert graph["31"]["inputs"]["height"] == base["height"]
+
+
+def test_upscale_map_renders_uncropped_lattice_and_keeps_audio_video_timing():
+    doc = json.loads((FIXTURES / "jobs.json").read_text())
+    job = next(entry for entry in doc["jobs"] if entry["kind"] == "upscale")
+    graph_path = WORKFLOWS / "ltx25_i2v_2stage.api.json"
+    graph = json.loads(graph_path.read_text())
+    inject_params(graph, load_params_map(graph_path, "upscale"), {**job["params"], "fps": 30})
+    for axis in ("width", "height"):
+        base = graph["8"]["inputs"][axis]
+        assert base % 32 == 0
+        assert base * 2 == job["dims"][axis] == job["params"][axis]
+        assert graph["31"]["inputs"][axis] == base
+    assert graph["7"]["inputs"]["frame_rate"] == graph["9"]["inputs"]["frame_rate"] == graph["42"]["inputs"]["fps"] == 30
 
 
 def test_a_parameter_with_no_mapping_is_refused_naming_it():
