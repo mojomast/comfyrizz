@@ -35,7 +35,7 @@ function parseRuleProperties(block, selector) {
   if (start === -1) return null;
   const end = block.indexOf('}', start);
   if (end === -1) return null;
-  const body = block.slice(start + 1, end);
+  const body = block.slice(start + 1, end).replace(/\/\*[\s\S]*?\*\//g, '');
   const props = {};
   for (const decl of body.split(';')) {
     const colon = decl.indexOf(':');
@@ -49,8 +49,7 @@ function parseRuleProperties(block, selector) {
 
 test('easy-main has a base max-width of 880px for standard/tablet viewports', () => {
   // Before any wide breakpoint, easy-main must maintain its baseline max-width
-  const baseBlock = easyCss.slice(0, easyCss.indexOf('@media'));
-  const baseProps = parseRuleProperties(baseBlock, '.easy-main');
+  const baseProps = parseRuleProperties(easyCss, '.easy-main');
   assert.ok(baseProps, '.easy-main should be defined before media queries');
   assert.equal(baseProps['max-width'], '880px');
 });
@@ -118,8 +117,7 @@ test('idea and characters steps render inside container without restrictive max-
 });
 
 test('easy-main opts out of the global main grid (UI2-11 root cause)', () => {
-  const baseBlock = easyCss.slice(0, easyCss.indexOf('@media'));
-  const baseProps = parseRuleProperties(baseBlock, '.easy-main');
+  const baseProps = parseRuleProperties(easyCss, '.easy-main');
   assert.ok(baseProps, '.easy-main should be defined before media queries');
   assert.equal(baseProps['display'], 'block');
 });

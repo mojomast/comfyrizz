@@ -11,7 +11,19 @@
  * @param {PackageV1} pkg
  * @returns {{ assetId: string, file: string } | null}
  */
+const H3_SILENT_CONDITIONING_SOURCE = 'comfyrizz/deterministic-silence-500ms-24k-mono';
+
+function isPlayableNarrationAsset(asset) {
+  return asset?.kind === 'audio'
+    && asset.status === 'ready'
+    && typeof asset.file === 'string'
+    && asset.file.length > 0
+    && !(asset.gen?.generator === 'kokoro' && typeof asset.gen?.inputs?.character === 'string')
+    && asset.source?.id !== H3_SILENT_CONDITIONING_SOURCE;
+}
+
 export function narrationAudio(pkg) {
+  if (pkg?.voice?.enabled === false) return null;
   const assets = pkg?.assets ?? {};
   const referenced = [];
   for (const scene of pkg?.scenes ?? []) {
@@ -20,9 +32,7 @@ export function narrationAudio(pkg) {
   const candidates = pkg?.audio ? referenced : [...referenced, ...Object.keys(assets)];
   for (const assetId of candidates) {
     const asset = assets[assetId];
-    if (asset?.kind === 'audio' && asset.status === 'ready' && typeof asset.file === 'string' && asset.file.length > 0) {
-      return { assetId, file: asset.file };
-    }
+    if (isPlayableNarrationAsset(asset)) return { assetId, file: asset.file };
   }
   return null;
 }
@@ -50,8 +60,7 @@ export function unreferencedNarrationAssets(pkg) {
   for (const sfx of audio.sfx ?? []) if (sfx?.asset) buses.add(sfx.asset);
   return Object.keys(assets).filter(assetId => {
     const asset = assets[assetId];
-    const usable = asset?.kind === 'audio' && asset.status === 'ready' && typeof asset.file === 'string' && asset.file.length > 0;
-    return usable && !referenced.has(assetId) && !buses.has(assetId);
+    return isPlayableNarrationAsset(asset) && !referenced.has(assetId) && !buses.has(assetId);
   });
 }
 

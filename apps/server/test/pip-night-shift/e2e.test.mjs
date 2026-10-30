@@ -1,5 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { collectMockContribution, approveMockContribution } from '../helpers/comfy-contribution.mjs';
 import { createHash } from 'node:crypto';
 import { createServer, request as httpRequest } from 'node:http';
 import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
@@ -137,13 +138,15 @@ async function withServer(app, fn) {
   }
 }
 
-test('PN09: first open without a GPU reaches the 3/4 gate, then approves s3 and renders on CPU', async t => {
+test('PN09: first open with a verified mocked plate reaches the 4/5 gate, then approves s3 and renders on CPU', async t => {
   const runtimeDir = tempRuntime(t);
   const seeded = seedProjects({ runtimeDir, examplesDir, env: {}, generateMedia: false });
   assert.equal(seeded.pip.packageId, pkg.id);
 
   const packagePath = join(runtimeDir, 'packages', `${pkg.id}.json`);
-  writeFileSync(packagePath, `${JSON.stringify(packageWithMedia(pkg, takesDoc), null, 2)}\n`);
+  const fixture = packageWithMedia(pkg, takesDoc);
+  collectMockContribution(fixture, join(runtimeDir, 'packages'));
+  writeFileSync(packagePath, `${JSON.stringify(fixture, null, 2)}\n`);
 
   const renderCalls = [];
   const renderBytes = Buffer.from('PN09 fake CPU render bytes');
@@ -162,6 +165,7 @@ test('PN09: first open without a GPU reaches the 3/4 gate, then approves s3 and 
     },
   });
   t.after(() => app.close());
+  approveMockContribution(app.takeStore, fixture, app.store.dir);
 
   await withServer(app, async ({ call }) => {
     const packageResponse = await call(`/api/package/${pkg.id}`);
@@ -174,8 +178,8 @@ test('PN09: first open without a GPU reaches the 3/4 gate, then approves s3 and 
 
     const clipList = await call(`/api/package/${pkg.id}/clips`);
     assert.equal(clipList.status, 200, clipList.text);
-    assert.equal(clipList.json.clips.length, 4);
-    assert.equal(clipList.json.clips.filter(clip => clip.state === 'approved').length, 3);
+    assert.equal(clipList.json.clips.length, 5);
+    assert.equal(clipList.json.clips.filter(clip => clip.state === 'approved').length, 4);
     const juno = clipList.json.clips.find(clip => clip.clipId === S3_CLIP_ID);
     assert.equal(juno.takeCount, 2);
     assert.equal(juno.selectedN, 2);
@@ -198,8 +202,8 @@ test('PN09: first open without a GPU reaches the 3/4 gate, then approves s3 and 
     const blocked = await call('/api/render', { packageId: pkg.id });
     assert.equal(blocked.status, 409, blocked.text);
     assert.equal(blocked.json.code, 'RENDER_GATE_BLOCKED');
-    assert.equal(blocked.json.approved, 3);
-    assert.equal(blocked.json.total, 4);
+    assert.equal(blocked.json.approved, 4);
+    assert.equal(blocked.json.total, 5);
     assert.deepEqual(blocked.json.blocking, [{ clipId: S3_CLIP_ID, state: 'review' }]);
     assert.equal(renderCalls.length, 0);
     assert.equal(backendState.runs, 0);
@@ -215,12 +219,12 @@ test('PN09: first open without a GPU reaches the 3/4 gate, then approves s3 and 
     const gate = finalGate(app.store.read(pkg.id), app.takeStore.read(pkg.id));
     assert.deepEqual(
       { ok: gate.ok, approved: gate.approved, total: gate.total, blocking: gate.blocking },
-      { ok: true, approved: 4, total: 4, blocking: [] },
+      { ok: true, approved: 5, total: 5, blocking: [] },
     );
 
     const afterApproval = await call(`/api/package/${pkg.id}/clips`);
     assert.equal(afterApproval.status, 200, afterApproval.text);
-    assert.equal(afterApproval.json.clips.filter(clip => clip.state === 'approved').length, 4);
+    assert.equal(afterApproval.json.clips.filter(clip => clip.state === 'approved').length, 5);
 
     const rendered = await call('/api/render', { packageId: pkg.id });
     assert.equal(rendered.status, 200, rendered.text);

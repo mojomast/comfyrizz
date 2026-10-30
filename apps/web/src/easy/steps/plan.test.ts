@@ -20,7 +20,7 @@ const PLAN_HASH = 'c'.repeat(64);
 function snapshot() {
   return {
     productionId: PRODUCTION_ID,
-    production: { id: PRODUCTION_ID, revision: 4 },
+    production: { id: PRODUCTION_ID, revision: 4, iteration: { policy: { level: 'draft' }, level: 'draft' } },
     revision: 4,
     gap: false,
     stale: false,
@@ -167,7 +167,21 @@ test('a failed approve starts an inline error with a Try again button', () => {
   assert.ok(html.includes(COPY.errors.tryAgain), 'the retry action is labelled');
 });
 
-test('a rejected approve records a message for the plan surface', async () => {
+test('Plan exposes the agent console while writing and after resume', () => {
+  const state = readyState();
+  assert.match(renderPlan(state), /data-agent-console/);
+  state.plan = { ...state.plan, status: 'writing' };
+  assert.match(renderPlan(state), /data-agent-console/);
+});
+
+test('a ready plan offers the complete pre-GPU review and edit surface', () => {
+  const html = renderPlan(readyState());
+  assert.match(html, /data-easy-full-plan-review/u);
+  assert.match(html, /Review &amp; edit full plan/u);
+  assert.match(html, /every scene, prompt and GPU action/u);
+});
+
+test('a rejected approve records the actionable server error for the plan surface', async () => {
   const state = readyState();
   const deps = {
     api: failingApi(),
@@ -176,7 +190,7 @@ test('a rejected approve records a message for the plan surface', async () => {
   };
 
   await assert.rejects(approveAndGenerate(state, deps));
-  assert.equal(takeApprovalFailure()?.message, COPY.plan.approveFailed);
+  assert.equal(takeApprovalFailure()?.message, 'network down');
 });
 
 test('the plan primary rerenders the failure and bind focuses Try again', async () => {
@@ -204,7 +218,7 @@ test('the plan primary rerenders the failure and bind focuses Try again', async 
     exportCurrent: false,
   });
   assert.match(rendered, /data-easy-approve-error/u);
-  assert.match(rendered, /start making this video/u);
+  assert.match(rendered, /network down/u);
 
   const doc = fakeDocument();
   const el = new FakeElement(doc);

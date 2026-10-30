@@ -1,5 +1,16 @@
 # Hosted Google Colab invite demo — state, design, next steps
 
+## Main integration: known planning gap
+
+After integration with the Pi production changes, the isolated hosted guest
+builder still invokes its offline runner. Generated-film planning now requires
+a live model, so hosted guest planning currently fails before dispatch. The
+offline guest-builder test and the three hosted Super Easy pipeline/no-spend
+tests fail as a result. The earlier no-spend smoke below describes the prior
+host deployment, not a successful test of this integrated version. Reconnect
+guest planning to a host-configured live model with isolated guest storage and
+verify the hosted flow before deploying this integration or enabling spend.
+
 ## Host integration update (2026-10-28)
 
 The sections below describe the original branch and should not be treated as

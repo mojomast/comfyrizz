@@ -38,6 +38,17 @@ export function validateEditor(value) {
     if (typeof extra !== 'object' || Array.isArray(extra)) return { error: `editor.${key} must be an object` };
     editor[key] = extra;
   }
+  if (value.transitionCompensation != null) {
+    const compensation = value.transitionCompensation;
+    if (typeof compensation !== 'object' || Array.isArray(compensation)) return { error: 'editor.transitionCompensation must be an object' };
+    for (const [boundary, offsets] of Object.entries(compensation)) {
+      if (!SCENE_ID.test(boundary) || !offsets || typeof offsets !== 'object' || Array.isArray(offsets)
+        || Object.entries(offsets).some(([sceneId, frames]) => !SCENE_ID.test(sceneId) || !Number.isInteger(frames) || Math.abs(frames) > 108000)) {
+        return { error: 'bad transition compensation: expected scene IDs and integer frame offsets' };
+      }
+    }
+    editor.transitionCompensation = structuredClone(compensation);
+  }
   return { editor };
 }
 

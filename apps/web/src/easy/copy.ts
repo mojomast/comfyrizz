@@ -121,7 +121,7 @@ export const COPY = Object.freeze({
   },
   level: {
     heading: 'How many versions should we try?',
-    intro: 'More versions give you more to choose from. Each one takes a little longer on this computer.',
+    intro: 'More versions give you more to choose from. Each one adds a little time on this computer.',
     introColab: 'More versions give you more to choose from and use more Google Colab units.',
     compactName: 'Level',
     names: { draft: 'Draft', balanced: 'Balanced', director: 'Director', custom: 'Custom' },

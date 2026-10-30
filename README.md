@@ -6,15 +6,32 @@
   <img src="brand/comfyrizz-logo-light.svg" alt="Comfyrizz" width="420">
 </picture>
 
-### Chat in a brief. Get a narrated motion-graphics explainer, rendered on open weights.
+### One prompt in. Watch your film come together. Refine it with the agent.
 
-Comfyrizz is a chat agent that turns a short brief into a 30–90 second narrated motion-graphics
-video. Type, charts and captions are exact because code draws them. FLUX 3 Klein stills and LTX-2.5
-motion plates are generated through the Comfy SDK on a Google Colab GPU that Comfyrizz starts and
-stops for you, or on your own ComfyUI. MIT licensed.
+ComfyRizz turns a short brief into a narrated motion-graphics explainer or a generated short film.
+The default flow plans, generates, finishes and plays the result without per-shot approval dialogs.
+Characters, shots and audio appear in a live gallery as they land; the finished MP4 can be downloaded
+or revised in place through the agent and Advanced editor. Type, charts and captions are exact
+because code draws them. FLUX 3 Klein stills, LTX-2.5 motion plates and MiniMax H3 character/native
+AV shots are generated through the Comfy SDK on a Google Colab GPU that Comfyrizz starts and stops
+for you, or on your own ComfyUI. MIT licensed.
+
+**No local GPU required.** Google Colab is the default managed inference path:
+after one-time account/model-access setup and your production approval, ComfyRizz
+deploys ComfyUI, its dependencies and pinned models on a cloud GPU, runs your jobs,
+collects the media and shuts the runtime down. Your laptop runs the app; Colab does
+the GPU inference. [How it works and compute-unit allowances](#google-colab).
+
+**[One-prompt setup for Linux and native Windows](docs/ONE_PROMPT.md)** ·
+**[Product contract](docs/submission/ONE_PROMPT_PRODUCT_SPEC.md)**
+
+**For hackathon judges:** the intended entry point is a managed demo with agent inference,
+Google Colab and model access preconfigured, plus server-side rate and credit limits.
+Its public URL and live generation are still awaiting verification. The instructions below
+are for people who want to run ComfyRizz themselves.
 
 [![License: MIT](https://img.shields.io/badge/license-MIT-22c55e.svg)](LICENSE)
-[![Node.js 22.6+](https://img.shields.io/badge/node-%E2%89%A522.6-339933?logo=nodedotjs&logoColor=white)](#quick-start)
+[![Node.js 22.19.0+](https://img.shields.io/badge/node-%E2%89%A522.19.0-339933?logo=nodedotjs&logoColor=white)](#quick-start)
 [![ComfyUI](https://img.shields.io/badge/ComfyUI-Comfy%20SDK-7c5cff)](https://github.com/comfyanonymous/ComfyUI)
 [![Remotion](https://img.shields.io/badge/render-Remotion-0b84f3)](https://www.remotion.dev)
 [![Hackathon](https://img.shields.io/badge/Comfy-Open%20Source%20Higgsfield%20hackathon-f59e0b)](#hackathon-submission)
@@ -31,15 +48,21 @@ stops for you, or on your own ComfyUI. MIT licensed.
 
 ## Why it's different
 
-- **A model-agnostic agent.** The chat agent runs a bounded tool loop against any OpenAI-compatible
+- **Pi-powered, model-agnostic production.** Pi 1.4 runs planning, chat, revisions and repairs
+  through a bounded tool loop against an OpenAI-compatible
   endpoint: OpenRouter, OpenCode Go or your own server. A built-in scripted model runs the whole CPU
   path offline, and recorded cassettes replay a real session under a different model.
 - **ComfyUI as a plate generator, not the whole product.** Generated pixels go through the Comfy SDK
   as API-format workflows. Headlines, statistics, charts and captions are rendered by Remotion, so
   an image model never invents a number or misspells a title.
-- **Google Colab automation with honest teardown.** Comfyrizz allocates a G4, bootstraps pinned
-  models, runs the jobs, collects results and stops the VM, behind a spend card and budget check.
+- **Cloud generation from a laptop.** The default Google Colab path deploys the inference stack
+  for you: ComfyUI, dependencies, pinned model weights and job execution. No local CUDA installation,
+  model-weight downloads or GPU ownership is needed for that path. Comfyrizz allocates the GPU,
+  runs the jobs, collects results and stops the VM, behind production approval and budget checks.
   It reports "VM stopped" only after the Google Colab CLI confirms it.
+- **Real generated media in every final film.** Final production exports require visibly used
+  ComfyUI output from a verified supported model, backed by trusted generation and render receipts.
+  Native typography and graphics finish the film; a queued job or unused image is not enough.
 - **Rights-aware export.** Every asset carries its source, creator and licence. `CREDITS.md` and a
   rights-filtered `package.zip` ship only what may be redistributed.
 
@@ -47,12 +70,21 @@ stops for you, or on your own ComfyUI. MIT licensed.
 
 ### Super Easy, Easy home and the seven-step flow
 
-**Super Easy** is the default entry: type what your video is about and press **Generate**. It uses
-Draft for you and starts on **This computer**, so a first run needs no Google Colab. **I want more
-control** opens **Easy Studio** (the seven-step flow below), and **Open in editor** in Easy Studio
-opens **Advanced** for the full timeline. See [docs/ui/SUPER_EASY.md](docs/ui/SUPER_EASY.md).
+**Super Easy** is the default entry: choose **Auto**, **H3**, **LTX** or **Klein only**, enter one
+prompt and press **Generate**. Review the concise title, logline, look, duration and soundtrack,
+then revise before GPU spending or choose **Make this film**. Agent-provider charges may apply
+to planning and revisions. Auto combines Klein identity/keyframe art, LTX
+camera/scenery motion and H3 character acting/native sound; Klein-only uses stills plus code motion.
+A saved Colab cap avoids repeated spending approvals. Real assets appear in a live gallery, and the
+finished MP4 offers Download, an agent composer for changes and **Advanced mode**. **I want more
+control** opens **Easy Studio** (the seven-step flow below), and **Open in editor** opens the full
+timeline with the agent beside it. See [docs/ui/SUPER_EASY.md](docs/ui/SUPER_EASY.md).
 Tick **Record this run** to film the run itself for a demo
 ([docs/ui/PROCEDURE_CAPTURE.md](docs/ui/PROCEDURE_CAPTURE.md)).
+
+Choose a **15/30/60/90-second preset** or an **exact custom duration from 1–120 seconds**.
+An explicit duration in the brief takes precedence. The timeline must fit the requested
+duration; infeasible narration or shot constraints produce a validation error.
 
 <table>
 <tr>
@@ -132,17 +164,26 @@ Voice cloning is not supported. See [docs/features/voice.md](docs/features/voice
 - **Google Colab progress, rates and cancel**: live VM gauges, per-accelerator pricing, balance check and verified stop ([observability](docs/PIPELINE_OBSERVABILITY.md)).
 - **24 style recipes**, 37 effects and 25 transitions, with a [motion gallery](docs/motion-gallery/index.html) ([guide](docs/MOTION_STYLES.md)).
 - **Quality checks** before the render: `node scripts/quality/cli.mjs` ([guide](docs/QUALITY_PIPELINE.md)) — technical evidence, never a substitute for human review ([capability status](docs/ui/UX_RESULTS.md)).
+- **Editorial controls:** native multiline title sizing and uploaded-master audio gain
+  preservation ([recent finishing changes](docs/ui/SUPER_EASY.md#editorial-finishing)).
 - **Default project** Pip's Night Shift, a finished motion-graphics project to play and export ([guide](docs/DEFAULT_PROJECT.md)).
 - **Two-minute demo page** `apps/web/demo.html?fixture=1`, no server or GPU ([runbook](docs/DEMO_WEBAPP_RUNBOOK.md)).
 - **Setup preflight** `pnpm run doctor` ([guide](docs/DOCTOR.md)).
 
 ## Quick start
 
-Requirements: **Node.js 22.6+**, **pnpm 10**, **ffmpeg** and Chrome or Chromium
-for Remotion (`REMOTION_BROWSER` overrides the default `/usr/bin/google-chrome`). Python 3.10+ is
-needed only for the GPU pipeline and Kokoro narration. Supported operating systems: Linux and
-macOS, or WSL on Windows. Set `COMFYRIZZ_PYTHON` to the Python interpreter with the pipeline
+Requirements: **Node.js 22.19.0+** (required by Pi 1.4), **pnpm 10**, **ffmpeg** and Chrome or Chromium
+for Remotion (`REMOTION_BROWSER` overrides discovery; without it Remotion can manage a browser).
+Python 3.12 is used by the setup doctor, GPU pipeline and Kokoro narration. The primary one-prompt
+path supports Linux and native Windows; see [platform notes](docs/ONE_PROMPT.md#platform-notes-and-current-limits)
+for current validation limits. Set `COMFYRIZZ_PYTHON` to the Python interpreter with the pipeline
 dependencies (for example `.venv/bin/python`); it defaults to `python3`.
+
+Verify `node --version` and `pnpm --version` before installing. If the pnpm launcher
+reports `MODULE_NOT_FOUND`, repair it using the [official pnpm installation guide](https://pnpm.io/installation)
+and select pnpm 10. A frozen lockfile pins dependencies but does not populate an
+offline dependency store. Recent migration checks used Node 22.19.0 and pnpm 10.27.0;
+those checks are not a fresh-checkout verification of the final submission.
 
 ```bash
 git clone https://github.com/mojomast/comfyrizz
@@ -153,11 +194,15 @@ pnpm run doctor --offline
 cd apps/server && npm start
 ```
 
-Open the URL the server prints (`http://127.0.0.1:4319/#token=…`). **Super Easy** opens: describe the
-video and press **Generate**. Choose **I want more control** for **Easy home**, where **New video**
-and **Try the example** (Pip's Night Shift, `examples/pip-night-shift`) live. With the **local ·
-scripted model** and the CPU backend you can plan, edit a headline or a chart value, then **Export
-MP4** or **Export bundle** with no GPU and no API key.
+Open the URL the server prints (`http://127.0.0.1:4319/#token=…`). **Super Easy** opens: choose a
+motion route, describe the video and press **Generate**. Review or revise the short proposal, then
+choose **Make this film**. Choose **I want more control** for **Easy home**, where **New video** and
+**Try the example** (Pip's Night Shift, `examples/pip-night-shift`) live. The **local · scripted
+model** and diagnostic CPU/fixture paths support planning and editing rehearsals.
+Final production export requires visibly used ComfyUI-generated media from a verified
+supported hackathon model and trusted generation/render receipts. CPU-only previews
+and fixture videos do not satisfy that requirement. For managed Google Colab generation,
+complete the one-time [agent/Colab/HF setup](docs/ONE_PROMPT.md).
 
 > Use `pnpm run doctor`, not bare `pnpm doctor`: the bare form runs pnpm's own built-in command.
 
@@ -167,7 +212,8 @@ Render the bundled example from the command line (about 90 seconds on CPU):
 pnpm --filter @comfyrizz/renderer render:example   # → examples/launch-demo/out/launch-demo.mp4
 ```
 
-The full clean-clone check is in [docs/RELEASE_CHECK.md](docs/RELEASE_CHECK.md).
+Historical clean-clone results are in [docs/RELEASE_CHECK.md](docs/RELEASE_CHECK.md).
+A clean-checkout smoke of the exact final submission revision remains required.
 
 ## Offline demo with a cassette
 
@@ -189,17 +235,44 @@ are covered in [docs/AGENT_CASSETTE.md](docs/AGENT_CASSETTE.md).
 
 ## Google Colab
 
-Comfyrizz drives your own Google Colab account through the official `google-colab-cli`
-(`python3 -m pip install --user google-colab-cli`, then sign in with the CLI).
+### Your laptop directs; a cloud GPU generates
+
+**Google Colab is the default managed inference backend.** ComfyRizz takes care of deploying
+the inference stack, so people without a local GPU can generate with FLUX 3 Image Klein,
+LTX-2.5 and MiniMax H3. You do not have to build a ComfyUI installation or manually operate
+a notebook for each film. The local app still needs Node, Python and the rendering dependencies
+listed above; GPU model inference happens on Colab. Final composition can run locally on CPU
+or on the held Colab VM when remote rendering is selected.
+
+Comfyrizz drives your own Google Colab account through the official `google-colab-cli`.
+Connect the account, model access and agent provider once via
+**Set up AI & Google Colab** ([setup guide](docs/ONE_PROMPT.md)).
 
 1. In the app, pick **Google Colab** as the backend. The status card shows whether the CLI is
    installed and signed in; **Test connection** checks it.
-2. FLUX 3 Klein and LTX-2.5 are gated on Hugging Face. Accept both licences, put a read token in a
-   `0600` file and point `COMFYRIZZ_HF_TOKEN_FILE` at it.
-3. Approve the spend card. Comfyrizz allocates a G4, runs the scripts in [`colab/`](colab/)
-   (bootstrap, health, run, collect) and stops the VM, confirming the stop before it says so.
+2. Accept the required model licences and save a Hugging Face read token through setup.
+   For environment-based setup, point `COMFYRIZZ_HF_TOKEN_FILE` at a private token file.
+3. Set a per-video credit ceiling and approve the proposal. Comfyrizz allocates the GPU,
+   installs the inference stack and pinned models, checks readiness, executes the ComfyUI
+   workflows, collects verified outputs and stops the VM. The scripts live in [`colab/`](colab/);
+   shutdown is reported as complete only after confirmation.
 4. Optionally render the final video on the same held VM (`renderLocation: 'colab'`), including
-   HyperFrames composition scenes. See [docs/COMPOSITIONS.md](docs/COMPOSITIONS.md#google-colab-remote-render).
+    HyperFrames composition scenes. See [docs/COMPOSITIONS.md](docs/COMPOSITIONS.md#google-colab-remote-render).
+
+### Use your Colab compute allowance
+
+An eligible **Google AI Pro** subscription includes Colab compute units, which can make
+cloud generation accessible without buying a graphics card. As checked on **2026-10-29**,
+[Google's AI Pro benefits page](https://support.google.com/googleone/answer/14534406?hl=en)
+lists **200 Colab compute units (CCUs)**. The separate
+[Colab Pro plan](https://colab.research.google.com/signup) advertises **100 compute units per month**.
+Check the allowance and eligibility shown in your account; these are different subscriptions.
+
+Compute units pay for runtime usage, including setup and model downloads, not a fixed number
+of films. Usage varies with the accelerator, models, shot lengths and retries. ComfyRizz uses
+your available balance, production estimate and chosen ceiling before spending, and includes
+collection/shutdown overhead. Agent API usage is billed separately by your selected provider.
+See the [Colab guide](docs/features/google-colab.md) for the lifecycle and budget details.
 
 The suites never start a real runtime: `node scripts/gpu4/g4_dryrun.mjs` runs a whole Google Colab
 job against loopback fakes. Efficiency measurements are in
@@ -210,21 +283,22 @@ have, choose **My ComfyUI URL** instead.
 
 ```mermaid
 flowchart TD
-    A["Chat brief"] --> B["Agent · any OpenAI-compatible LLM<br/>or cassette replay"]
+    A["Chat brief"] --> B["Pi production agent · OpenAI-compatible LLM<br/>or cassette replay"]
     B -->|style.list / suggest / apply| R["24 style recipes<br/>effects · transitions · fonts"]
     R --> C
     B --> C["Package<br/>comfyrizz.package/v1"]
     B -->|"propose only"| P["Production journal<br/>plan cards · approvals · budget ledger"]
     P -->|"approved slots"| D
-    C --> D["jobs.json<br/>FLUX 3 Klein stills · LTX-2.5 plates · upscale"]
+    C --> D["jobs.json<br/>FLUX 3 Klein stills · LTX-2.5 plates · H3 character/native AV"]
     D --> S{"Spend card approved?"}
-    S -->|Google Colab| E["Google Colab G4<br/>up · bootstrap · run · collect · verified stop"]
+    S -->|"Google Colab · default managed path"| E["Cloud GPU inference stack<br/>up · bootstrap · run · collect · verified stop"]
     S -->|BYO| F["Your ComfyUI<br/>+ comfy-api-proxy"]
     E --> G["Assets + manifest"]
     F --> G
-    C -.->|"CPU path: SVG + procedural fallbacks"| H
+    C -.->|"Native graphics + editorial instructions"| H
     G --> H["Remotion render<br/>narration · captions · finishing layer"]
-    H --> I["Export bundle<br/>MP4 · SRT/VTT · CREDITS · package.zip"]
+    H --> V["Final gate<br/>visible ComfyUI contribution + trusted receipts"]
+    V --> I["Export bundle<br/>MP4 · SRT/VTT · CREDITS · package.zip"]
 ```
 
 - **The package is the contract.** [packages/schema](packages/schema/) holds the JSON Schema and
@@ -267,10 +341,10 @@ apps/
   renderer/     Remotion project: layouts, transitions, storytelling recipes, finishing layer, CLI renders
 packages/
   schema/       comfyrizz.package/v1 + jobs/v1 schemas, TS + Python validators, motion lint
-  agent/        Tool loop, asset router, brief extractor, skills (including motion-style), style recipes
+  agent/        Pi production runtime, tools, asset router, brief extractor, skills, style recipes
   llm/          OpenAI-compatible adapter: OpenRouter, OpenCode Go, custom presets
   planner/      Timeline compiler (integer frames, transitions, caption cues)
-  jobs/         package → ordered, hashed jobs.json
+  jobs/         package → ordered, hashed jobs.json; trusted model-contribution checks
   backends/     Google Colab lifecycle + BYO ComfyUI, budget, watchdog
   vector/       SVG sanitiser, resvg render check, auto-fix loop
   tts/          Kokoro + Qwen3-TTS adapters, measured cues, SRT/VTT
@@ -316,6 +390,8 @@ due **Oct 30, 2026, 12:00 PM Toronto time (9:00 AM PT)**.
 | Document | What it covers |
 | --- | --- |
 | [WRITEUP.md](docs/submission/WRITEUP.md) | The entry: what it is, how it's built, why it's innovative, and the categories it targets |
+| [DEADLINE_HANDOFF.md](docs/submission/DEADLINE_HANDOFF.md) | Current acceptance blockers, verified claims and final artifact slots |
+| [DEMO_TAKE_PLAN.md](docs/submission/DEMO_TAKE_PLAN.md) | Current recording plan, conditional on an accepted generated film |
 | [DEMO_SCRIPT.md](docs/submission/DEMO_SCRIPT.md) | The two-minute demo video shot list |
 | [CHECKLIST.md](docs/submission/CHECKLIST.md) | Each official requirement with status and evidence |
 | [LICENSE_AUDIT.md](docs/submission/LICENSE_AUDIT.md) | Repository licence, model weights and the Open Weights Only check |

@@ -225,6 +225,7 @@ test('approve reuses POST /api/run/approve with the plan hash', async () => {
 
 test('select, revert and verdict call their clip routes', async () => {
   const { api, calls } = client((url) => {
+    if (url.endsWith('/takes')) return json({ packageId: 'pkg_1', revision: 4, clip: clipSummary });
     if (url.endsWith('/select')) {
       return json({ kind: 'selected', packageId: 'pkg_1', revision: 5, clip: clipSummary, takeId: TAKE_ID });
     }
@@ -243,24 +244,32 @@ test('select, revert and verdict call their clip routes', async () => {
   const selected = await api.select('pkg_1', CLIP_ID, TAKE_ID);
   assert.equal(selected.kind, 'selected');
   assert.equal(selected.takeId, TAKE_ID);
-  assert.equal(calls[0]?.url, '/api/package/pkg_1/clips/s1%3Aa_plate1/select');
-  assert.deepEqual(JSON.parse(String(calls[0]?.init?.body)), { takeId: TAKE_ID });
+  assert.equal(calls[0]?.url, '/api/package/pkg_1/clips/s1%3Aa_plate1/takes');
+  assert.equal(calls[1]?.url, '/api/package/pkg_1/clips/s1%3Aa_plate1/select');
+  const selection = JSON.parse(String(calls[1]?.init?.body));
+  assert.equal(selection.takeId, TAKE_ID);
+  assert.equal(selection.commandId, selection.idempotencyKey);
+  assert.deepEqual(selection.expected, { packageRevision: 4, selected: TAKE_ID });
 
   const reverted = await api.revert('pkg_1', CLIP_ID);
   assert.equal(reverted.kind, 'reverted');
   assert.equal(reverted.takeId, null);
-  assert.equal(calls[1]?.url, '/api/package/pkg_1/clips/s1%3Aa_plate1/revert');
-  assert.equal(calls[1]?.init?.method, 'POST');
-  assert.equal(calls[1]?.init?.body, undefined);
+  assert.equal(calls[2]?.url, '/api/package/pkg_1/clips/s1%3Aa_plate1/revert');
+  assert.equal(calls[2]?.init?.method, 'POST');
+  assert.deepEqual(JSON.parse(String(calls[2]?.init?.body)).expected, { packageRevision: 5, selected: TAKE_ID });
 
   const verdict = await api.verdict('pkg_1', CLIP_ID, 'approved', { note: 'logo is readable', takeId: TAKE_ID });
   assert.equal(verdict.kind, 'verdict');
   assert.equal(verdict.clip.state, 'approved');
-  assert.equal(calls[2]?.url, '/api/package/pkg_1/clips/s1%3Aa_plate1/verdict');
-  assert.deepEqual(JSON.parse(String(calls[2]?.init?.body)), {
+  assert.equal(calls[3]?.url, '/api/package/pkg_1/clips/s1%3Aa_plate1/verdict');
+  const { commandId, idempotencyKey, ...verdictBody } = JSON.parse(String(calls[3]?.init?.body));
+  assert.notEqual(commandId, selection.commandId);
+  assert.equal(commandId, idempotencyKey);
+  assert.deepEqual(verdictBody, {
     verdict: 'approved',
     note: 'logo is readable',
     takeId: TAKE_ID,
+    expected: { packageRevision: 6, selected: TAKE_ID },
   });
 });
 

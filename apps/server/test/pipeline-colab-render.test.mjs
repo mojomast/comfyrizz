@@ -4,12 +4,14 @@ import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'nod
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { prepareRenderJob, projectTransferLists, readRenderStatus, renderStallMs, runColabRender } from '../src/pipeline-colab-render.mjs';
+import { collectMockContribution } from './helpers/comfy-contribution.mjs';
 
 test('the render job ships host edits and links media that is still on the VM', async () => {
   const workDir = mkdtempSync(join(tmpdir(), 'colab-render-job-'));
   try {
     const pkg = JSON.parse(readFileSync(new URL('../../../examples/data-story/package.json', import.meta.url)));
     pkg.scenes[1].copy.headline = 'Edited on the host before render';
+    collectMockContribution(pkg, workDir);
     mkdirSync(join(workDir, 'audio'), { recursive: true });
     writeFileSync(join(workDir, 'audio/narration.norm.wav'), 'wav');
     writeFileSync(join(workDir, 'package.json'), JSON.stringify(pkg));
@@ -41,6 +43,7 @@ function renderFixture(t) {
   mkdirSync(workDir, { recursive: true });
   t.after(() => rmSync(runDir, { recursive: true, force: true }));
   const pkg = JSON.parse(readFileSync(new URL('../../../examples/data-story/package.json', import.meta.url)));
+  collectMockContribution(pkg, workDir);
   writeFileSync(join(workDir, 'package.json'), JSON.stringify(pkg));
   return { runDir, workDir };
 }

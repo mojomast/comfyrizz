@@ -10,11 +10,12 @@
 import { createHash } from 'node:crypto';
 
 import {
+  BOOTSTRAP_OVERHEAD_MINUTES,
   MEASURED_JOB_MINUTES,
   PRESENTER_MEASURED_JOB_MINUTES,
-  BOOTSTRAP_OVERHEAD_MINUTES,
 } from '../../../../packages/backends/src/colab-backend.mjs';
 import { nextJobUpperEstimate, rateForGpu, reserveUnitsFor } from '../../../../packages/backends/src/budget.mjs';
+import { fasth3JobMinutes } from '../../../../packages/backends/src/fasth3-profile.mjs';
 import { canonicalJson } from './commands.mjs';
 import { sceneAssetIds } from '../../../../packages/agent/dist/src/scene-build.js';
 import { ITERATION_PRESETS, effectivePolicyForShot } from './iteration.mjs';
@@ -22,7 +23,7 @@ import { ITERATION_PRESETS, effectivePolicyForShot } from './iteration.mjs';
 // Generators that run without a GPU. The agent search `generator: '` finds
 // llm-svg (CPU) and flux3-klein (GPU). Kokoro is a local voice engine, not a
 // package generator string in packages/agent/src.
-const CPU_GENERATORS = new Set(['llm-svg']);
+const CPU_GENERATORS = new Set(['llm-svg', 'procedural-audio']);
 
 const GENERATOR_MINUTES = Object.freeze({
   'flux3-klein': MEASURED_JOB_MINUTES.still,
@@ -54,7 +55,7 @@ function gpuAssetsForScene(pkg, scene) {
   return found;
 }
 
-function hashFor(sceneId, assets) {
+export function hashFor(sceneId, assets) {
   return createHash('sha256')
     .update(canonicalJson({
       sceneId,
@@ -70,7 +71,9 @@ function seedFor(hash) {
 function upperBoundFor(assets, takes, ratePerHour) {
   const minutes = assets.reduce((total, asset) => {
     const generator = asset.gen?.generator;
-    const jobMinutes = GENERATOR_MINUTES[generator] ?? 1;
+    const jobMinutes = generator === 'fasth3-omni'
+      ? fasth3JobMinutes({ frames: asset.gen?.inputs?.frames, fps: asset.gen?.inputs?.fps })
+      : GENERATOR_MINUTES[generator] ?? 1;
     return total + jobMinutes;
   }, 0) * takes;
   const upper = nextJobUpperEstimate({
@@ -78,7 +81,10 @@ function upperBoundFor(assets, takes, ratePerHour) {
     overheadMinutes: BOOTSTRAP_OVERHEAD_MINUTES,
     ratePerHour,
   });
-  return typeof upper === 'number' && Number.isFinite(upper) ? normalizeNumber(upper + reserveUnitsFor(ratePerHour)) : 0;
+  if (typeof upper !== 'number' || !Number.isFinite(upper)) return 0;
+  // Run admission compares the whole increment: job upper estimate plus the
+  // collect/stop reserve. The approved action slot must cover both.
+  return normalizeNumber(upper + reserveUnitsFor(ratePerHour));
 }
 
 function takesFor(level, sceneId) {
@@ -121,6 +127,7 @@ export function planFromPackage(input = {}) {
   }
 
   const only = Array.isArray(input.onlyShotIds) ? new Set(input.onlyShotIds) : null;
+  const onlyAssets = Array.isArray(input.onlyAssetIds) ? new Set(input.onlyAssetIds) : null;
   const scenes = Array.isArray(pkg?.scenes) ? pkg.scenes : [];
   const ratePerHour = rateForGpu('G4', { env: {} }).ratePerHour;
   const chip = typeof input.chip === 'string' && input.chip !== '' ? input.chip : null;
@@ -130,7 +137,7 @@ export function planFromPackage(input = {}) {
   for (const scene of scenes) {
     if (!isPlainObject(scene) || typeof scene.id !== 'string' || scene.id === '') continue;
     if (only && !only.has(scene.id)) continue;
-    const assets = gpuAssetsForScene(pkg, scene);
+    const assets = gpuAssetsForScene(pkg, scene).filter(asset => !onlyAssets || onlyAssets.has(asset.assetId));
     if (assets.length === 0) continue;
     const takes = takesFor(level, scene.id);
     const effectiveInputHash = hashFor(scene.id, assets);
@@ -143,6 +150,7 @@ export function planFromPackage(input = {}) {
       backendId: 'colab',
       takes,
       upperBound,
+      assetIds: assets.map(asset => asset.assetId),
       reuse: false,
       effectiveInputHash,
       seed: seedFor(effectiveInputHash),

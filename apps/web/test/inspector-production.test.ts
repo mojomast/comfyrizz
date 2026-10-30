@@ -120,7 +120,9 @@ test('a paid plan hides Approve until the iteration level is known', () => {
 });
 
 test('a known level lets the inspector approve, and a free plan does not need one', () => {
-  const ready = renderProductionTab(snapshot(), {
+  const selected = snapshot();
+  selected.production.iteration = { policy: { level: 'draft' } };
+  const ready = renderProductionTab(selected, {
     productionId: PRODUCTION_ID,
     iteration: iterationRead('draft'),
   });

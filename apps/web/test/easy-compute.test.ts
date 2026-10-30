@@ -2,9 +2,9 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { COPY } from '../src/easy/copy.ts';
-import { renderCompute, validateCap, computeBlockReason } from '../src/easy/compute-choice.ts';
+import { COMPUTE_HF_NOT_READY, renderCompute, validateCap, computeBlockReason } from '../src/easy/compute-choice.ts';
 
-const signedIn = { signedIn: true, installed: true };
+const signedIn = { signedIn: true, installed: true, tokenPresent: true, tokenChecked: true, tokenReady: true };
 
 function inputTag(html, id) {
   const match = html.match(new RegExp(`<input[^>]*id="${id}"[^>]*>`));
@@ -57,10 +57,26 @@ test('the checking state is explicit and does not offer Connect yet', () => {
   assert.match(colab, /aria-describedby="easy-not-connected"/);
 });
 
-test('Google Colab is enabled when signed in', () => {
+test('Google Colab is enabled only when signed in and both HF checks passed', () => {
   const html = renderCompute({ compute: 'cpu', colabStatus: signedIn, spendCap: 15, spent: 0 });
   assert.doesNotMatch(radioTag(html, 'colab'), /\sdisabled(?=[\s/>])/);
   assert.ok(!html.includes(COPY.compute.notConnected));
+
+  for (const colabStatus of [
+    { signedIn: true, installed: true },
+    { signedIn: true, installed: true, tokenPresent: true, tokenChecked: false, tokenReady: false },
+    { signedIn: true, installed: true, tokenPresent: true, tokenChecked: false, tokenReady: true },
+    { signedIn: true, installed: true, tokenPresent: true, tokenChecked: true, tokenReady: false },
+  ]) {
+    const blocked = renderCompute({ compute: 'cpu', colabStatus, spendCap: 15, spent: 0 });
+    assert.match(radioTag(blocked, 'colab'), /\sdisabled(?=[\s/>])/);
+    assert.match(blocked, /Hugging Face model access is not verified/);
+    assert.match(blocked, /data-easy-compute-connect/);
+  }
+  assert.equal(
+    computeBlockReason({ compute: 'colab', spendCap: 15 }, { signedIn: true, tokenPresent: true, tokenReady: true }),
+    COMPUTE_HF_NOT_READY,
+  );
 });
 
 test('the cap input exists only when compute is Google Colab', () => {

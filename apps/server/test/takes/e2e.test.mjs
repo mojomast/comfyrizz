@@ -4,6 +4,7 @@
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import { collectMockContribution, approveMockContribution } from '../helpers/comfy-contribution.mjs';
 import { createHash } from 'node:crypto';
 import { createServer, request as httpRequest } from 'node:http';
 import {
@@ -327,6 +328,10 @@ test('TR18: adopted take, approved colab correction, gate and one final render',
     const current = app.store.read(pkg.id);
     assert.equal(current.assets[ASSET_ID].file, second.file);
     assert.equal(current.assets[ASSET_ID].sha256, second.sha256);
+    current.scenes.forEach(scene => { delete scene.narration; });
+    collectMockContribution(current, app.store.dir);
+    app.store.write(current);
+    approveMockContribution(app.takeStore, current, app.store.dir);
     const rendered = await call('/api/render', { packageId: pkg.id, baseRevision: current.revision });
     assert.equal(rendered.status, 200);
     assert.equal(rendered.headers['content-type'], 'video/mp4');

@@ -166,6 +166,12 @@ function normalizeStoredRecord(raw) {
   if (typeof raw.id !== 'string' || !REF_ID_PATTERN.test(raw.id)) return null;
   if (raw.sha256 !== undefined && (typeof raw.sha256 !== 'string' || !/^[0-9a-f]{64}$/i.test(raw.sha256))) return null;
 
+  // Every legacy HTTP upload was already gated by X-Rights-Asserted. Keep that
+  // provenance for old libraries, while allowing newer records to fail closed.
+  const assertion = raw.rightsAsserted ?? raw.rights_asserted ?? raw.rights?.asserted ?? raw.license?.approved_by_user;
+  const rightsAsserted = assertion === undefined ? true : assertion === true || assertion === 1;
+  const usage = rightsAsserted && raw.usage === 'editorial' ? 'editorial' : 'reference';
+
   const frames = Array.isArray(raw.frames)
     ? raw.frames
       .filter(frame => isPlainObject(frame)
@@ -177,6 +183,8 @@ function normalizeStoredRecord(raw) {
 
   return {
     ...clone(raw),
+    usage,
+    rightsAsserted,
     frames,
     revision: Number.isInteger(raw.revision) && raw.revision > 0 ? raw.revision : 1,
   };
@@ -460,11 +468,12 @@ export function createReferenceStore(options = {}) {
         // trustable dimensions to return.
       }
     }
-    // The probe step normally supplies dimensions. A header-only fixture (as
-    // used by the upload tests) still gets a conservative placeholder instead
-    // of making the bytes unaddable.
-    width ??= 1;
-    height ??= 1;
+    // The probe step normally supplies dimensions. A header-only image fixture
+    // still gets a conservative placeholder; audio has no pixel dimensions.
+    if (validated.kind !== 'audio') {
+      width ??= 1;
+      height ??= 1;
+    }
 
     const ext = validated.ext;
     const file = safeStoredName(id, ext);
@@ -485,6 +494,12 @@ export function createReferenceStore(options = {}) {
         width,
         height,
         durationSec: nonNegativeNumber(metadata.durationSec),
+        codec: metadata.codec,
+        sampleRate: metadata.sampleRate,
+        channels: metadata.channels,
+        fps: metadata.fps,
+        frameCount: metadata.frameCount,
+        audio: metadata.audio,
         role: metadata.role,
         note: metadata.note,
         label,
@@ -497,9 +512,13 @@ export function createReferenceStore(options = {}) {
       throw error;
     }
 
-    const frames = normalizeFrames(metadata.frames, metadata.frameFiles);
+    const frames = validated.kind === 'audio' ? [] : normalizeFrames(metadata.frames, metadata.frameFiles);
     const record = {
       ...base,
+      // store.add is the trusted persistence side of the rights-gated upload
+      // route. Usage is deliberately not taken from metadata: editorial is an
+      // explicit later PATCH, never an upload-time side effect.
+      rightsAsserted: true,
       ext,
       frames: frames.map(frame => ({ index: frame.index, atSec: frame.atSec })),
       updatedAt: createdAt,
@@ -507,7 +526,7 @@ export function createReferenceStore(options = {}) {
     };
 
     writeAsset(join(filesDir, file), data);
-    writeThumb(id, metadata);
+    if (validated.kind !== 'audio') writeThumb(id, metadata);
     writeFrames(id, frames, validated.kind);
 
     state.references.push(record);
@@ -541,12 +560,21 @@ export function createReferenceStore(options = {}) {
       throw error;
     }
 
+    if (changes.usage === 'editorial' && record.rightsAsserted !== true) {
+      fail('RIGHTS_REQUIRED', 'editorial usage requires the upload rights assertion', { field: 'usage' });
+    }
+    if (changes.editorialScope !== undefined && record.kind !== 'image') {
+      fail('INVALID_EDITORIAL_SCOPE', 'editorialScope is supported only for images', { field: 'editorialScope' });
+    }
+
     const next = {
       ...record,
       ...clone(changes),
       revision: (Number.isInteger(record.revision) && record.revision > 0 ? record.revision : 1) + 1,
       updatedAt: clockIso(clock),
     };
+    // A usage change is a new consent decision; never inherit an older scope.
+    if (changes.usage !== undefined && changes.editorialScope === undefined) delete next.editorialScope;
     const position = state.references.findIndex(reference => reference.id === id);
     state.references[position] = next;
     persist(state);

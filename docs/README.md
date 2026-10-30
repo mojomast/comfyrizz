@@ -2,6 +2,22 @@
 
 Start with the [project README](../README.md).
 
+**No local GPU?** The default managed path deploys the ComfyUI inference stack
+on Google Colab for you, from allocation and pinned model setup through generation,
+collection and confirmed shutdown. Start with [One prompt setup](ONE_PROMPT.md)
+and [Colab automation and compute allowances](features/google-colab.md).
+
+## Recent production changes
+
+- [Pi production runtime and ComfyUI contribution gate](PI_PIPELINE_MIGRATION.md):
+  Pi 1.4 orchestration, trusted generation/render receipts and final-export checks.
+- [Agent providers](AGENT_PROVIDERS.md): Node 22.19.0+ and the 65,536-token output
+  allowance for the configured DeepSeek Flash routes.
+- [Super Easy](ui/SUPER_EASY.md): exact custom durations from 1–120 seconds,
+  proposal review and scoped same-project chat edits.
+- [Deadline handoff](submission/DEADLINE_HANDOFF.md): dated verification,
+  remaining end-to-end blockers and final artifact status.
+
 ## Features
 
 - [Iterative production agent](features/production-agent.md): coordinator, plan cards and approvals, agent tools, guardrails, budget ledger and spend cap, evals
@@ -17,6 +33,10 @@ Start with the [project README](../README.md).
 - [Testing](features/testing.md)
 
 ## Guides
+
+Start with [One prompt setup](ONE_PROMPT.md), [Super Easy](ui/SUPER_EASY.md) and
+[Managed hackathon demo](DEPLOYED_DEMO.md). For recording, see
+[Procedure capture](ui/PROCEDURE_CAPTURE.md).
 
 [SPEC](SPEC.md) · [Agent providers](AGENT_PROVIDERS.md) · [Conversation agent](CONVERSATION_AGENT.md) ·
 [Agent cassette](AGENT_CASSETTE.md) · [Character creator](CHARACTER_CREATOR.md) ·

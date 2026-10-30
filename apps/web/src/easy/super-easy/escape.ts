@@ -195,6 +195,7 @@ export function renderSuperEasyDoneActions(options: SuperEasyDoneActionsOptions 
     options.facts ?? null,
   );
   return `<div class="super-easy-done-actions" data-super-easy-done-actions>
+<form class="super-easy-change-form" data-super-easy-change-form><label for="super-easy-change">What would you like to change?</label><div class="super-easy-change-row"><textarea id="super-easy-change" rows="2" placeholder="For example: make the opening more dramatic"></textarea><button type="submit" class="btn btn-secondary">Ask the agent</button></div><p class="hint">The agent edits this video. Any paid regeneration is confirmed separately.</p></form>
 ${download}<a class="btn btn-secondary" href="${escapeHtml(studioHref)}" data-super-easy-open-studio>${escapeHtml(COPY.done.openStudio)}</a>
 <button type="button" class="btn btn-secondary" data-super-easy-make-another>${escapeHtml(COPY.done.again)}</button>
 <button type="button" class="btn btn-secondary" data-super-easy-open-editor>${escapeHtml(EASY_COPY.shell.openEditor)}</button>

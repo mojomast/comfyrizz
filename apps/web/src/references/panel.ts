@@ -21,7 +21,7 @@ export const ROLES = [
   'other',
 ] as const;
 
-export type ReferenceRole = (typeof ROLES)[number];
+export type ReferenceRole = (typeof ROLES)[number] | 'song';
 
 export const ROLE_LABELS: Record<ReferenceRole, string> = {
   style: 'Style',
@@ -34,6 +34,7 @@ export const ROLE_LABELS: Record<ReferenceRole, string> = {
   palette: 'Palette',
   composition: 'Composition',
   other: 'Other',
+  song: 'Song',
 };
 
 /**
@@ -45,13 +46,15 @@ export const LIMITS = {
   imageMaxBytes: 20 * 1024 * 1024,
   videoMaxBytes: 200 * 1024 * 1024,
   videoMaxSeconds: 60,
+  audioMaxBytes: 100 * 1024 * 1024,
+  audioMaxSeconds: 300,
   totalMaxBytes: 1024 * 1024 * 1024,
   maxReferences: 24,
   noteMaxChars: 1000,
   labelMaxChars: 80,
 } as const;
 
-export type ReferenceKind = 'image' | 'video';
+export type ReferenceKind = 'image' | 'video' | 'audio';
 
 type AcceptedType = {
   kind: ReferenceKind;
@@ -67,11 +70,17 @@ export const ACCEPTED_TYPES: readonly AcceptedType[] = [
   { kind: 'video', mime: 'video/mp4', extensions: ['mp4'] },
   { kind: 'video', mime: 'video/quicktime', extensions: ['mov'] },
   { kind: 'video', mime: 'video/webm', extensions: ['webm'] },
+  { kind: 'audio', mime: 'audio/wav', extensions: ['wav'] },
+  { kind: 'audio', mime: 'audio/mpeg', extensions: ['mp3'] },
 ];
 
 export const ACCEPT_ATTRIBUTE = ACCEPTED_TYPES.map(type => type.mime).join(',');
 
 const MIME_INDEX = new Map(ACCEPTED_TYPES.map(type => [type.mime, type]));
+for (const alias of ['audio/x-wav', 'audio/wave', 'audio/vnd.wave']) {
+  MIME_INDEX.set(alias, ACCEPTED_TYPES.find(type => type.mime === 'audio/wav')!);
+}
+MIME_INDEX.set('audio/mp3', ACCEPTED_TYPES.find(type => type.mime === 'audio/mpeg')!);
 const EXTENSION_INDEX = new Map(
   ACCEPTED_TYPES.flatMap(type => type.extensions.map(extension => [extension, type] as const)),
 );
@@ -106,6 +115,11 @@ export type Reference = {
   createdAt?: string;
   updatedAt?: string;
   revision?: number;
+  /** Reference-only planning context, or explicitly rights-cleared footage. */
+  usage?: 'reference' | 'editorial' | string;
+  editorialScope?: 'custom' | 'product-walkthrough' | 'music-video';
+  /** Persisted evidence that the upload carried X-Rights-Asserted: 1. */
+  rightsAsserted?: boolean | 1 | '1';
 };
 
 export type ReferenceAssignment = {
@@ -125,6 +139,8 @@ export type ReferenceUploadFile = {
   readonly name: string;
   readonly type?: string;
   readonly size: number;
+  /** Optional browser-probed metadata; the server remains authoritative. */
+  readonly durationSec?: number;
 };
 
 export type UploadProgress = number | { loaded?: number; total?: number };
@@ -143,7 +159,7 @@ export type ReferenceMutation = Reference | { reference: Reference };
 export type ReferenceApi = {
   list(): Promise<{ references: Reference[]; assignments?: ReferenceAssignment[]; questions?: unknown } | Reference[]>;
   upload(file: ReferenceUploadFile, options?: UploadOptions): Promise<ReferenceMutation>;
-  patch(id: string, patch: { role?: string; note?: string; label?: string }): Promise<ReferenceMutation>;
+  patch(id: string, patch: { role?: string; note?: string; label?: string; usage?: 'reference' | 'editorial'; editorialScope?: 'custom' | 'product-walkthrough' | 'music-video' }): Promise<ReferenceMutation>;
   delete(id: string): Promise<void>;
   thumbUrl?(ref: Reference): string | undefined;
   fileUrl?(ref: Reference): string | undefined;
@@ -198,7 +214,7 @@ export type PrecheckOk = {
 
 export type PrecheckError = {
   ok: false;
-  code: 'EMPTY' | 'UNSUPPORTED_TYPE' | 'SVG_USE_BRAND' | 'TOO_LARGE';
+  code: 'EMPTY' | 'UNSUPPORTED_TYPE' | 'SVG_USE_BRAND' | 'TOO_LARGE' | 'TOO_LONG';
   message: string;
 };
 
@@ -278,21 +294,30 @@ export function precheckFile(file: ReferenceUploadFile): Precheck {
     return {
       ok: false,
       code: 'UNSUPPORTED_TYPE',
-      message: 'unsupported type: use PNG, JPEG, WEBP, GIF, MP4, MOV or WEBM',
+      message: 'unsupported type: use PNG, JPEG, WEBP, GIF, MP4, MOV or WEBM; audio: WAV or MP3',
     };
   }
 
-  const kind = byMime?.kind ?? byExtension!.kind;
-  const limit = kind === 'image' ? LIMITS.imageMaxBytes : LIMITS.videoMaxBytes;
+  const audioExtension = byExtension?.kind === 'audio' ? byExtension : undefined;
+  const kind = audioExtension?.kind ?? byMime?.kind ?? byExtension!.kind;
+  const limit = kind === 'image' ? LIMITS.imageMaxBytes : kind === 'video' ? LIMITS.videoMaxBytes : LIMITS.audioMaxBytes;
   if (size > limit) {
     return {
       ok: false,
       code: 'TOO_LARGE',
-      message: `too large: ${formatFileSize(size)}, ${kind === 'image' ? 'images' : 'videos'} max ${formatFileSize(limit)}`,
+      message: `too large: ${formatFileSize(size)}, ${kind === 'image' ? 'images' : kind === 'video' ? 'videos' : 'audio'} max ${formatFileSize(limit)}`,
+    };
+  }
+  const durationSec = finiteNumber(file?.durationSec);
+  if (kind === 'audio' && durationSec !== null && durationSec > LIMITS.audioMaxSeconds) {
+    return {
+      ok: false,
+      code: 'TOO_LONG',
+      message: `too long: ${formatDuration(durationSec)}, audio max ${formatDuration(LIMITS.audioMaxSeconds)}`,
     };
   }
 
-  const canonicalMime = byMime?.mime ?? byExtension!.mime;
+  const canonicalMime = audioExtension?.mime ?? byMime?.mime ?? byExtension!.mime;
   const ext = byExtension?.extensions[0] ?? byMime!.extensions[0];
   const warning = byMime && byExtension && byMime.kind !== byExtension.kind
     ? 'declared type and file extension disagree; the server checks the actual bytes'
@@ -301,7 +326,8 @@ export function precheckFile(file: ReferenceUploadFile): Precheck {
 }
 
 export function roleOf(ref: Reference | null | undefined): ReferenceRole {
-  return ROLES.includes(ref?.role as ReferenceRole) ? (ref!.role as ReferenceRole) : 'other';
+  if (ref?.kind === 'audio' && ref.role === 'song') return 'song';
+  return ROLES.includes(ref?.role as (typeof ROLES)[number]) ? (ref!.role as ReferenceRole) : 'other';
 }
 
 export function displayLabel(ref: Reference): string {
@@ -513,14 +539,17 @@ export function renderReferenceCard(
   const role = roleOf(ref);
   const note = String(ref.note ?? '').slice(0, LIMITS.noteMaxChars);
   const video = ref.kind === 'video';
+  const audio = ref.kind === 'audio';
   const id = escapeHtml(ref.id);
   const thumb = options.thumbUrl?.(ref) ?? ref.thumbUrl ?? ref.thumb ?? ref.posterUrl;
-  const media = isAuthedThumbUrl(thumb)
-    ? `<span class="ref-thumb-placeholder ref-thumb-loading" data-ref-thumb="${escapeHtml(thumb)}" data-ref-id="${id}" data-ref-updated="${escapeHtml(ref.updatedAt ?? '')}" role="img" aria-label="${escapeHtml(label)}">${video ? 'Video' : 'Image'}</span>`
-    : thumb
-      ? `<img src="${escapeHtml(thumb)}" alt="${escapeHtml(label)}" loading="lazy" />`
-      : `<span class="ref-thumb-placeholder" role="img" aria-label="${escapeHtml(label)}">${video ? 'Video' : 'Image'}</span>`;
-  const duration = video
+  const media = audio
+    ? `<span class="ref-thumb-placeholder ref-thumb-audio" role="img" aria-label="${escapeHtml(label)}">Audio</span>`
+    : isAuthedThumbUrl(thumb)
+      ? `<span class="ref-thumb-placeholder ref-thumb-loading" data-ref-thumb="${escapeHtml(thumb)}" data-ref-id="${id}" data-ref-updated="${escapeHtml(ref.updatedAt ?? '')}" role="img" aria-label="${escapeHtml(label)}">${video ? 'Video' : 'Image'}</span>`
+      : thumb
+        ? `<img src="${escapeHtml(thumb)}" alt="${escapeHtml(label)}" loading="lazy" />`
+        : `<span class="ref-thumb-placeholder" role="img" aria-label="${escapeHtml(label)}">${video ? 'Video' : 'Image'}</span>`;
+  const duration = video || audio
     ? `<span class="ref-duration" data-duration="${escapeHtml(formatDuration(ref.durationSec))}" aria-label="Duration ${escapeHtml(formatDuration(ref.durationSec))}">${escapeHtml(formatDuration(ref.durationSec))}</span>`
     : '';
   const question = options.question !== undefined
@@ -533,10 +562,11 @@ export function renderReferenceCard(
   const badge = question !== undefined
     ? `<button type="button" class="badge badge-warn ref-question" data-question-ref="${id}"${question ? ` title="${escapeHtml(question)}"` : ''} aria-label="Agent has a question about ${escapeHtml(label)}">agent has a question</button>`
     : '';
-  const roleOptions = ROLES.map(value =>
+  const roles: readonly ReferenceRole[] = audio ? [...ROLES, 'song'] : ROLES;
+  const roleOptions = roles.map(value =>
     `<option value="${value}"${value === role ? ' selected' : ''}>${escapeHtml(ROLE_LABELS[value])}</option>`).join('');
   return `<article class="ref-card panel" data-ref-id="${id}">
-    <div class="ref-thumb${video ? ' ref-thumb-video' : ''}">${media}${duration}</div>
+    <div class="ref-thumb${video ? ' ref-thumb-video' : ''}${audio ? ' ref-thumb-audio' : ''}">${media}${duration}</div>
     <div class="ref-body">
       <div class="ref-title-row">
         <label class="field ref-field ref-label-field">Label
@@ -555,7 +585,7 @@ export function renderReferenceCard(
       </label>
       <div class="ref-note-meta">
         <span class="ref-note-count" data-note-count="${id}" aria-live="polite">${note.length} / ${LIMITS.noteMaxChars}</span>
-        <span class="ref-meta">${video ? 'Video' : 'Image'}${ref.width && ref.height ? ` · ${ref.width}×${ref.height}` : ''}${video && ref.durationSec !== undefined ? ` · ${formatDuration(ref.durationSec)}` : ''}</span>
+        <span class="ref-meta">${audio ? 'Audio' : video ? 'Video' : 'Image'}${ref.width && ref.height ? ` · ${ref.width}×${ref.height}` : ''}${(video || audio) && ref.durationSec !== undefined ? ` · ${formatDuration(ref.durationSec)}` : ''}</span>
       </div>
       ${renderAssignmentChips(ref, assignments)}
       <div class="ref-actions">
@@ -602,15 +632,15 @@ export function renderReferencePanel(
   return `<section class="panel reference-panel" aria-labelledby="${escapeHtml(prefix)}-title">
     <header class="panel-header ref-header">
       <h2 class="panel-header-title" id="${escapeHtml(prefix)}-title">References <span class="badge ref-count" data-ref-count aria-label="${countLabel}">${count}</span></h2>
-      <p class="ref-hint">Attach images or short videos and tell the agent how to use them.</p>
+      <p class="ref-hint">Attach images, short videos or WAV/MP3 audio and tell the agent how to use them.</p>
     </header>
     <div class="ref-dropzone-wrap">
       <button type="button" class="ref-dropzone" data-ref-pick aria-describedby="${escapeHtml(prefix)}-drop-hint">
-        <span class="ref-dropzone-title">Drop images or videos here</span>
+        <span class="ref-dropzone-title">Drop images, videos or audio here</span>
         <span class="btn btn-secondary btn-sm ref-browse-btn">Browse files</span>
       </button>
       <input class="ref-file-input" data-ref-file type="file" multiple hidden accept="${ACCEPT_ATTRIBUTE}" />
-      <p class="ref-hint" id="${escapeHtml(prefix)}-drop-hint">Images up to 20 MB; videos up to 200 MB and 60 seconds. At most 24 references per conversation.</p>
+      <p class="ref-hint" id="${escapeHtml(prefix)}-drop-hint">Images up to 20 MB; videos up to 200 MB and 60 seconds; WAV/MP3 audio up to 100 MiB and 300 seconds. At most 24 references per conversation.</p>
     </div>
     ${renderPendingUploads(state.pending)}
     <p class="ref-status${state.messageError ? ' error' : ''}" data-ref-status role="status" aria-live="polite">${escapeHtml(state.message)}</p>
@@ -643,11 +673,15 @@ function normalizeReference(value: Reference, fallback?: Partial<Reference>): Re
   }
   const kind: ReferenceKind = value.kind === 'video'
     ? 'video'
-    : value.kind === 'image'
-      ? 'image'
-      : fallback?.kind === 'video'
-        ? 'video'
-        : 'image';
+    : value.kind === 'audio'
+      ? 'audio'
+      : value.kind === 'image'
+        ? 'image'
+        : fallback?.kind === 'video'
+          ? 'video'
+          : fallback?.kind === 'audio'
+            ? 'audio'
+            : 'image';
   return {
     ...value,
     kind,
@@ -985,7 +1019,8 @@ export class ReferencePanelController {
 
   async setRole(id: string, role: string): Promise<boolean> {
     const current = this.findReference(id);
-    if (!current || !ROLES.includes(role as ReferenceRole)) return false;
+    const allowed = ROLES.includes(role as (typeof ROLES)[number]) || (current?.kind === 'audio' && role === 'song');
+    if (!current || !allowed) return false;
     if (roleOf(current) === role) return false;
     try {
       const value = await this.api.patch(id, { role });
@@ -1149,7 +1184,7 @@ export type ReferenceBoardControllerOptions = {
 
 function boardRole(value: unknown, fallback: ReferenceRole = 'other'): ReferenceRole {
   if (value === undefined || value === null || value === '') return fallback;
-  return ROLES.includes(value as ReferenceRole) ? (value as ReferenceRole) : 'other';
+  return ROLES.includes(value as (typeof ROLES)[number]) ? (value as ReferenceRole) : 'other';
 }
 
 function boardText(value: unknown): string {

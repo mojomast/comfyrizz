@@ -43,6 +43,12 @@ test('extractBrief: vertical French explainer with an explicit look and avoid li
   assert.deepEqual(draft.avoid, ['stock-photo people', 'red']);
 });
 
+test('explicit output aspect takes precedence over incidental reel and portrait words', () => {
+  assert.equal(extractBrief('A portrait of a singer. Aspect: 16:9. Lyrics use reel presentation.').aspect, '16:9');
+  assert.equal(extractBrief('Landscape scenery. Aspect: 9:16.').aspect, '9:16');
+  assert.equal(extractBrief('Vertical dance. Aspect: 1:1.').aspect, '1:1');
+});
+
 test('missingQuestions: priority order, cap of three, answered fields skipped', () => {
   const questions = missingQuestions(extractBrief(RICH));
   // The rich prompt answered key_message/audience/length/cta; only look remains (no data mention).

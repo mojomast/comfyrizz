@@ -55,10 +55,18 @@ function parseRetryAfter(value: string | null, fallbackMs: number): number {
   return Number.isFinite(date) ? Math.min(2000, Math.max(0, date - Date.now())) : fallbackMs;
 }
 
+function parseRetryAfterUnbounded(value: string): number | undefined {
+  const seconds = Number(value);
+  if (Number.isFinite(seconds)) return Math.max(0, seconds * 1000);
+  const date = Date.parse(value);
+  return Number.isFinite(date) ? Math.max(0, date - Date.now()) : undefined;
+}
+
 async function sleep(ms: number, signal: AbortSignal): Promise<void> {
+  if (signal.aborted) throw signal.reason ?? new Error('aborted');
   if (ms <= 0) return;
   await new Promise<void>((resolve, reject) => {
-    const timer = setTimeout(resolve, ms);
+    const timer = setTimeout(() => { signal.removeEventListener('abort', abort); resolve(); }, ms);
     const abort = () => {
       clearTimeout(timer);
       reject(signal.reason ?? new Error('aborted'));
@@ -88,13 +96,22 @@ async function performRequest(config: ModelConfig, body: unknown, sessionId: str
     });
     if (response.ok) return response;
     const retryAfterMs = parseRetryAfter(response.headers.get('retry-after'), config.retryDelayMs ?? 500);
-    if (attempt >= maxRetries || ![429, 500, 502, 503, 504].includes(response.status)) {
-      const text = (await response.text().catch(() => '')).slice(0, 300);
-      throw Object.assign(new Error(`provider HTTP ${response.status}${text ? `: ${text}` : ''}`), {
+    // Explicit admission refusals are owned by the planning retry policy, not
+    // this transport loop. Inspect before retrying so the budgets cannot nest.
+    const text = response.status === 429 ? await response.text() : '';
+    const admission = response.status === 429 && /\bttft_admission_refused\b/i.test(text);
+    if (admission || attempt >= maxRetries || ![429, 500, 502, 503, 504].includes(response.status)) {
+      const raw = text || await response.text().catch(() => '');
+      const marker = admission ? raw.search(/\bttft_admission_refused\b/i) : 0;
+      const detail = raw.slice(Math.max(0, marker), Math.max(0, marker) + 300);
+      const header = response.headers.get('retry-after');
+      const admissionDelay = header ? parseRetryAfterUnbounded(header) : undefined;
+      throw Object.assign(new Error(`provider HTTP ${response.status}${detail ? `: ${detail}` : ''}`), {
         status: response.status,
-        retryAfterMs,
+        retryAfterMs: admission ? admissionDelay : retryAfterMs,
       });
     }
+    if (response.status !== 429) await response.body?.cancel();
     await sleep(retryAfterMs, signal);
   }
 }
@@ -112,6 +129,9 @@ export function createOpenAICompatibleModel(config: ModelConfig): ChatModel {
         model: config.model,
         stream: true,
         stream_options: { include_usage: true },
+        ...(config.reasoningEffort ? { reasoning_effort: config.reasoningEffort } : {}),
+        ...(config.thinking ? { thinking: { type: config.thinking } } : {}),
+        ...(config.maxTokens !== undefined ? { max_tokens: config.maxTokens } : {}),
         messages: wireMessages(request.system, request.messages),
         ...(request.tools.length ? { tools: wireTools(request.tools), tool_choice: 'auto' } : {}),
       };
@@ -119,6 +139,7 @@ export function createOpenAICompatibleModel(config: ModelConfig): ChatModel {
       try {
         response = await performRequest(config, body, request.sessionId, request.signal);
       } catch (error) {
+        if (request.signal.aborted) throw error;
         const status = (error as { status?: number }).status;
         const retryAfterMs = (error as { retryAfterMs?: number }).retryAfterMs;
         yield { type: 'error', code: status ? `http_${status}` : 'network_error', message: (error as Error).message, retryAfterMs };
@@ -137,8 +158,10 @@ export function createOpenAICompatibleModel(config: ModelConfig): ChatModel {
       let done = false;
       const nameMap = new Map(request.tools.map(tool => [safeToolName(tool.name), tool.name]));
       const partial = new Map<number, { id: string; name: string; arguments: string }>();
-      const usage = { input: 0, output: 0 };
+      const usage: { input: number; output: number; cacheRead?: number; cacheWrite?: number; reasoningTokens?: number } = { input: 0, output: 0 };
       let sawUsage = false;
+      let finishReason: string | undefined;
+      let badStream = false;
 
       const consume = (block: string): ChatChunk[] => {
         const out: ChatChunk[] = [];
@@ -155,12 +178,19 @@ export function createOpenAICompatibleModel(config: ModelConfig): ChatModel {
         try {
           payload = JSON.parse(data);
         } catch {
+          badStream = true;
           out.push({ type: 'error', code: 'bad_stream_json', message: data.slice(0, 160) });
           return out;
         }
         if (payload.usage) {
           usage.input = Number(payload.usage.prompt_tokens) || usage.input;
           usage.output = Number(payload.usage.completion_tokens) || usage.output;
+          const cacheRead = payload.usage.prompt_cache_hit_tokens ?? payload.usage.prompt_tokens_details?.cached_tokens;
+          const cacheWrite = payload.usage.cache_creation_input_tokens;
+          const reasoningTokens = payload.usage.completion_tokens_details?.reasoning_tokens;
+          if (Number.isFinite(cacheRead)) usage.cacheRead = cacheRead;
+          if (Number.isFinite(cacheWrite)) usage.cacheWrite = cacheWrite;
+          if (Number.isFinite(reasoningTokens)) usage.reasoningTokens = reasoningTokens;
           sawUsage = true;
         }
         const choice = payload.choices?.[0];
@@ -177,10 +207,11 @@ export function createOpenAICompatibleModel(config: ModelConfig): ChatModel {
             arguments: existing.arguments + (fragment.function?.arguments ?? ''),
           });
         }
-        if (choice.finish_reason === 'tool_calls') done = true;
+        if (typeof choice.finish_reason === 'string') finishReason = choice.finish_reason;
         return out;
       };
 
+      try {
       while (!done) {
         const { value, done: streamDone } = await reader.read();
         if (streamDone) break;
@@ -202,16 +233,47 @@ export function createOpenAICompatibleModel(config: ModelConfig): ChatModel {
       if (buffer.trim()) {
         for (const chunk of consume(buffer)) yield chunk;
       }
-      if (sawUsage) yield { type: 'usage', input: usage.input, output: usage.output };
+      if (sawUsage) yield { type: 'usage', ...usage };
+      if (badStream) {
+        yield { type: 'done' };
+        return;
+      }
+      if (finishReason && !['stop', 'tool_calls'].includes(finishReason)) {
+        yield { type: 'error', code: `finish_${finishReason}`, message: `Provider stopped generation: ${finishReason}` };
+        yield { type: 'done' };
+        return;
+      }
+      if (partial.size && finishReason !== 'tool_calls') {
+        yield { type: 'error', code: 'incomplete_tool_calls', message: 'Provider stream ended before tool calls completed' };
+        yield { type: 'done' };
+        return;
+      }
+      if (!finishReason) {
+        yield { type: 'error', code: 'incomplete_stream', message: 'Provider stream ended without a finish reason' };
+        yield { type: 'done' };
+        return;
+      }
+      const parsedCalls: ChatChunk[] = [];
+      let invalidArguments = false;
       for (const [index, call] of [...partial.entries()].sort((a, b) => a[0] - b[0])) {
         try {
-          const args = call.arguments.trim() ? JSON.parse(call.arguments) : {};
-          yield { type: 'tool_call', id: call.id, name: nameMap.get(call.name) ?? call.name, args };
+          const args = JSON.parse(call.arguments);
+          parsedCalls.push({ type: 'tool_call', id: call.id, name: nameMap.get(call.name) ?? call.name, args });
         } catch {
+          invalidArguments = true;
           yield { type: 'error', code: 'invalid_tool_arguments', message: `tool ${call.name} arguments are not complete JSON`, toolCallId: call.id };
         }
       }
+      if (!invalidArguments) for (const call of parsedCalls) yield call;
       yield { type: 'done' };
+      } catch (error) {
+        if (request.signal.aborted) throw error;
+        yield { type: 'error', code: 'stream_error', message: error instanceof Error ? error.message : String(error) };
+        yield { type: 'done' };
+      } finally {
+        await reader.cancel().catch(() => {});
+        reader.releaseLock();
+      }
     },
   };
 }

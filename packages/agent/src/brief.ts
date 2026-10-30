@@ -256,6 +256,8 @@ function detectLengthSeconds(text: string): number | undefined {
 }
 
 function detectAspect(text: string): Brief['aspect'] | undefined {
+  const declared = /\bAspect\s*:\s*(16:9|9:16|1:1)(?!\d)/i.exec(text);
+  if (declared) return declared[1] as Brief['aspect'];
   if (/\b(vertical|9:16|tiktok|reel|shorts|portrait)\b/i.test(text)) return '9:16';
   if (/\b(square|1:1)\b/i.test(text)) return '1:1';
   if (/\b(16:9|landscape|widescreen|youtube)\b/i.test(text)) return '16:9';

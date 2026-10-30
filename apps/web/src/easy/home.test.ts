@@ -85,6 +85,8 @@ class FakeWindow {
   dispatch(type, event = {}) {
     for (const listener of Array.from(this.listeners.get(type) ?? [])) listener(event);
   }
+  setInterval() { return 1; }
+  clearInterval() {}
 }
 
 class FakeDocument {
@@ -96,6 +98,9 @@ class FakeDocument {
   }
   getElementById() {
     return null;
+  }
+  createElement() {
+    return { setAttribute() {}, replaceChildren() {}, append() {}, remove() {} };
   }
 }
 

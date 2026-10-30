@@ -88,7 +88,7 @@ test('every Google Colab mention is spelled out and never bare', () => {
       const before = text.slice(0, match.index);
       assert.ok(
         before.endsWith('Google '),
-        `${path} says "Colab" without "Google" before it: ${text}`,
+        `${path} is missing the Google prefix: ${text}`,
       );
     }
   }

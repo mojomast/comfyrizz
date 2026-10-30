@@ -91,7 +91,7 @@ export class ColabCli {
   constructor({ bin = "colab", home = process.env.HOME || process.env.USERPROFILE || os.homedir(), logDir = null, detached = false, onLog = null, extraEnv = {} } = {}) {
     this.bin = bin;
     this.home = home;
-    this.logDir = logDir || join(process.env.TMPDIR || "/tmp", `comfyrizz-colab-${process.pid}`);
+    this.logDir = logDir || join(os.tmpdir(), `comfyrizz-colab-${process.pid}`);
     this.detached = detached;
     this.onLog = onLog;
     this.extraEnv = extraEnv;

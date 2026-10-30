@@ -7,9 +7,11 @@
 // survive frequent fraction events.
 
 import { COPY, fill } from './copy.ts';
+import { superEasyBrandMarkup } from './brand.ts';
 import { COPY as EASY_COPY } from '../copy.ts';
 import { renderSuperEasyDoneActions } from './escape.ts';
 import { escapeHtml, renderProgressBar } from '../components.ts';
+import { agentConsoleMarkup } from '../agent-console.ts';
 import {
   readStages,
   STAGE_STATUS_TEXT,
@@ -25,6 +27,9 @@ import {
 export interface SuperEasyProgressFailure {
   message: string;
   retryable?: boolean;
+  narrationRevision?: boolean | string;
+  proposalRevisionNote?: string;
+  downloadedOutputsRecovery?: boolean;
 }
 
 export interface SuperEasyProgressViewOptions {
@@ -89,10 +94,10 @@ export interface ProgressRoot {
 
 const VIDEO_URL = /\.(?:mp4|m4v|webm|mov)(?:[?#]|$)/iu;
 const PREVIEW_TITLE = 'Your preview is ready';
-const PREVIEW_BODY = 'Download MP4 makes the video file on this computer in about a minute. You can watch the preview while it works.';
-const PREVIEW_DOWNLOAD = 'Download MP4';
+const PREVIEW_BODY = 'Download preview MP4 makes a preview file on this computer in about a minute. It is not newly generated AI footage. You can watch the preview while it works.';
+const PREVIEW_DOWNLOAD = 'Download preview MP4';
 const PREVIEW_ACTION = 'Watch and review';
-const PREVIEW_LIVE = 'Preview ready. Download MP4 makes the video file.';
+const PREVIEW_LIVE = 'Preview ready. You can download a preview MP4.';
 
 function percent(fraction: number): number {
   if (!Number.isFinite(fraction)) return 0;
@@ -196,7 +201,7 @@ function slotKey(item: GalleryItem): string {
 }
 
 function slotMarkup(item: GalleryItem): string {
-  const classes = ['super-easy-progress-slot', `super-easy-progress-slot-${item.state}`];
+  const classes = ['super-easy-progress-slot', `super-easy-progress-slot-${item.kind}`, `super-easy-progress-slot-${item.state}`];
   if (item.highlighted) classes.push('super-easy-progress-slot-highlighted');
   const highlighted = item.highlighted ? ' data-gallery-highlighted="true"' : '';
   const reason = item.reason === null
@@ -281,7 +286,7 @@ function actionsKeyOf(
 ): string {
   const message = failure === null ? '' : failure.message;
   const retryable = failure === null ? 0 : failure.retryable === false ? 0 : 1;
-  return `${finalReady ? 1 : 0}|${gallery.final.url ?? ''}|${previewReady ? 1 : 0}|${message}|${retryable}|${options.packageId ?? ''}|${options.search ?? ''}`;
+  return `${finalReady ? 1 : 0}|${gallery.final.url ?? ''}|${previewReady ? 1 : 0}|${message}|${retryable}|${failure?.narrationRevision ? 1 : 0}|${failure?.proposalRevisionNote ?? ''}|${failure?.downloadedOutputsRecovery ? 1 : 0}|${options.packageId ?? ''}|${options.search ?? ''}`;
 }
 
 function previewMarkup(): string {
@@ -291,6 +296,7 @@ function previewMarkup(): string {
 <div class="super-easy-progress-preview-actions">
 <button type="button" class="btn btn-primary" data-super-easy-export>${escapeHtml(PREVIEW_DOWNLOAD)}</button>
 <button type="button" class="btn btn-secondary" data-super-easy-review>${escapeHtml(PREVIEW_ACTION)}</button>
+<button type="button" class="btn btn-secondary" data-super-easy-change>Change anything</button>
 </div>
 </section>`;
 }
@@ -299,9 +305,14 @@ function failureMarkup(failure: SuperEasyProgressFailure): string {
   const retry = failure.retryable === false
     ? ''
     : `\n<button type="button" class="btn btn-primary" data-super-easy-retry>${escapeHtml(EASY_COPY.errors.tryAgain)}</button>`;
+  const revise = failure.narrationRevision
+    ? '\n<button type="button" class="btn btn-primary" data-super-easy-revise-narration>Revise narration for this length</button><p>Review and approve the revised proposal before generation. Speech will be measured again; existing footage may need regeneration.</p>'
+    : '';
   return `<section class="super-easy-progress-error" data-super-easy-error>
 <p class="super-easy-progress-error-message" data-super-easy-error-message>${escapeHtml(failure.message)}</p>
-<div class="super-easy-progress-error-actions">${retry}
+${failure.proposalRevisionNote !== undefined ? `<form class="super-easy-proposal-revise" data-super-easy-revise-proposal><label for="super-easy-proposal-change">Edit your revision request</label><div><textarea id="super-easy-proposal-change" rows="4">${escapeHtml(failure.proposalRevisionNote)}</textarea><button type="submit" class="btn btn-primary">Revise proposal</button></div></form>` : ''}
+<div class="super-easy-progress-error-actions">${retry}${revise}
+${failure.downloadedOutputsRecovery ? '<button type="button" class="btn btn-primary" data-super-easy-recover-outputs>Recover downloaded outputs</button><p>Uses downloaded files; no new generation credits. Verifies the files and renders a new MP4 on this computer.</p>' : ''}
 <button type="button" class="btn btn-secondary" data-super-easy-more-control>${escapeHtml(COPY.done.openStudio)}</button>
 <button type="button" class="btn btn-secondary" data-super-easy-open-editor>${escapeHtml(EASY_COPY.shell.openEditor)}</button>
 </div>
@@ -322,12 +333,16 @@ export function superEasyProgressParts(
   const stages = stagesForFinalArtifact(rawStages, finalReady);
   const overall = finalReady ? stages.overall : Math.min(stages.overall, 0.99);
   const failure = options.failure ?? null;
+  const recovery = (snapshot as { downloadedOutputsRecovery?: string } | null)?.downloadedOutputsRecovery;
+  const recoveryText = recovery === 'completed' ? 'Your video was recovered from downloaded outputs.'
+    : recovery === 'rendering' ? 'Rendering recovered outputs on this computer…'
+      : recovery === 'verifying' ? 'Recovering downloaded outputs: verifying files…' : '';
   const previewReady = options.previewReady === true && !finalReady && failure === null;
   const overallValue = finalReady ? COPY.making.overall : `${percent(overall)}%`;
   const overallLabel = finalReady ? COPY.done.title : COPY.making.title;
   const liveText = typeof options.liveText === 'string'
     ? options.liveText
-    : progressLiveText(stages, gallery, {
+    : recoveryText || progressLiveText(stages, gallery, {
         previewReady,
         failure: failure === null ? null : failure.message,
       });
@@ -359,7 +374,7 @@ ${stages.stages.map(stageMarkup).join('\n')}
 ${gallerySlots.map((slot) => slot.html).join('\n')}
 </ul>`;
 
-  const actionsHtml = failure !== null
+  const primaryActionsHtml = failure !== null
     ? failureMarkup(failure)
     : finalReady
       ? renderSuperEasyDoneActions({
@@ -370,26 +385,35 @@ ${gallerySlots.map((slot) => slot.html).join('\n')}
       : previewReady
         ? previewMarkup()
         : '';
+  const startOverHtml = finalReady ? '' : `<div class="super-easy-progress-start-over">
+<button type="button" class="btn btn-secondary" data-super-easy-make-another>Stop and start a new prompt</button>
+<p class="hint">${recovery ? 'Return to the idea screen and stop following this recovery.' : 'Return to the idea screen. Any active video run is cancelled.'}</p>
+</div>`;
+  const studioHtml = finalReady ? '' : `<div class="super-easy-progress-mode-actions"><button type="button" class="btn btn-secondary" data-super-easy-more-control>${escapeHtml(COPY.done.openStudio)}</button><span class="hint">Switch views without stopping your work.</span></div>`;
+  const recoveryHtml = recoveryText ? `<p data-super-easy-recovery-status>${escapeHtml(recoveryText)}</p>${!finalReady && !failure ? '<button type="button" class="btn btn-primary" disabled>Recovering downloaded outputs…</button><p>Uses downloaded files; no new generation credits.</p>' : ''}` : '';
+  const actionsHtml = `${studioHtml}${recoveryHtml}${primaryActionsHtml}${startOverHtml}`;
 
   const keys: SuperEasyProgressKeys = {
-    live: progressLiveKey(stages, gallery, {
+    live: recoveryText + progressLiveKey(stages, gallery, {
       previewReady,
       failure: failure === null ? null : failure.message,
     }),
     chrome: chromeKeyOf(stages, finalReady),
     gallery: galleryKeyOf(gallery),
-    actions: actionsKeyOf(finalReady, gallery, previewReady, failure, options),
+    actions: recoveryText + actionsKeyOf(finalReady, gallery, previewReady, failure, options),
   };
 
   const html = `<section class="${rootClasses.join(' ')}"${reducedAttribute} data-super-easy-progress data-super-easy-live-key="${escapeHtml(keys.live)}" data-super-easy-chrome-key="${escapeHtml(keys.chrome)}" data-super-easy-gallery-key="${escapeHtml(keys.gallery)}" data-super-easy-actions-key="${escapeHtml(keys.actions)}" aria-labelledby="super-easy-progress-title">
+${superEasyBrandMarkup()}
 <h1 class="super-easy-progress-title" id="super-easy-progress-title">${escapeHtml(COPY.making.title)}</h1>
 <p class="super-easy-progress-subtitle">${escapeHtml(COPY.making.subtitle)}</p>
+${agentConsoleMarkup()}
 <p class="super-easy-progress-live" role="status" aria-live="polite" aria-atomic="true" data-super-easy-live data-super-easy-live-key="${escapeHtml(keys.live)}">${escapeHtml(liveText)}</p>
-<div class="super-easy-progress-actions" data-super-easy-actions>${actionsHtml}</div>
-<div class="super-easy-progress-chrome" data-super-easy-chrome style="display: flex; flex-direction: column; gap: var(--space-4)">${chromeHtml}</div>
 <section class="super-easy-progress-gallery" aria-label="${escapeHtml(COPY.gallery.empty)}" data-super-easy-gallery>
 ${galleryHtml}
 </section>
+<div class="super-easy-progress-actions" data-super-easy-actions>${actionsHtml}</div>
+<div class="super-easy-progress-chrome" data-super-easy-chrome>${chromeHtml}</div>
 </section>`;
 
   return {
@@ -437,6 +461,7 @@ function patchGallery(container: ProgressElement, parts: SuperEasyProgressParts)
     return;
   }
 
+  const list = container.querySelectorAll?.('ul,ol')?.[0] ?? container;
   for (const slot of parts.gallerySlots) {
     if (existing.has(slot.id)) continue;
     const target = parts.gallerySlots
@@ -450,11 +475,11 @@ function patchGallery(container: ProgressElement, parts: SuperEasyProgressParts)
       }
       target.insertAdjacentHTML('beforebegin', slot.html);
     } else {
-      if (typeof container.insertAdjacentHTML !== 'function') {
+      if (typeof list.insertAdjacentHTML !== 'function') {
         container.innerHTML = parts.galleryHtml;
         return;
       }
-      container.insertAdjacentHTML('beforeend', slot.html);
+      list.insertAdjacentHTML('beforeend', slot.html);
     }
   }
 

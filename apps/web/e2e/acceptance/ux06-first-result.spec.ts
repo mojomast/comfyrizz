@@ -39,6 +39,7 @@ async function startCpuJourney(page: Page, token: string): Promise<Journey> {
   await page.goto(`/#token=${encodeURIComponent(token)}`);
   await page.locator('#super-easy-prompt').fill(PROMPT);
   await page.locator('[data-super-easy-generate]').click();
+  await page.getByRole('button', { name: 'Make this film' }).click();
   await expect(page.locator('[data-super-easy-progress]')).toBeVisible();
   await expect.poll(() => builtPackageId, { message: 'the offline planner never built a package', timeout: SETTLE_MS }).not.toBeNull();
   return { requests, builtPackageId: () => builtPackageId };

@@ -404,6 +404,38 @@ test('reference and cast proposals render the existing Accept and Reject control
   }
 });
 
+test('clip corrections, audio and signed plans render actionable controls with the activity drawer', async () => {
+  const dom = installDom();
+  try {
+    const host = dom.doc.createElement('div');
+    dom.doc.body.appendChild(host);
+    const proposed = conversation({
+      clipProposals: [
+        { id: 'cp_fall', kind: 'correction', clipId: 's2', status: 'proposed', change: { note: 'Hit the ground harder.' } },
+        { id: 'cp_audio', kind: 'audio', clipId: 'soundtrack', status: 'proposed', change: { note: 'Add percussion and impact foley.' } },
+        { id: 'cp_plan', kind: 'correction', clipId: 's3', status: 'plan_ready', productionId: 'prod_1', planId: 'plan_1', planHash: 'a'.repeat(64) },
+      ],
+    });
+    const reviewed = [];
+    const chat = create(host, {
+      initialConversationId: CHAT_ID,
+      onReviewPlan: id => reviewed.push(id),
+      apiFetch: async () => jsonResponse({ conversation: proposed, reply: '', built: false }),
+    });
+    await chat.ready;
+
+    assert.ok(host.querySelector('[data-agent-console-toggle]'));
+    assert.equal(host.querySelector('[data-confirm-clip="cp_fall"]').textContent.trim(), 'Prepare generation');
+    assert.equal(host.querySelector('[data-confirm-clip="cp_audio"]').textContent.trim(), 'Apply change');
+    assert.equal(host.querySelector('[data-review-plan="prod_1"]').textContent.trim(), 'Review & edit full plan');
+    assert.ok(host.querySelector('[data-clip-proposal="cp_audio"]'));
+    host.querySelector('[data-review-plan="prod_1"]').dispatchEvent({ type: 'click', bubbles: true });
+    assert.deepEqual(reviewed, ['prod_1']);
+  } finally {
+    dom.restore();
+  }
+});
+
 test('destroy removes the submit listener and empties the host', async () => {
   const dom = installDom();
   try {
@@ -461,4 +493,163 @@ test('mountProjectChat still resolves the global prompt for suggested prompts', 
   } finally {
     dom.restore();
   }
+});
+
+test('adoptPackageId is sent only while unbound and the returned chat is handed off before package adoption', async () => {
+  const dom = installDom();
+  try {
+    const host = dom.doc.createElement('div');
+    dom.doc.body.appendChild(host);
+    const bodies = [];
+    const order = [];
+    let turn = 0;
+    const chat = create(host, {
+      adoptPackageId: 'pkg_existing',
+      expectedPackageId: 'pkg_existing',
+      onConversationChange: (conversation) => order.push(`chat:${conversation.id}`),
+      applyProject: (project) => order.push(`package:${project.package.id}`),
+      apiFetch: async (_url, init = {}) => {
+        turn += 1;
+        bodies.push(JSON.parse(init.body));
+        const built = turn === 1;
+        return jsonResponse({
+          conversation: conversation({
+            revision: turn,
+            projectId: 'pkg_existing',
+            projectRevision: built ? 2 : 3,
+            phase: built ? 'built' : 'chatting',
+          }),
+          reply: built ? 'Changed the existing package.' : 'No further changes.',
+          built,
+          ...(built ? { project: { package: { id: 'pkg_existing', title: 'Existing', revision: 2 }, revision: 2 } } : {}),
+        });
+      },
+    });
+    await chat.ready;
+
+    await chat.send('Change the opening.', 'plan');
+    await chat.send('Keep everything else unchanged.', 'plan');
+
+    assert.equal(bodies[0].adoptPackageId, 'pkg_existing');
+    assert.equal('adoptPackageId' in bodies[1], false, 'a bound conversation never re-adopts');
+    assert.deepEqual(order.slice(0, 2), [`chat:${CHAT_ID}`, 'package:pkg_existing']);
+  } finally {
+    dom.restore();
+  }
+});
+
+test('a response from another package is rejected before chat or package handoff', async () => {
+  const dom = installDom();
+  try {
+    const host = dom.doc.createElement('div');
+    dom.doc.body.appendChild(host);
+    const handedOff = [];
+    const chat = create(host, {
+      expectedPackageId: 'pkg_expected',
+      onConversationChange: (conversation) => handedOff.push(conversation.id),
+      applyProject: (project) => handedOff.push(project.package.id),
+      apiFetch: async () => jsonResponse({
+        conversation: conversation({ projectId: 'pkg_other', phase: 'built' }),
+        reply: 'Wrong project.',
+        built: true,
+        project: { package: { id: 'pkg_other', title: 'Other', revision: 2 }, revision: 2 },
+      }),
+    });
+    await chat.ready;
+
+    await chat.send('Change something.', 'plan');
+
+    assert.deepEqual(handedOff, []);
+    assert.match(host.querySelector('[data-project-chat-panel]').innerHTML, /different project/);
+  } finally {
+    dom.restore();
+  }
+});
+
+test('Advanced chat reads a Super Easy package at send time and rejects a substituted reply', async () => {
+  const dom = installDom();
+  try {
+    const host = dom.doc.createElement('div');
+    dom.doc.body.appendChild(host);
+    let current = null;
+    const bodies = [];
+    const applied = [];
+    const chat = create(host, {
+      getEditContext: () => current,
+      applyProject: project => applied.push(project.package.id),
+      apiFetch: async (_url, init = {}) => {
+        bodies.push(JSON.parse(init.body));
+        return jsonResponse({ conversation: conversation({ projectId: 'pkg_replacement', phase: 'built' }), reply: 'Replaced.', built: true,
+          project: { package: { id: 'pkg_replacement', revision: 1 }, revision: 1 } });
+      },
+    });
+    await chat.ready;
+    current = { packageId: 'pkg_7c235c863aa8707a', revision: 6 };
+    await chat.send('Correct the existing olive video.', 'plan');
+    assert.equal(bodies[0].expectedPackageId, current.packageId);
+    assert.equal(bodies[0].expectedPackageRevision, 6);
+    assert.deepEqual(applied, []);
+    assert.match(host.querySelector('[data-project-chat-panel]').innerHTML, /different project/);
+    assert.equal(chat.conversation, null);
+  } finally { dom.restore(); }
+});
+
+test('an explicit new-video action leaves edit mode, while opening another package restores it', async () => {
+  const dom = installDom();
+  try {
+    const host = dom.doc.createElement('div');
+    dom.doc.body.appendChild(host);
+    let current = { packageId: 'pkg_existing', revision: 6 };
+    const bodies = [];
+    const chat = create(host, {
+      getEditContext: () => current,
+      apiFetch: async (_url, init = {}) => {
+        const body = JSON.parse(init.body); bodies.push(body);
+        return jsonResponse({ conversation: conversation({ id: body.conversationId, projectId: body.expectedPackageId ?? null }), reply: 'Draft only.', built: false });
+      },
+    });
+    await chat.ready;
+    host.querySelector('#project-new').dispatchEvent({ type: 'click', bubbles: true });
+    await chat.send('Make a new film.', 'plan');
+    assert.equal(bodies[0].expectedPackageId, undefined);
+    current = { packageId: 'pkg_other_opened', revision: 2 };
+    await chat.send('Edit the newly opened film.', 'plan');
+    assert.equal(bodies[1].expectedPackageId, current.packageId);
+    assert.equal(bodies[1].expectedPackageRevision, 2);
+  } finally { dom.restore(); }
+});
+
+test('a cold saved package displays its exact edit diff and applies through the revision-bound Build action', async () => {
+  const dom = installDom();
+  try {
+    const host = dom.doc.createElement('div'); dom.doc.body.appendChild(host);
+    const bodies = [], applied = [];
+    const diff = [{ path: 'voice.enabled', before: true, after: false }, { path: 'scenes.s1.copy.kicker', before: '<unwanted>', after: null }];
+    const staged = conversation({ plan: null, phase: 'draft', projectId: 'pkg_existing', projectRevision: 41,
+      packageEdit: { request: { packageId: 'pkg_existing', expectedRevision: 41 }, diff } });
+    const chat = create(host, {
+      getEditContext: () => ({ packageId: 'pkg_existing', revision: 41 }),
+      applyProject: project => applied.push(project.package.id),
+      apiFetch: async (_url, init = {}) => {
+        const body = JSON.parse(init.body); bodies.push(body);
+        return jsonResponse(body.action === 'build'
+          ? { conversation: conversation({ ...staged, phase: 'built', revision: 2, projectRevision: 42, packageEdit: null, lastPackageEdit: { diff, appliedRevision: 42 } }), built: true, reply: 'Applied reviewed edits.', project: { package: { id: 'pkg_existing', revision: 42 }, revision: 42 } }
+          : { conversation: staged, built: false, reply: 'Review the staged package edits.' });
+      },
+    });
+    await chat.ready;
+    await chat.send('Stage the requested cleanup.', 'plan');
+    const review = host.querySelector('[data-package-edit-review]');
+    assert.ok(review); assert.match(host.querySelector('[data-project-chat-panel]').innerHTML, /voice.enabled/);
+    assert.match(host.querySelector('[data-project-chat-panel]').innerHTML, /&lt;unwanted&gt;/);
+    assert.deepEqual(applied, []);
+    host.querySelector('#project-package-edit-build').dispatchEvent({ type: 'click', bubbles: true });
+    await waitFor(() => applied.length === 1, 'the reviewed edit was applied');
+    assert.equal(bodies[1].action, 'build');
+    assert.equal(bodies[1].expectedPackageId, 'pkg_existing');
+    assert.equal(bodies[1].expectedPackageRevision, 41);
+    assert.equal(bodies[1].baseRevision, staged.revision);
+    assert.equal(host.querySelector('#project-package-edit-build'), null);
+    assert.match(host.querySelector('[data-project-chat-panel]').innerHTML, /Applied package edits · revision 42/);
+  } finally { dom.restore(); }
 });

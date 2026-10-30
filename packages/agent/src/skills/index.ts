@@ -1,6 +1,6 @@
 import { readFileSync } from 'node:fs';
 
-export const SKILL_CATALOG_VERSION = '1.5.0';
+export const SKILL_CATALOG_VERSION = '1.5.1';
 
 export const BUNDLED_SKILL_IDS = [
   'video-brief',
@@ -29,11 +29,11 @@ interface BundledSkill {
   body: string;
 }
 
-function readMarkdown(id: SkillId): string {
+function readMarkdown(id: SkillId, filename = 'SKILL.md'): string {
   // tsc does not copy Markdown. Published packages include src alongside dist.
   const candidates = [
-    new URL(`./${id}/SKILL.md`, import.meta.url),
-    new URL(`../../../src/skills/${id}/SKILL.md`, import.meta.url),
+    new URL(`./${id}/${filename}`, import.meta.url),
+    new URL(`../../../src/skills/${id}/${filename}`, import.meta.url),
   ];
   for (const file of candidates) {
     try {
@@ -68,6 +68,11 @@ function loadSkill(id: SkillId): BundledSkill {
 
 // Only this fixed allowlist reaches the filesystem; mode and caller data never do.
 const catalog = new Map(BUNDLED_SKILL_IDS.map(id => [id, loadSkill(id)]));
+
+/** Builder-only guidance; never include builder tool calls in conversation skills. */
+export function proceduralDrawingBuilderGuidance(): string {
+  return readMarkdown('storyboard-direction', 'PROCEDURAL-DRAWING.md').trim();
+}
 
 export function composeConversationSkills(context: ConversationSkillContext): ConversationSkills {
   const ids: SkillId[] = [

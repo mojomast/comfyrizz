@@ -158,12 +158,19 @@ test('newly saved named connection and explicit model are used by the real agent
   const seen = [];
   const brief = 'A short explainer about solar panels.';
   const calls = defaultCpuScript(brief);
+  let planningCalls = 0;
   const upstream = await listen(t, async (request, response) => {
     let raw = '';
     for await (const chunk of request) raw += chunk;
     seen.push({ headers: request.headers, body: JSON.parse(raw) });
     response.setHeader('content-type', 'text/event-stream');
-    const call = calls[seen.length - 1];
+    const isSvg = seen.at(-1).body.messages?.some(message => message.role === 'system' && message.content?.includes('one standalone SVG document'));
+    if (isSvg) {
+      const svg = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100"><rect width="100" height="100" fill="#f2f2f2"/><text x="10" y="60" fill="#050505">Solar</text></svg>';
+      response.end(`data: ${JSON.stringify({ choices: [{ delta: { content: svg }, finish_reason: 'stop' }] })}\n\ndata: [DONE]\n\n`);
+      return;
+    }
+    const call = calls[planningCalls++];
     const delta = call ? { tool_calls: [{ index: 0, id: `call-${seen.length}`, function: { name: call.name.replace(/[^a-zA-Z0-9_-]/g, '_'), arguments: JSON.stringify(call.args) } }] } : { content: 'done' };
     response.end(`data: ${JSON.stringify({ choices: [{ delta, finish_reason: call ? 'tool_calls' : 'stop' }] })}\n\ndata: [DONE]\n\n`);
   });
@@ -180,4 +187,7 @@ test('newly saved named connection and explicit model are used by the real agent
   assert.ok(seen.length > 0);
   assert.equal(seen[0].body.model, 'chosen-model');
   assert.equal(seen[0].headers.authorization, `Bearer ${SECRET}`);
+  const svgCalls = seen.filter(item => item.body.messages?.some(message => message.role === 'system' && message.content?.includes('one standalone SVG document')));
+  assert.equal(svgCalls.length, 4);
+  assert.ok(svgCalls.every(item => item.body.model === 'chosen-model' && item.headers.authorization === `Bearer ${SECRET}` && item.body.max_tokens === 2048));
 });

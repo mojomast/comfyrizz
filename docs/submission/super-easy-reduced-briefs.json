@@ -1,0 +1,37 @@
+{
+  "version": 2,
+  "revisionNote": "Second probe prompts explicitly request exact duration and native primitives after the first three baseline exports revealed flexible timing and unnecessary illustrations. Each run must retain its exact submitted prompt.",
+  "purpose": "New deadline reliability probes; not replacements claimed as completed original campaign briefs",
+  "briefs": [
+    {
+      "id": "title-simple-12",
+      "videoType": "title-reveal",
+      "durationSeconds": 12,
+      "prompt": "Create exactly 12 seconds of landscape native kinetic typography called PLEASE HOLD. Use one plain warm-white scene, large condensed black lettering and one thin blue horizontal rule. Reveal PLEASE, then HOLD, during the first three seconds. Resolve into one centered, readable two-line title filling roughly 60 percent of the frame width. Keep that completed composition unchanged for the rest of the film, including the final three seconds. No narration, music, generated images, SVG illustrations, scene fades or outro. This is an intentionally silent typography test.",
+      "requiredEvidence": ["exact title", "readable composition", "visible entrance", "three-second still ending", "downloaded MP4"],
+      "optionalAttachment": "authorized Anton-Regular.ttf"
+    },
+    {
+      "id": "motion-small-step-20",
+      "videoType": "motion-explainer",
+      "durationSeconds": 20,
+      "prompt": "Create exactly 20 seconds of landscape motion graphics called ONE SMALL STEP. Use a native technical-flow diagram with three large connected cards on a plain cream background: CHOOSE, FINISH, REPEAT. Charcoal text and one red accent. Reveal the cards in order and finish with all three readable together. Keep the same diagram and positions throughout. Use this exact narration: Pick one small task. Give it your attention. Finish it before choosing the next. Progress can be simple: choose, finish, repeat. Use native text and shapes, with no generated illustrations or statistics. Start on the visible diagram rather than a black fade.",
+      "requiredEvidence": ["connected steps", "exact narration", "measured speech fits", "audible speech review", "downloaded MP4"]
+    },
+    {
+      "id": "sketch-simple-growth-15",
+      "videoType": "sketch-build",
+      "durationSeconds": 15,
+      "prompt": "Create exactly 15 seconds of landscape drawn animation on a plain warm-white canvas. Use one continuous drawing, large enough to occupy the central 60 percent of the frame height. Begin with a clearly visible black seed. Draw one stem upward, then one leaf on each side. Keep the same geometry and position as it grows. Add the readable closing label SIMPLE GROWTH. Finish all motion by second 12 and hold the completed drawing for three seconds. Black lines and one green accent. No narration or music. Use restrained drawing sounds if supported. Start on the visible warm-white canvas, with no black fade or scene transition.",
+      "requiredEvidence": ["progressive drawing", "stable geometry", "two leaves", "readable final label", "downloaded MP4"]
+    },
+    {
+      "id": "data-fictional-four-days-20",
+      "videoType": "data-story",
+      "durationSeconds": 20,
+      "prompt": "Make exactly 20 seconds of landscape Data Story using these supplied fictional practice values: Monday 10 minutes, Tuesday 15 minutes, Wednesday 20 minutes, Thursday 25 minutes. The attached fictional-study.csv contains the same four values. Label the film FICTIONAL STUDY LOG so it is clearly an illustration, not a claim about real people. Show four bars in that order, labelled with the exact day and minutes. These are measurements, not counts of CSV rows. End by highlighting Thursday, 25 minutes. Navy, cream and one orange highlight. Use a simple bar reveal and a readable final hold. No narration, inferred causes, percentages or additional statistics. Use a gentle instrumental bed if supported.",
+      "attachment": "fictional-study.csv",
+      "requiredEvidence": ["fictional label", "four exact source values", "correct units", "Thursday 25 highlighted", "downloaded MP4"]
+    }
+  ]
+}

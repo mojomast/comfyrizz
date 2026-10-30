@@ -15,7 +15,7 @@ const plan = hero => ({
   title: 'Why solar panels work', brief: 'Explain how solar panels turn sunlight into electricity.',
   audience: 'Curious homeowners', aspect: '16:9', stylePreset: 'cinematic-dark',
   scenes: [
-    { id: 's_title', layout: 'title', headline: 'Sunlight, meet electricity', sub: 'How solar panels work', narration: 'Solar panels turn sunlight into electricity.', seconds: 4, visual: 'Title over a procedural dawn gradient' },
+    { id: 's_title', layout: 'title', headline: 'Sunlight, meet electricity', sub: 'How solar panels work', narration: 'Solar panels turn sunlight into electricity.', seconds: 4, visual: 'Sunlight over solar panels at dawn', mediaType: 'image' },
     { id: 's_hero', layout: 'hero', headline: hero, sub: 'Silicon cells free electrons', body: 'When photons strike the cell, electrons flow and create current.', narration: 'Silicon cells absorb photons. That releases electrons, and their flow becomes current.', seconds: 9, visual: 'An SVG diagram of a photon hitting a silicon cell' },
     { id: 's_list', layout: 'list', headline: 'From roof to room', items: ['Cells make direct current', 'An inverter changes it to AC', 'The grid or battery stores the rest'], narration: 'An inverter converts the current for your home. Extra power goes to a battery or the grid.', seconds: 10, visual: 'A three-step labeled energy flow diagram', mediaType: 'svg', svg: '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 400 240"><rect width="400" height="240" fill="#05070d"/><path d="M40 120 H360" stroke="#6d8cff" stroke-width="8"/><circle cx="100" cy="120" r="25" fill="#f4f6fb"/><circle cx="200" cy="120" r="25" fill="#f4f6fb"/><circle cx="300" cy="120" r="25" fill="#f4f6fb"/></svg>' },
   ],
@@ -113,6 +113,12 @@ test('chat builds a real project from conversation copy and storyboard', { timeo
   assert.equal(first.body.project.timeline.scenes.length, 3);
   assert.deepEqual(first.body.conversation.messages.map(message => message.role), ['user', 'assistant']);
   assert.doesNotMatch(JSON.stringify(first.body), new RegExp(KEY));
+  const progress = await api('/api/agent/progress?sessionId=turn-one-123');
+  assert.equal(progress.status, 200);
+  assert.equal(progress.body.status, 'done');
+  assert.equal(typeof progress.body.usage.total, 'number');
+  assert.ok(progress.body.recentEvents.some(event => event.type === 'tool_call' && event.name === 'project_build'));
+  assert.ok(progress.body.recentEvents.every(event => !JSON.stringify(event).includes('private fixture')));
 
   const conversationId = first.body.conversation.id;
   assert.ok(existsSync(join(runtimeDir, 'conversations', `${conversationId}.json`)));

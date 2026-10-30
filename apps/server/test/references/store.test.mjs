@@ -54,6 +54,24 @@ function mp4Bytes(marker = 0) {
   return buffer;
 }
 
+function wavBytes(marker = 0) {
+  const bytes = Buffer.alloc(44, marker);
+  bytes.write('RIFF', 0, 'ascii');
+  bytes.writeUInt32LE(36, 4);
+  bytes.write('WAVEfmt ', 8, 'ascii');
+  bytes.writeUInt32LE(16, 16);
+  bytes.writeUInt16LE(1, 20);
+  bytes.writeUInt16LE(2, 22);
+  bytes.writeUInt32LE(44100, 24);
+  bytes.writeUInt32LE(176400, 28);
+  bytes.writeUInt16LE(4, 32);
+  bytes.writeUInt16LE(16, 34);
+  bytes.write('data', 36, 'ascii');
+  bytes.writeUInt32LE(0, 40);
+  bytes[43] = marker;
+  return bytes;
+}
+
 function makeStore(rootDir, chatId = 'chat_0123456789abcdef') {
   return createReferenceStore({ rootDir, chatId, clock });
 }
@@ -84,6 +102,8 @@ test('R05: a new library lives under references/<chat_id> and writes refs.json m
   assert.equal(record.ext, 'png');
   assert.equal(record.file, `${record.id}.png`);
   assert.equal(record.role, 'style');
+  assert.equal(record.usage, 'reference');
+  assert.equal(record.rightsAsserted, true);
   assert.equal(record.note, 'warm film grain');
   assert.equal(record.label, 'grain.png');
   assert.equal(record.bytes, pngBytes(4, 3).length);
@@ -184,7 +204,64 @@ test('R05: video references keep duration, fps-free frame metadata and safe name
   assert.equal(existsSync(join(store.framesDir, record.id, '1.png')), true);
 });
 
-test('R05: update accepts only role, note and label and bumps the revision', t => {
+test('R05: audio songs persist original bytes and probe metadata without image derivatives', t => {
+  const root = tempDir(t);
+  const store = makeStore(root);
+  const bytes = wavBytes();
+
+  const record = store.add({
+    bytes,
+    filename: '../../theme.mp3',
+    meta: {
+      role: 'song',
+      note: 'main theme',
+      durationSec: 42.5,
+      codec: 'pcm_s16le',
+      sampleRate: 44100,
+      channels: 2,
+      thumb: Buffer.from('not a real thumbnail'),
+      frames: [{ index: 0, atSec: 1, bytes: pngBytes() }],
+    },
+  });
+
+  assert.equal(record.kind, 'audio');
+  assert.equal(record.mime, 'audio/wav');
+  assert.equal(record.ext, 'wav');
+  assert.equal(record.file, `${record.id}.wav`);
+  assert.equal(record.label, 'theme.mp3');
+  assert.equal(record.role, 'song');
+  assert.equal(record.usage, 'reference');
+  assert.equal(record.rightsAsserted, true);
+  assert.equal(record.durationSec, 42.5);
+  assert.equal(record.codec, 'pcm_s16le');
+  assert.equal(record.sampleRate, 44100);
+  assert.equal(record.channels, 2);
+  assert.equal('width' in record, false);
+  assert.equal('height' in record, false);
+  assert.deepEqual(record.frames, []);
+  assert.equal(existsSync(join(store.thumbsDir, `${record.id}.jpg`)), false);
+  assert.equal(existsSync(join(store.framesDir, record.id)), false);
+  assert.deepEqual(readFileSync(join(store.filesDir, record.file)), bytes);
+
+  assert.deepEqual(makeStore(root).get(record.id), record);
+  const duplicate = makeStore(root).add({
+    bytes: Buffer.from(bytes),
+    filename: 'copy.wav',
+    meta: { role: 'other', durationSec: 1 },
+  });
+  assert.equal(duplicate.id, record.id);
+  assert.equal(duplicate.role, 'song');
+  assert.equal(makeStore(root).list().length, 1);
+  assert.deepEqual(filesIn(store.filesDir), [record.file]);
+
+  assert.throws(
+    () => makeStore(root).add({ bytes: wavBytes(1), filename: 'unknown.wav', meta: { role: 'song' } }),
+    error => error instanceof ReferenceStoreError && error.code === 'INVALID_DURATION' && error.field === 'durationSec',
+  );
+  assert.equal(makeStore(root).update(record.id, { usage: 'editorial' }).usage, 'editorial');
+});
+
+test('R05: update accepts role, note, label and explicit usage and bumps the revision', t => {
   const root = tempDir(t);
   const store = makeStore(root);
   const created = store.add({
@@ -195,12 +272,14 @@ test('R05: update accepts only role, note and label and bumps the revision', t =
 
   const updated = store.update(created.id, {
     role: 'palette',
+    usage: 'editorial',
     note: '  use on every scene  ',
     label: '  Warm texture  ',
   });
 
   assert.equal(updated.id, created.id);
   assert.equal(updated.role, 'palette');
+  assert.equal(updated.usage, 'editorial');
   assert.equal(updated.note, 'use on every scene');
   assert.equal(updated.label, 'Warm texture');
   assert.equal(updated.revision, created.revision + 1);
@@ -224,6 +303,41 @@ test('R05: update accepts only role, note and label and bumps the revision', t =
     error => error instanceof ReferenceStoreError && error.code === 'NOT_FOUND',
   );
   assert.equal(store.get(created.id).revision, 2);
+});
+
+test('R05: uploads stay reference-only and legacy records normalise their usage', t => {
+  const root = tempDir(t);
+  const store = makeStore(root);
+  const created = store.add({
+    bytes: pngBytes(),
+    filename: 'legacy.png',
+    meta: { usage: 'editorial', width: 4, height: 3 },
+  });
+  assert.equal(created.usage, 'reference', 'upload metadata cannot opt into editorial usage');
+
+  const state = JSON.parse(readFileSync(store.statePath, 'utf8'));
+  delete state.references[0].usage;
+  delete state.references[0].rightsAsserted;
+  writeFileSync(store.statePath, JSON.stringify(state));
+  const legacy = makeStore(root).get(created.id);
+  assert.equal(legacy.usage, 'reference');
+  assert.equal(legacy.rightsAsserted, true, 'legacy uploads were rights-gated by the HTTP route');
+  assert.equal(makeStore(root).update(created.id, { usage: 'editorial' }).usage, 'editorial');
+});
+
+test('R05: a record without a rights assertion cannot become editorial', t => {
+  const root = tempDir(t);
+  const store = makeStore(root);
+  const created = store.add({ bytes: pngBytes(), filename: 'private.png', meta: {} });
+  const state = JSON.parse(readFileSync(store.statePath, 'utf8'));
+  state.references[0].rightsAsserted = false;
+  writeFileSync(store.statePath, JSON.stringify(state));
+
+  assert.throws(
+    () => makeStore(root).update(created.id, { usage: 'editorial' }),
+    error => error instanceof ReferenceStoreError && error.code === 'RIGHTS_REQUIRED' && error.field === 'usage',
+  );
+  assert.equal(makeStore(root).get(created.id).usage, 'reference');
 });
 
 test('R05: remove deletes that reference only and cascades its assignments', t => {

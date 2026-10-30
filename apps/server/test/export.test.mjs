@@ -13,6 +13,7 @@ import { join } from 'node:path';
 import { createApp } from '../src/app.mjs';
 import { EXPORT_FILE_NAMES, hasWordCues, collectAssetVariantBytes, collectNarrationExtras } from '../src/export.mjs';
 import { compileTimeline } from '../../../packages/planner/dist/src/index.js';
+import { collectMockContribution } from './helpers/comfy-contribution.mjs';
 
 const TOKEN = 'test-token-0123456789abcdef';
 const repo = new URL('../../..', import.meta.url).pathname;
@@ -59,7 +60,9 @@ before(async () => {
   // writes so the seeded example's SVG assets resolve (index.mjs does the same).
   mkdirSync(join(runtime, 'packages'), { recursive: true });
   cpSync(join(repo, 'examples', 'launch-demo', 'assets'), join(runtime, 'packages', 'assets'), { recursive: true });
-  app.store.seed(JSON.parse(JSON.stringify(seed)));
+  const pkg = structuredClone(seed);
+  collectMockContribution(pkg, join(runtime, 'packages'));
+  app.store.seed(pkg);
   server = createServer(app.handler);
   await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
   port = server.address().port;
@@ -178,6 +181,7 @@ test('a second export reuses a real render only while its receipt fingerprint ma
   const pkg = structuredClone(seed);
   pkg.id = 'pkg_exportreuse01';
   pkg.revision = 1;
+  collectMockContribution(pkg, app.store.dir);
   app.store.write(pkg);
 
   // First export: no video exists, so this is the real CPU render.
@@ -222,6 +226,7 @@ test('export excludes a CC BY-NC asset and still writes captions', { timeout: 90
     source: { provider: 'openverse', landing_url: 'https://example.test/photo', title: 'A photo', creator: 'Someone' },
     license: { id: 'CC-BY-NC-4.0', blocked: true, blocked_reason: 'non-commercial licence is outside the v0.1 policy' },
   };
+  collectMockContribution(pkg, app.store.dir);
   app.store.write(pkg);
 
   // IP13: an untracked video has no receipt, so it is not reused; the export

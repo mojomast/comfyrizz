@@ -1,3 +1,22 @@
+/* Super Easy replaces the fixed advanced-editor shell, so it must restore page scroll. */
+html:has(#easy-root[data-super-easy-view]),
+body:has(#easy-root[data-super-easy-view]) {
+  height: auto;
+  min-height: 100%;
+  max-height: none;
+  overflow-x: hidden;
+  overflow-y: auto;
+}
+
+html body #easy-root[data-super-easy-view] {
+  display: flex;
+  height: auto;
+  min-height: 100vh;
+  min-height: 100dvh;
+  max-height: none;
+  overflow: visible;
+}
+
 .super-easy-progress,
 .super-easy-progress *,
 .super-easy-progress *::before,
@@ -10,7 +29,7 @@
   flex-direction: column;
   gap: var(--space-4);
   width: 100%;
-  max-width: 720px;
+  max-width: 1080px;
   margin-inline: auto;
   padding: var(--space-5);
   background: var(--bg-0);
@@ -38,7 +57,7 @@
   align-items: center;
   gap: var(--space-2);
   width: 100%;
-  max-width: 720px;
+  max-width: 1080px;
   margin-inline: auto;
   padding: var(--space-4) var(--space-5) var(--space-6);
   background: var(--bg-0);
@@ -54,6 +73,36 @@
 
 .super-easy-done-download {
   flex: 0 0 auto;
+}
+
+.super-easy-change-form {
+  flex: 1 0 100%;
+  padding: var(--space-4);
+  border: 1px solid var(--accent);
+  border-radius: var(--radius-control);
+  background: var(--bg-1);
+}
+
+.super-easy-change-form label {
+  display: block;
+  margin-bottom: var(--space-2);
+  font-weight: var(--font-weight-600);
+}
+
+.super-easy-change-row {
+  display: flex;
+  gap: var(--space-2);
+  align-items: stretch;
+}
+
+.super-easy-change-row textarea {
+  flex: 1;
+  min-width: 0;
+  resize: vertical;
+}
+
+.super-easy-change-form .hint {
+  margin: var(--space-2) 0 0;
 }
 
 .super-easy-progress-title {
@@ -109,10 +158,17 @@
   transition: width var(--transition-normal);
 }
 
+.super-easy-progress-chrome {
+  display: grid;
+  grid-template-columns: minmax(180px, 0.65fr) minmax(0, 2fr);
+  gap: var(--space-4);
+  align-items: start;
+}
+
 .super-easy-progress-stages {
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-3);
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: var(--space-2);
   margin: 0;
   padding: 0;
   list-style: none;
@@ -173,8 +229,8 @@
 
 .super-easy-progress-slots {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(120px, 1fr));
-  gap: var(--space-3);
+  grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+  gap: var(--space-2);
   margin: 0;
   padding: 0;
   list-style: none;
@@ -195,12 +251,35 @@
   border-color: var(--accent);
 }
 
+.super-easy-progress-slot-ready {
+  animation: super-easy-asset-pop 220ms ease-out both;
+}
+
+@keyframes super-easy-asset-pop {
+  from { opacity: 0; transform: translateY(8px) scale(0.97); }
+  to { opacity: 1; transform: translateY(0) scale(1); }
+}
+
+.super-easy-progress-slot-final.super-easy-progress-slot-ready {
+  grid-column: 1 / -1;
+}
+
+.super-easy-progress-slot-final .super-easy-progress-slot-media {
+  aspect-ratio: 16 / 9;
+  background: #05090d;
+}
+
+.super-easy-progress-slot-final .super-easy-progress-slot-video {
+  max-height: min(72vh, 720px);
+  object-fit: contain;
+}
+
 .super-easy-progress-slot-media {
   display: flex;
   align-items: center;
   justify-content: center;
   width: 100%;
-  aspect-ratio: 1 / 1;
+  aspect-ratio: 16 / 9;
   overflow: hidden;
   border-radius: var(--radius-control);
   background: var(--bg-2);
@@ -248,6 +327,17 @@
   margin: 0;
   color: var(--danger);
   font-size: var(--font-size-12);
+}
+
+.super-easy-progress-mode-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.super-easy-progress-mode-actions .hint {
+  margin: 0;
 }
 
 .super-easy-progress-actions:empty {
@@ -353,7 +443,8 @@
 }
 
 .super-easy-progress-reduced-motion .easy-progress-fill,
-.super-easy-progress-reduced-motion .super-easy-progress-slot-loading .super-easy-progress-slot-placeholder {
+.super-easy-progress-reduced-motion .super-easy-progress-slot-loading .super-easy-progress-slot-placeholder,
+.super-easy-progress-reduced-motion .super-easy-progress-slot-ready {
   transition: none;
   animation: none;
 }
@@ -364,7 +455,8 @@
 
 @media (prefers-reduced-motion: reduce) {
   .super-easy-progress .easy-progress-fill,
-  .super-easy-progress-slot-loading .super-easy-progress-slot-placeholder {
+  .super-easy-progress-slot-loading .super-easy-progress-slot-placeholder,
+  .super-easy-progress .super-easy-progress-slot-ready {
     transition: none;
     animation: none;
   }
@@ -380,9 +472,23 @@
   }
 }
 
+@media (max-width: 800px) {
+  .super-easy-progress-chrome {
+    grid-template-columns: 1fr;
+  }
+
+  .super-easy-progress-stages {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
 @media (max-width: 640px) {
   .super-easy-progress {
     padding: var(--space-4);
+  }
+
+  .super-easy-progress-slots {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
   .super-easy-done-actions {

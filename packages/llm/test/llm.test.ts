@@ -62,8 +62,15 @@ test('presets: three providers, OpenCode fallback key and session header', () =>
   assert.equal(oc.sessionHeader, 'x-opencode-session');
   assert.equal(oc.headers['User-Agent'], 'comfyrizz/0.1');
   assert.equal(oc.model, 'deepseek-v4.1-flash');
+  assert.equal(oc.reasoningEffort, 'low');
+  assert.equal(oc.maxTokens, 65_536);
   const custom = resolveProvider('custom', { env: {} });
   assert.equal(custom.apiKey, null);
+  assert.equal(custom.reasoningEffort, undefined);
+  const directDeepSeek = resolveProvider('custom', { env: {}, baseUrl: 'https://api.deepseek.com/v1', model: 'deepseek-flash' });
+  assert.equal(directDeepSeek.reasoningEffort, 'low');
+  assert.equal(directDeepSeek.maxTokens, 65_536);
+  assert.equal(custom.maxTokens, undefined);
   assert.throws(() => resolveProvider('openrouter', { env: {} }), /requires OPENROUTER_API_KEY/);
   assert.throws(() => resolveProvider('openrouter', { env: { OPENROUTER_API_KEY: 'secret' }, apiKey: null }), /requires/);
 });
@@ -94,9 +101,62 @@ test('streams text and usage, sends bearer + session header and keeps tools out 
   assert.equal(body.model, 'test-model');
   assert.equal(body.stream, true);
   assert.equal(body.tools.length, 1);
+  assert.equal(body.reasoning_effort, undefined);
   const noTools = await collect(createOpenAICompatibleModel(config(fetchImpl)), { ...request, tools: [] });
   assert.equal(JSON.parse(String(seen?.init.body)).tools, undefined);
   assert.ok(noTools.some(chunk => chunk.type === 'done'));
+});
+
+test('OpenCode Go DeepSeek defaults to bounded low reasoning on the wire', async () => {
+  let body: any;
+  const fetchImpl = (async (_url: string | URL | Request, init?: RequestInit) => {
+    body = JSON.parse(String(init?.body));
+    return sse([{ choices: [{ delta: { content: 'ok' }, finish_reason: 'stop' }] }]);
+  }) as typeof fetch;
+  const provider = resolveProvider('opencode-go', { env: { OPENCODE_GO_API_KEY: 'k' }, baseUrl: 'http://mock/v1' });
+  await collect(createOpenAICompatibleModel({ ...provider, fetchImpl, maxRetries: 0 }));
+  assert.equal(body.model, 'deepseek-v4.1-flash');
+  assert.equal(body.reasoning_effort, 'low');
+  assert.equal(body.max_tokens, 65_536);
+});
+
+test('direct DeepSeek sends the 64K output allowance with either thinking setting', async () => {
+  for (const thinking of ['enabled', 'disabled'] as const) {
+    let body: any;
+    const fetchImpl = (async (_url: string | URL | Request, init?: RequestInit) => {
+      body = JSON.parse(String(init?.body));
+      return sse([{ choices: [{ delta: { content: 'ok' }, finish_reason: 'stop' }] }]);
+    }) as typeof fetch;
+    const provider = resolveProvider('custom', { env: {}, baseUrl: 'https://api.deepseek.com/v1', model: 'deepseek-flash' });
+    await collect(createOpenAICompatibleModel({ ...provider, thinking, fetchImpl, maxRetries: 0 }));
+    assert.equal(body.max_tokens, 65_536);
+    assert.deepEqual(body.thinking, { type: thinking });
+    assert.equal(body.reasoning_effort, 'low');
+  }
+});
+
+test('truncated or interrupted streams cannot execute even valid partial tool calls', async () => {
+  for (const finish of ['length', 'insufficient_system_resource', null]) {
+    const fetchImpl = (async () => sse([
+      { choices: [{ delta: { tool_calls: [{ index: 0, id: 'c', function: { name: 'ping', arguments: '{"value":"x"}' } }] }, finish_reason: finish }] },
+      { choices: [], usage: { prompt_tokens: 5, completion_tokens: 8 } },
+    ])) as typeof fetch;
+    const chunks = await collect(createOpenAICompatibleModel(config(fetchImpl)));
+    assert.equal(chunks.some(chunk => chunk.type === 'tool_call'), false);
+    assert.ok(chunks.some(chunk => chunk.type === 'error' && chunk.code === (finish ? `finish_${finish}` : 'incomplete_tool_calls')));
+    assert.ok(chunks.some(chunk => chunk.type === 'usage' && chunk.output === 8));
+  }
+});
+
+test('DeepSeek thinking mode can be explicitly disabled on the wire', async () => {
+  let body: any;
+  const fetchImpl = (async (_url: string | URL | Request, init?: RequestInit) => {
+    body = JSON.parse(String(init?.body));
+    return sse([{ choices: [{ delta: { content: 'ok' }, finish_reason: 'stop' }] }]);
+  }) as typeof fetch;
+  const provider = resolveProvider('custom', { env: {}, baseUrl: 'http://mock/v1', model: 'deepseek-flash' });
+  await collect(createOpenAICompatibleModel({ ...provider, thinking: 'disabled', fetchImpl, maxRetries: 0 }));
+  assert.deepEqual(body.thinking, { type: 'disabled' });
 });
 
 test('assembles fragmented tool arguments and emits only a complete call', async () => {
@@ -145,6 +205,18 @@ test('malformed tool JSON is an error, not an executed call', async () => {
   const error = chunks.find(chunk => chunk.type === 'error');
   assert.equal(error?.code, 'invalid_tool_arguments');
   assert.equal((error as { toolCallId?: string }).toolCallId, 'call_bad');
+});
+
+test('one malformed call discards its entire completed batch', async () => {
+  const fetchImpl = (async () => sse([
+    { choices: [{ delta: { tool_calls: [
+      { index: 0, id: 'good', function: { name: 'ping', arguments: '{"value":"ok"}' } },
+      { index: 1, id: 'bad', function: { name: 'ping', arguments: '{"value":' } },
+    ] }, finish_reason: 'tool_calls' }] },
+  ])) as typeof fetch;
+  const chunks = await collect(createOpenAICompatibleModel(config(fetchImpl)));
+  assert.equal(chunks.some(chunk => chunk.type === 'tool_call'), false);
+  assert.ok(chunks.some(chunk => chunk.type === 'error' && chunk.code === 'invalid_tool_arguments'));
 });
 
 test('retries 429 with Retry-After, then streams', async () => {
@@ -206,7 +278,7 @@ test('wire messages distinguish absent reasoning from an explicitly empty field'
     const assistants = JSON.parse(String(init?.body)).messages.filter((m: ChatMessage) => m.role === 'assistant');
     assert.equal(Object.hasOwn(assistants[0], 'reasoning_content'), false);
     assert.equal(assistants[1].reasoning_content, '');
-    return sse([{ choices: [{ delta: { content: 'ok' } }] }]);
+    return sse([{ choices: [{ delta: { content: 'ok' }, finish_reason: 'stop' }] }]);
   }) as typeof fetch;
   for await (const _chunk of createOpenAICompatibleModel(config(fetchImpl)).stream({ ...request, messages: [
     { role: 'assistant', content: 'old reply' },

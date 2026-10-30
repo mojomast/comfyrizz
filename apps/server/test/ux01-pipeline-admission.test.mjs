@@ -14,6 +14,7 @@ import { createPipelineController } from '../src/pipeline.mjs';
 import { createPipelineAdapter } from '../src/productions/pipeline-adapter.mjs';
 import { validateAdmissionRefusal, ADMISSION_REFUSALS } from '../src/productions/contract.mjs';
 import { cleanup, makeBoundProduction, tempRuntime, ACTION_ID } from './ux01-fixture.mjs';
+import { seedMockContribution, approveMockContribution } from './helpers/comfy-contribution.mjs';
 
 const TOKEN = 'ux01-pipeline-token-0123456789';
 
@@ -42,7 +43,8 @@ async function mount(t, { runtimeDir = tempRuntime(t), bound = null } = {}) {
     providers: { available: [] },
   });
   const pkg = onePackage();
-  app.store.seed(pkg);
+  seedMockContribution(app.store, pkg);
+  approveMockContribution(app.takeStore, pkg, app.store.dir);
   const server = createServer(app.handler);
   await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
   cleanup(t, async () => { app.close(); await new Promise(resolve => server.close(resolve)); });

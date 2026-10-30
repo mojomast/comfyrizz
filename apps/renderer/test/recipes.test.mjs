@@ -300,6 +300,9 @@ test('AI2: technical-flow layout is deterministic, aspect-aware and bounded', ()
   assert.equal(portrait.portrait, true);
   assert.ok(portrait.nodes.every((node, index) => index === 0 || node.y > portrait.nodes[index - 1].y), 'portrait ranks top to bottom');
   for (const plan of [landscape, portrait]) {
+    const graphCenter = (Math.min(...plan.nodes.map(node => node.y)) + Math.max(...plan.nodes.map(node => node.y + node.h))) / 2;
+    const areaCenter = plan.area.y + plan.area.h / 2;
+    assert.ok(Math.abs(graphCenter - areaCenter) < 0.01, `${plan.portrait ? 'portrait' : 'landscape'} graph is vertically centered`);
     for (const node of plan.nodes) {
       assert.ok(node.x >= plan.area.x - 0.5 && node.y >= plan.area.y - 0.5);
       assert.ok(node.x + node.w <= plan.area.x + plan.area.w + 0.5 && node.y + node.h <= plan.area.y + plan.area.h + 0.5);

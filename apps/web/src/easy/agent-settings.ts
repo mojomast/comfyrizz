@@ -95,9 +95,11 @@ export function mountEasyAgentSettings(options: EasyAgentSettingsOptions): EasyA
     return result as T;
   }
 
-  function ensureLoaded(): Promise<EasyAgentSettingsData> {
-    if (settings) return Promise.resolve(settings);
+  function ensureLoaded(force = false): Promise<EasyAgentSettingsData> {
+    if (settings && !force) return Promise.resolve(settings);
     if (loading) return loading;
+    // A failed refresh must not leave an old active provider looking current.
+    if (force) settings = null;
     loading = json<EasyAgentSettingsData>('/api/agent/settings').then((result) => {
       settings = result;
       return result;
@@ -354,7 +356,7 @@ export function mountEasyAgentSettings(options: EasyAgentSettingsOptions): EasyA
     }
     message('Loading AI settings…');
     try {
-      const result = await ensureLoaded();
+      const result = await ensureLoaded(true);
       if (result.profiles.length === 0) {
         fill();
         message('No provider yet. Add a connection to use Ask and AI planning.');

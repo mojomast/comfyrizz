@@ -274,7 +274,7 @@ export function renderParity({ packagePath, outputPath, workDir, frames, onLog =
 
   const normalisedFullPath = join(work, 'full-normalised.mp4');
   copyFileSync(fullPath, normalisedFullPath);
-  normalizeMixLoudness(normalisedFullPath, { onLog });
+  normalizeMixLoudness(normalisedFullPath, { onLog, pkg });
   const normalisedFullAudio = probeAudio(normalisedFullPath);
 
   const incrementalWindows = audioWindows.map(window => {

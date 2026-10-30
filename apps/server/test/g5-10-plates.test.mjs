@@ -6,6 +6,7 @@
 // through a fake backend (no Google Colab, no spend) and asserts the plate lands in the package.
 import { test, after } from 'node:test';
 import assert from 'node:assert/strict';
+import { collectMockContribution, plannedContribution } from './helpers/comfy-contribution.mjs';
 import { createServer, request as httpRequest } from 'node:http';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
@@ -24,6 +25,7 @@ after(() => {
 function seedPackage() {
   const base = JSON.parse(readFileSync(join(repoRoot, 'examples', 'launch-demo', 'package.json'), 'utf8'));
   const scene = structuredClone(base.scenes.find((entry) => entry.id === 's_chart'));
+  delete scene.transitionOut;
   return {
     ...base,
     id: 'pkg_g510000000001',
@@ -66,6 +68,7 @@ function fakeBackend() {
       const applied = structuredClone(pkg);
       applied.assets = { a_x_plate: videoAsset() };
       applied.scenes = applied.scenes.map((scene) => ({ ...scene, foreground: [{ asset: 'a_x_plate', x: 0.5, y: 0.5, w: 0.6, anim: 'fade-in' }] }));
+      collectMockContribution(applied, opts.outDir);
       return {
         ok: true,
         package: applied,
@@ -85,9 +88,13 @@ test('G5-10: completeRun copies a non-upscaled plate the applied package names',
     token: TOKEN,
     runtimeDir: runtime,
     backendFactory: async () => fakeBackend(),
-    render: async () => ({ output: 'g510.mp4', bytes: 1, frames: 1, hash: 'g510' }),
+    render: async (_path, output) => {
+      writeFileSync(output, 'mock-g510-video');
+      return { output, bytes: 15, frames: 1, hash: 'g510' };
+    },
   });
   const pkg = seedPackage();
+  plannedContribution(pkg);
   app.store.seed(pkg);
   const server = createServer(app.handler);
   await new Promise((done) => server.listen(0, '127.0.0.1', done));
@@ -95,7 +102,7 @@ test('G5-10: completeRun copies a non-upscaled plate the applied package names',
     const started = await httpJson(server, 'POST', '/api/run', { backendId: 'byo-comfyui', packageId: pkg.id, budgetUnits: 0 });
     assert.equal(started.status, 200, JSON.stringify(started.json));
     const finished = await app.runs.wait(started.json.runId);
-    assert.equal(finished.status, 'done');
+    assert.equal(finished.status, 'done', finished.renderError ?? finished.error);
 
     const packageDir = dirname(app.store.path(pkg.id));
     const plate = join(packageDir, 'out', 'intermediates', 'a_x.plate.mp4');

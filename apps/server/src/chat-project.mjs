@@ -1,4 +1,5 @@
 import { mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
+import { plannedModelContribution, assertGenerationBrief, MODEL_CONTRIBUTION_MESSAGE } from '../../../packages/jobs/src/model-contribution.mjs';
 import { basename, dirname, isAbsolute, join } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { isDeepStrictEqual as equal } from 'node:util';
@@ -505,12 +506,103 @@ function applyCharacterBuild({ draft, characters, runtimeDir }) {
 const ASPECTS = { '16:9': [1920, 1080], '9:16': [1080, 1920], '1:1': [1080, 1080] };
 const DEFAULT_TRANSITION = { type: 'fade', frames: 12 };
 
+function packageAspect(pkg, fallback = '16:9') {
+  const width = Number(pkg?.format?.width);
+  const height = Number(pkg?.format?.height);
+  if (!(width > 0 && height > 0)) return fallback;
+  if (width === height) return '1:1';
+  return width < height ? '9:16' : '16:9';
+}
+
+function packageMediaType(pkg, scene) {
+  for (const item of Array.isArray(scene?.foreground) ? scene.foreground : []) {
+    const kind = pkg?.assets?.[item?.asset]?.kind;
+    if (kind === 'svg' || kind === 'vector-anim') return 'svg';
+    if (kind === 'image') return 'image';
+  }
+  return 'procedural';
+}
+
+/**
+ * Project the actual package into the draft vocabulary used by the merge and
+ * production-scope differ. This is deliberately not a conversation's
+ * `previousPlan`: an adopted package did not necessarily come from chat.
+ *
+ * Fields the package cannot represent (brief, audience and style preset) come
+ * from the new complete plan. For media that is already present, an omitted or
+ * default procedural media type must not accidentally discard user assets;
+ * an explicit change to a different non-procedural type remains a real change.
+ */
+export function chatPlanFromPackage(pkg, authored = null) {
+  const fps = Number(pkg?.format?.fps) > 0 ? Number(pkg.format.fps) : 30;
+  const authoredScenes = Array.isArray(authored?.scenes) ? authored.scenes : [];
+  const scenes = (Array.isArray(pkg?.scenes) ? pkg.scenes : []).map(scene => {
+    const draft = authoredScenes.find(candidate => candidate?.id === scene?.id) ?? null;
+    const requestedMediaType = draft?.mediaType ?? 'procedural';
+    const currentMediaType = packageMediaType(pkg, scene);
+    const mediaType = requestedMediaType === 'procedural' || requestedMediaType === currentMediaType
+      ? requestedMediaType
+      : currentMediaType;
+    const seconds = Number(scene?.preferredFrames) > 0
+      ? Number(scene.preferredFrames) / fps
+      : (Number(draft?.seconds) > 0 ? Number(draft.seconds) : 4);
+    const plates = Array.isArray(draft?.plates)
+      ? draft.plates.map((plate, index) => {
+        const media = Array.isArray(scene?.media) ? scene.media[index] : null;
+        if (!media?.procedural) return structuredClone(plate);
+        return {
+          ...structuredClone(plate),
+          mediaType: 'procedural',
+          ...(media.label !== undefined ? { label: media.label } : {}),
+          pattern: media.procedural.pattern ?? plate.pattern,
+          ...(media.procedural.seed !== undefined ? { seed: media.procedural.seed } : {}),
+          ...(media.procedural.palette !== undefined ? { palette: structuredClone(media.procedural.palette) } : {}),
+        };
+      })
+      : undefined;
+    return {
+      id: scene.id,
+      layout: scene.layout ?? draft?.layout ?? 'title',
+      headline: typeof scene?.copy?.headline === 'string' ? scene.copy.headline : '',
+      sub: typeof scene?.copy?.sub === 'string' ? scene.copy.sub : '',
+      body: typeof scene?.copy?.body === 'string' ? scene.copy.body : '',
+      items: Array.isArray(scene?.copy?.items) ? structuredClone(scene.copy.items) : [],
+      footnote: typeof scene?.copy?.footnote === 'string' ? scene.copy.footnote : '',
+      narration: typeof scene?.narration === 'string' ? scene.narration : '',
+      seconds,
+      visual: typeof scene?.notes === 'string' && scene.notes.trim()
+        ? scene.notes
+        : (draft?.visual ?? 'Keep the current scene visual.'),
+      mediaType,
+      ...(draft?.svg !== undefined ? { svg: draft.svg } : {}),
+      ...(scene?.data !== undefined && scene.data !== null ? { data: structuredClone(scene.data) } : {}),
+      ...(scene?.code !== undefined && scene.code !== null ? { code: structuredClone(scene.code) } : {}),
+      ...(plates ? { plates } : {}),
+      ...(scene?.motion !== undefined ? { motion: structuredClone(scene.motion) } : {}),
+      ...(scene?.transitionOut !== undefined ? { transitionOut: structuredClone(scene.transitionOut) } : {}),
+    };
+  });
+  return {
+    title: typeof pkg?.title === 'string' ? pkg.title : (authored?.title ?? ''),
+    brief: authored?.brief ?? '',
+    audience: authored?.audience ?? '',
+    aspect: packageAspect(pkg, authored?.aspect ?? '16:9'),
+    stylePreset: authored?.stylePreset ?? 'cinematic-dark',
+    datasets: structuredClone(pkg?.datasets ?? {}),
+    scenes,
+  };
+}
+
 /** Compile model-authored content, merging revisions into the current project. */
-export async function buildChatProject({ plan: rawPlan, previous, previousPlan, brand, runtimeDir, signal, references, characters, cast, placements, characterFiles, requestedDuration }) {
+export async function buildChatProject({ plan: rawPlan, previous, previousPlan, adoptPackage = false, brand, runtimeDir, signal, references, characters, cast, placements, characterFiles, requestedDuration }) {
   signal?.throwIfAborted();
   const plan = conversationPlanSchema.parse(rawPlan);
-  if (previous && !previousPlan) throw conflict('the last built plan is missing');
-  const baseline = previous ? conversationPlanSchema.parse(previousPlan) : undefined;
+  assertGenerationBrief(plan.brief);
+  const adopting = Boolean(previous && !previousPlan && adoptPackage);
+  if (previous && !previousPlan && !adopting) throw conflict('the last built plan is missing');
+  const baseline = previous
+    ? (adopting ? chatPlanFromPackage(previous, plan) : conversationPlanSchema.parse(previousPlan))
+    : undefined;
   const aspect = ASPECTS[plan.aspect];
   const defaults = STYLE_PRESET_DEFAULTS[plan.stylePreset];
   const pkg = previous ? structuredClone(previous) : {
@@ -544,6 +636,18 @@ export async function buildChatProject({ plan: rawPlan, previous, previousPlan, 
   const oldScenes = new Map(baseline?.scenes.map(scene => [scene.id, scene]) ?? []);
   const currentScenes = new Map(pkg.scenes?.map(scene => [scene.id, scene]) ?? []);
   const newScenes = new Map(plan.scenes.map(scene => [scene.id, scene]));
+  // Conversation plans can author stills/SVGs, not LTX/H3 plates. They must not
+  // reinterpret a video correction as a fresh hero/still scene. Clip correction
+  // tools own generation changes and their subsequent spend approval.
+  const videoScenes = previous?.scenes.filter(scene => sceneAssetIds(scene)
+    .some(id => previous.assets?.[id]?.kind === 'video')) ?? [];
+  for (const existing of videoScenes) {
+    const before = oldScenes.get(existing.id);
+    const after = newScenes.get(existing.id);
+    if (!before || !after || ['layout', 'visual', 'mediaType', 'svg', 'plates'].some(key => !equal(before[key], after[key]))) {
+      throw conflict(`video scene ${existing.id} cannot be replaced through a still/procedural plan; use the existing clip correction and review its generation plan`);
+    }
+  }
   const merged = new Map();
   const generate = new Set();
 
@@ -566,6 +670,9 @@ export async function buildChatProject({ plan: rawPlan, previous, previousPlan, 
       return;
     }
     const visualChanged = !oldPlan || ['visual', 'mediaType', 'svg', 'plates'].some(key => !equal(oldPlan[key], scene[key]));
+    if (existing?.drawing && oldPlan && visualChanged) {
+      throw new Error(`Scene ${scene.id} uses a procedural drawing; changing visual directions does not edit it. Drawing edits are not available in project chat.`);
+    }
     const platesNeeded = PLATE_LAYOUTS.has(scene.layout) && (!oldPlan || oldPlan.layout !== scene.layout || !equal(oldPlan.plates, scene.plates));
     const platesMissing = PLATE_LAYOUTS.has(scene.layout) && (!existing?.media || existing.media.length !== 2);
     const plateTypes = new Set((scene.plates ?? []).map(plate => plate.mediaType));
@@ -604,6 +711,13 @@ export async function buildChatProject({ plan: rawPlan, previous, previousPlan, 
       }
       const oldCopy = planCopy(oldPlan);
       const newCopy = planCopy(scene);
+      // Drawing scenes render their authored SVG elements instead of the usual
+      // layout/copy. Saving copy here would report success without changing a
+      // single visible pixel; the drawing itself needs a dedicated edit tool.
+      if (existing?.drawing && !equal(oldCopy, newCopy)) {
+        throw new Error(`Scene ${scene.id} uses a procedural drawing; its layout copy is not rendered. Editing drawing labels is not available in project chat.`);
+      }
+      const hadCopy = result.copy !== undefined;
       result.copy ??= {};
       const owns = (object, key) => Object.prototype.hasOwnProperty.call(object, key);
       for (const key of new Set([...Object.keys(oldCopy), ...Object.keys(newCopy)])) {
@@ -630,6 +744,7 @@ export async function buildChatProject({ plan: rawPlan, previous, previousPlan, 
           // A different existing value is a manual edit to hidden content.
         }
       }
+      if (!hadCopy && Object.keys(result.copy).length === 0) delete result.copy;
       mergeField(result, 'data', planData(oldPlan), sceneData, label('data'));
       mergeField(result, 'code', oldPlan.code, scene.code, label('code'));
       mergeMotion(result, oldPlan.motion, scene.motion, label('motion'));
@@ -739,6 +854,14 @@ export async function buildChatProject({ plan: rawPlan, previous, previousPlan, 
   if (requested) {
     const constraint = durationConstraint(requested, fps);
     pkg.duration = { mode: constraint.mode, targetFrames: constraint.requestedFrames, minFrames: constraint.minFrames, maxFrames: constraint.maxFrames };
+  } else if (previous && (previous.duration?.exact || baseline.scenes.every(scene => {
+    const current = previous.scenes.find(item => item.id === scene.id);
+    return current && current.preferredFrames === Math.round(scene.seconds * fps);
+  })) && equal(baseline.scenes.map(scene => [scene.id, scene.seconds, planTransition(scene)]),
+    plan.scenes.map(scene => [scene.id, scene.seconds, planTransition(scene)]))) {
+    // Copy-only edits retain exact duration and all existing timing constraints.
+    if (previous.duration === undefined) delete pkg.duration;
+    else pkg.duration = structuredClone(previous.duration);
   } else {
     pkg.duration = { mode: 'target', targetFrames: naturalTimeline.durationInFrames };
   }
@@ -819,5 +942,6 @@ export async function buildChatProject({ plan: rawPlan, previous, previousPlan, 
   const validation = validatePackage(draft);
   if (!validation.valid) throw new Error(`Project validation failed: ${validation.errors.slice(0, 5).map(error => `${error.path}: ${error.message}`).join('; ')}`);
   compilePackage(draft, join(runtimeDir, 'packages'));
+  if (!plannedModelContribution(draft).length) throw Object.assign(new Error(MODEL_CONTRIBUTION_MESSAGE), { status: 422, code: 'COMFY_MODEL_CONTRIBUTION_REQUIRED' });
   return draft;
 }

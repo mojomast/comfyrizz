@@ -1,7 +1,7 @@
 import { COPY, fill } from './copy.ts';
 import { escapeHtml } from './components.ts';
 import { createEasyApi } from './api.ts';
-import { createEasyStore, preserveUnsentPrompt, storageKey } from './store.ts';
+import { createEasyStore, planInputsHash, preserveUnsentPrompt, storageKey } from './store.ts';
 import { mountShell, renderShell } from './shell.ts';
 import { STEPS, stepIndex } from './steps.ts';
 import { initialRoute, nextUrl } from './router.ts';
@@ -12,7 +12,8 @@ import { STEP_MODULES } from './steps/index.ts';
 import type { EasyHost, EasyState, EasyStepContext, EasyStepModule, StepFacts, StepId } from './types.ts';
 import { getMode, setMode, subscribeMode, type Mode } from '../ui/mode.ts';
 import { writePlan } from './plan-writer.ts';
-import { resumeFacts } from './resume.ts';
+import { invalidatePlanSnapshot, requestFullPlanReview } from './steps/plan.ts';
+import { recoverProductionIdentity, restoreNarrationFit, resumeFacts } from './resume.ts';
 import { approveAndGenerate, resetPlanDecisionAnswers, retryShot } from './approve-generate.ts';
 import { runCpuGenerate } from './cpu-path.ts';
 import { levelForState } from './steps/level.ts';
@@ -24,6 +25,11 @@ import { createSuperEasySession, type SuperEasySession } from './super-easy/sess
 import type { SuperEasyHost } from './super-easy/run.ts';
 import { localStageReadings, mergeLocalStages } from './super-easy/local-stages.ts';
 import { readStages, type StagesProgress } from './super-easy/stages.ts';
+import { buildGalleryModel, type GalleryItem } from './super-easy/gallery-model.ts';
+import { createLiveAssetGallery, mergeLiveGallery } from './super-easy/live-gallery.ts';
+import { createTakesApi } from '../takes/api.ts';
+import { readSuperEasySetup, saveSuperEasySetup, type SuperEasySetup } from './super-easy/setup.ts';
+import type { SuperEasyGenerateInput } from './super-easy/mount.ts';
 import { createAskDrawer, type AskDrawerController } from './ask-drawer.ts';
 import { mountEasyAgentSettings } from './agent-settings.ts';
 import { mountProjectName, type ProjectNameController } from './project-name.ts';
@@ -32,6 +38,9 @@ import { createProcedureCapture, type ProcedureCapture } from './procedure/captu
 import { readCaptureArmed, writeCaptureArmed } from './procedure/arm.ts';
 import { renderProcedureToggle } from './procedure/toggle.ts';
 import { PROCEDURE_COPY } from './procedure/copy.ts';
+import { createSuperEasyContextAttachments } from './super-easy/context-attachments.ts';
+import { mountCorrectionShutdown } from './correction-shutdown.ts';
+import { readPlanCard } from '../productions/cards/plan-card.ts';
 
 import './easy.css';
 
@@ -62,6 +71,7 @@ export interface EasyStudioDeps {
 export function mountEasyStudio(root: HTMLElement, baseHost: EasyHost, deps: EasyStudioDeps = {}): () => void {
   const doc = root.ownerDocument;
   const view = doc.defaultView;
+  const stopCorrectionShutdown = mountCorrectionShutdown(root, baseHost.apiFetch);
   let settings: ReturnType<typeof mountEasyAgentSettings> | null = null;
   const host: EasyHost = {
     ...baseHost,
@@ -90,12 +100,24 @@ export function mountEasyStudio(root: HTMLElement, baseHost: EasyHost, deps: Eas
   let superEasySnapshot: unknown = null;
   let superEasyTicket = 0;
   let superEasySession: SuperEasySession | null = null;
+  let proposalReturnWaiting = false;
+  let proposalSaveNoticeOpen = false;
+  let narrationRecoveryChecked = false;
+  let narrationRecoveryReady = false;
   let primaryAction: () => void = () => host.openEditor();
   let cpuFlight: Promise<unknown> | null = null;
   let projectName: ProjectNameController | null = null;
   let shellSave: ShellSaveController | null = null;
   let ask: AskDrawerController | null = null;
   const procedure: ProcedureCapture = (deps.createCapture ?? createProcedureCapture)({ doc });
+  let liveGalleryItems: GalleryItem[] = [];
+  const liveGallery = createLiveAssetGallery({
+    api: createTakesApi({ apiFetch: host.apiFetch }),
+    onUpdate: (items) => {
+      liveGalleryItems = items;
+      superEasy?.render();
+    },
+  });
   let facts: StepFacts = {
     hasPackage: false,
     planApproved: false,
@@ -104,12 +126,81 @@ export function mountEasyStudio(root: HTMLElement, baseHost: EasyHost, deps: Eas
     exportCurrent: false,
   };
 
+  let conversationFlight: { generation: number; promise: Promise<string> } | null = null;
+  async function ensureEasyConversation(): Promise<string> {
+    const generation = store.generation();
+    const existing = store.get().chatId;
+    if (existing) return existing;
+    if (conversationFlight?.generation === generation) {
+      const shared = await conversationFlight.promise;
+      if (store.generation() !== generation) throw new Error('The conversation belongs to an earlier project.');
+      return shared;
+    }
+    const flight = (async () => {
+      const created = await api.createConversation();
+      if (store.generation() !== generation) throw new Error('The conversation belongs to an earlier project.');
+      const chatId = typeof created?.chatId === 'string'
+        ? created.chatId
+        : typeof created?.id === 'string'
+          ? created.id
+          : typeof created?.conversation?.id === 'string'
+            ? created.conversation.id
+            : '';
+      if (!chatId) throw new Error('The conversation did not return an id.');
+      if (store.generation() !== generation) throw new Error('The conversation belongs to an earlier project.');
+      store.patch({ chatId });
+      return chatId;
+    })();
+    const current = { generation, promise: flight };
+    conversationFlight = current;
+    try {
+      const chatId = await flight;
+      if (store.generation() !== generation) throw new Error('The conversation belongs to an earlier project.');
+      return chatId;
+    } finally {
+      if (conversationFlight === current) conversationFlight = null;
+    }
+  }
+
+  function patchSuperEasyInputs(partial: Partial<EasyState>): void {
+    const current = store.get();
+    const candidate = { ...current, ...partial };
+    const invalidate = current.plan.status === 'ready' && current.planHash !== planInputsHash(candidate);
+    store.patch({
+      ...partial,
+      ...(invalidate ? { plan: { ...current.plan, status: 'stale' as const } } : {}),
+    });
+  }
+
+  const contextAttachments = createSuperEasyContextAttachments({
+    apiFetch: (input, init) => host.apiFetch(input, init),
+    chatId: () => store.get().chatId,
+    ensureChatId: ensureEasyConversation,
+    videoType: () => store.get().videoType,
+    attachmentRevision: () => store.get().attachmentRevision,
+    generation: () => store.generation(),
+    onChange: ({ attachmentSignature, attachmentRevision }) => {
+      patchSuperEasyInputs({ attachmentSignature, attachmentRevision });
+      superEasy?.syncAttachments();
+    },
+    onStatus: () => superEasy?.syncAttachments(),
+  });
+
   settings = mountEasyAgentSettings({ apiFetch: (input, init) => host.apiFetch(input, init) });
   ask = createAskDrawer({
     root,
     state: () => store.get(),
     host,
     openSettings: () => settings?.open(),
+    onChatIdChange: (chatId) => store.patch({ chatId }),
+    onReviewPlan: (productionId) => {
+      invalidatePlanSnapshot(productionId);
+      const current = store.get();
+      store.patch({ plan: { ...current.plan, status: 'ready', error: null, errorAt: null, wordsChanged: false } });
+      requestFullPlanReview(productionId);
+      ask?.close();
+      go('plan');
+    },
     subscribe: (listener) => store.subscribe(() => listener()),
   });
 
@@ -136,6 +227,62 @@ export function mountEasyStudio(root: HTMLElement, baseHost: EasyHost, deps: Eas
   }
 
   async function loadFacts(): Promise<StepFacts> {
+    const initial = store.get();
+    let productionId = new URLSearchParams(search()).get('production') ?? initial.productionId;
+    if (!productionId && initial.packageId && !initial.idea.text.trim() && host.takesApi?.listClips) {
+      try {
+        productionId = (await host.takesApi.listClips(initial.packageId)).productionId ?? null;
+      } catch { /* An unavailable owner lookup cannot establish recovery. */ }
+    }
+    if (!narrationRecoveryChecked && productionId && initial.packageId && (!initial.productionId || initial.productionId === productionId)) {
+      narrationRecoveryChecked = true;
+      const generation = store.generation();
+      try {
+        const fit = await api.getNarrationFit(productionId);
+        const current = store.get();
+        if (generation === store.generation() && JSON.stringify(current) === JSON.stringify(initial) && !superEasySession) {
+          const restored = restoreNarrationFit(fit, host.getPackage(), productionId);
+          if (restored && (!current.idea.text.trim() || current.idea.text === restored.state.idea.text)) {
+            store.patch(restored.state);
+            ensureSuperEasySession().restoreNarrationFailure(restored.input, restored.failure);
+            narrationRecoveryReady = true;
+          } else if (fit.packageId === current.packageId && fit.packageRevision === host.getPackage()?.revision) {
+            store.patch({ productionId, generate: { status: 'error' } });
+            ensureSuperEasySession().restoreNarrationFailure({ prompt: '' }, { ok: false, code: 'CPU_FAILED', stage: 'run', retryable: false,
+              message: fit.blocked || 'The saved reviewed inputs cannot be verified against this project. Create a fresh proposal with the original source before revising narration.' });
+            narrationRecoveryReady = true;
+          }
+        }
+      } catch (error) {
+        // Older approved productions did not record narration failures. Do not
+        // turn a diagnostic or an absent render admission into an approval.
+        if ((error as { code?: string })?.code === 'NARRATION_FIT_NOT_FOUND' && new URLSearchParams(search()).has('production')) {
+          try {
+            const snapshot = await api.getProduction(productionId);
+            const card = readPlanCard(snapshot);
+            const admitted = await recoverProductionIdentity({ api, host, state: initial, productionId });
+            if (generation === store.generation() && JSON.stringify(store.get()) === JSON.stringify(initial) && !superEasySession && !admitted
+              && snapshot.production?.packageId === initial.packageId && card.status === 'ready' && card.approved && !card.stale) {
+              store.patch({ productionId, generate: { status: 'error' } });
+              ensureSuperEasySession().restoreNarrationFailure({ prompt: '' }, { ok: false, code: 'CPU_FAILED', stage: 'run', retryable: false,
+                message: 'No measured narration failure was saved for this approved production. Create a fresh proposal with the original source before revising narration.' });
+              narrationRecoveryReady = true;
+            }
+          } catch { /* Incomplete journals cannot establish recovery. */ }
+        }
+      }
+    }
+    if (productionId && initial.packageId && !initial.productionId && !initial.idea.text.trim()) {
+      const generation = store.generation();
+      try {
+        const recovered = await recoverProductionIdentity({ api, host, state: initial, productionId });
+        const current = store.get();
+        if (recovered && generation === store.generation() && current.packageId === initial.packageId
+          && !current.productionId && !current.idea.text.trim()) store.patch(recovered);
+      } catch {
+        // An incomplete or unavailable journal must not grant access.
+      }
+    }
     facts = await resumeFacts({ api, host, state: store.get() });
     return facts;
   }
@@ -162,10 +309,17 @@ export function mountEasyStudio(root: HTMLElement, baseHost: EasyHost, deps: Eas
     if (player) adoptPlayer(slot, player);
   }
 
-  function destroySuperEasy(): void {
+  function destroySuperEasy(stopSession = false): void {
     superEasyTicket += 1;
-    superEasySession?.stop();
-    superEasySession = null;
+    proposalReturnWaiting = false;
+    liveGallery.stop();
+    liveGalleryItems = [];
+    if (stopSession) {
+      superEasySession?.stop();
+      superEasySession = null;
+    }
+    // Mode switches park the session so an in-flight plan/proposal/run can be
+    // resumed. Only a new project or the final app teardown may stop it.
     superEasy?.destroy();
     superEasy = null;
   }
@@ -173,9 +327,11 @@ export function mountEasyStudio(root: HTMLElement, baseHost: EasyHost, deps: Eas
   function superEasyRunHost(): SuperEasyHost {
     return {
       adoptBuiltPackage: (body) => host.adoptBuiltPackage(body),
+      getPackage: () => host.getPackage(),
       aiSelection: () => host.aiSelection(),
       editorStore: host.editorStore,
       refreshClips: () => host.refreshClips(),
+      renderMp4: (options) => host.renderMp4(options),
       announce: (text) => shell?.setStatus(text),
       rerender: () => superEasy?.render(),
     };
@@ -186,11 +342,12 @@ export function mountEasyStudio(root: HTMLElement, baseHost: EasyHost, deps: Eas
     const create = deps.createSession ?? createSuperEasySession;
     superEasySession = create({
       api: api as never,
-      watchFetch: host.apiFetch,
+      fetchImpl: (input, init) => host.apiFetch(input, init),
       host: superEasyRunHost(),
       store: {
         get: () => store.get(),
         patch: (partial) => store.patch(partial),
+        generation: () => store.generation(),
       },
       go: () => {},
       onProgress: (_html, snapshot) => {
@@ -225,22 +382,116 @@ export function mountEasyStudio(root: HTMLElement, baseHost: EasyHost, deps: Eas
     await procedure.start({ title });
   }
 
-  async function onSuperEasyGenerate(input: { prompt: string; compute: 'cpu'; capture?: boolean }): Promise<void> {
+  async function openSuperEasySetup(): Promise<void> {
+    const { openDialog, confirmDialog } = await import('./dialog.ts');
+    const { renderCompute, mountCompute, computeBlockReason } = await import('./compute-choice.ts');
+    const saved = readSuperEasySetup();
+    let draft: SuperEasySetup = { ...saved, confirmed: false };
+    let status: any = null;
+    const hostId = `super-easy-setup-${Date.now()}`;
+    const opener = root.querySelector<HTMLElement>('[data-super-easy-setup]');
+    const computeHtml = renderCompute({ compute: draft.compute, spendCap: draft.spendCap, colabStatus: status, soFarText: 'This cap is saved for later one-prompt runs; no spending approval is needed for each run.', idPrefix: hostId });
+    const pending = openDialog({
+      title: 'Set up your video maker',
+      bodyHtml: `<p>Connect once. Future prompts will use these choices without another approval.</p><div id="${hostId}">${computeHtml}</div><button type="button" class="btn btn-secondary" data-super-easy-ai-setup>Connect AI agent</button><p class="hint">API keys and Hugging Face tokens stay on this server. Your credit cap is saved, not your credentials.</p>`,
+      actions: [{ label: 'Cancel', value: 'cancel', kind: 'secondary' }, { label: 'Save setup', value: 'save', kind: 'primary' }],
+      opener,
+    });
+    const setupRoot = doc.getElementById(hostId);
+    const paint = () => {
+      if (setupRoot) setupRoot.innerHTML = renderCompute({ compute: draft.compute, spendCap: draft.spendCap, colabStatus: status, soFarText: 'This cap is saved for later one-prompt runs; no spending approval is needed for each run.', idPrefix: hostId });
+    };
+    const unmount = setupRoot ? mountCompute(setupRoot, {
+      apiFetch: host.apiFetch,
+      colabStatus: async () => {
+        const response = await host.apiFetch('/api/colab/status');
+        return response.ok ? response.json() : null;
+      },
+      onChange: patch => {
+        const computeChanged = patch.compute !== undefined && patch.compute !== draft.compute;
+        draft = { ...draft, ...patch, spendCap: patch.spendCap === null ? Number.NaN : (patch.spendCap ?? draft.spendCap) };
+        if (computeChanged) paint();
+      },
+      onStatus: next => { status = next; paint(); },
+      idPrefix: hostId,
+    }) : () => {};
+    void (async () => {
+      try {
+        const response = await host.apiFetch('/api/colab/status');
+        status = response.ok ? await response.json() : null;
+      } catch { status = null; }
+      if (setupRoot?.isConnected) paint();
+    })();
+    opener?.ownerDocument.querySelector('[data-super-easy-ai-setup]')?.addEventListener('click', () => { void settings?.open(); }, { once: true });
+    const choice = await pending;
+    unmount();
+    if (choice !== 'save') return;
+    if (draft.compute === 'colab') {
+      try {
+        const selection = await settings?.selection();
+        if (!selection || selection.provider === 'none') throw new Error('Connect an AI agent first.');
+      } catch {
+        await settings?.open();
+        return;
+      }
+      const reason = computeBlockReason(draft, status);
+      if (reason) {
+        const retry = await confirmDialog({ title: 'Finish the connection checks', text: reason, confirmLabel: 'Back to setup', cancelLabel: 'Close', opener });
+        if (retry) await openSuperEasySetup();
+        return;
+      }
+      const approved = await confirmDialog({
+        title: 'Use Google Colab automatically?',
+        text: `Each new video can use up to ${draft.spendCap} Google Colab credits. You will not be asked again for each run. You can change this limit in setup.`,
+        confirmLabel: 'Save and use Google Colab', cancelLabel: 'Cancel', opener,
+      });
+      if (!approved) return;
+    }
+    const setup = { ...draft, spendCap: Number.isFinite(draft.spendCap) ? draft.spendCap : saved.spendCap, confirmed: true };
+    saveSuperEasySetup(setup);
+    store.patch({ compute: setup.compute, spendCap: setup.spendCap });
+    superEasy?.render({ forceHome: true });
+  }
+
+  async function onSuperEasyGenerate(input: SuperEasyGenerateInput): Promise<void> {
+    const setup = readSuperEasySetup();
+    store.patch({ compute: input.compute, spendCap: setup.spendCap });
     const session = ensureSuperEasySession();
     const status = session.status();
     if (status === 'running' || status === 'stopping') return;
     if (input.capture) {
       await startProcedure(input.prompt);
       procedure.mark('prompt', fill(PROCEDURE_COPY.prompt, { prompt: input.prompt }));
-      procedure.mark('compute', PROCEDURE_COPY.computeCpu);
+      procedure.mark('compute', input.compute === 'colab' ? PROCEDURE_COPY.computeColab : PROCEDURE_COPY.computeCpu);
     }
     const hostedInvite = new URLSearchParams(search()).get('demo') === '1';
-    void session.generate({ prompt: input.prompt, compute: hostedInvite ? 'colab' : 'cpu', ...(hostedInvite ? { hostedInvite: true } : {}) });
+    void session.generate({
+      prompt: input.prompt,
+      compute: hostedInvite ? 'colab' : input.compute,
+      ...(hostedInvite ? { hostedInvite: true } : {}),
+      ...(input.lengthS === undefined ? {} : { lengthS: input.lengthS }),
+      motionModel: input.motionModel,
+      ...(input.deepSeekNoThinking ? { deepSeekNoThinking: true } : {}),
+      ...(input.videoType ? { videoType: input.videoType } : {}),
+      ...(input.songTrim ? { songTrim: { ...input.songTrim } } : {}),
+      ...(input.lyricsStyle !== undefined || input.lyricsLrc !== undefined ? {
+        lyricsStyle: input.lyricsStyle ?? 'off',
+        lyricsLrc: input.lyricsLrc ?? '',
+      } : {}),
+      ...(input.conversationId ? { conversationId: input.conversationId } : {}),
+      ...(input.attachmentSignature ? {
+        attachmentSignature: input.attachmentSignature,
+        ...(input.attachmentRevision === undefined ? {} : { attachmentRevision: input.attachmentRevision }),
+      } : {}),
+      setupConfirmed: input.setupConfirmed,
+      proposalOnly: true,
+    });
   }
 
   function refreshSuperEasySnapshot(): void {
-    const productionId = store.get().productionId;
+    const { productionId, packageId } = store.get();
     if (!productionId) return;
+    if (packageId) liveGallery.start(packageId);
     const ticket = ++superEasyTicket;
     void api.getProduction(productionId).then((snapshot) => {
       if (ticket !== superEasyTicket) return;
@@ -257,9 +508,34 @@ export function mountEasyStudio(root: HTMLElement, baseHost: EasyHost, deps: Eas
     return mergeLocalStages(readStages(snapshot), localStageReadings({
       phase,
       failed: session?.failure() != null,
+      narrationFailed: Boolean(session?.failure()?.narrationRevision),
       pkg: host.getPackage(),
       packageId: store.get().packageId,
     }));
+  }
+
+  async function approveSuperEasyProposal(): Promise<void> {
+    if (proposalSaveNoticeOpen) return;
+    const session = superEasySession;
+    const ticket = superEasyTicket;
+    const result = await session?.approveProposal();
+    if (!result || result.ok || !session?.proposal() || !superEasy || session !== superEasySession || ticket !== superEasyTicket) return;
+    // A blocked save keeps the proposal parked. Only a later save notification
+    // or normal return may refresh it; this approval gesture never does.
+    proposalReturnWaiting = true;
+    proposalSaveNoticeOpen = true;
+    try {
+      const { openDialog } = await import('./dialog.ts');
+      if (!superEasy || session !== superEasySession || ticket !== superEasyTicket) return;
+      await openDialog({
+        title: 'Waiting for editor save',
+        bodyHtml: `<p>${escapeHtml(result.message)}</p>`,
+        actions: [{ label: 'Back to review', value: 'close', kind: 'secondary' }],
+        opener: root.querySelector<HTMLElement>('[data-super-easy-approve-proposal]') ?? root,
+      });
+    } finally {
+      proposalSaveNoticeOpen = false;
+    }
   }
 
   /** Super Easy first paint. The player stays with its owner; only the studio adopts it. */
@@ -276,6 +552,9 @@ export function mountEasyStudio(root: HTMLElement, baseHost: EasyHost, deps: Eas
     releasePlayer();
     destroySuperEasy();
     superEasySnapshot = null;
+    // Rebuild the review only on return. Later edits must still fail the normal
+    // approval revision guard, rather than silently updating what was reviewed.
+    proposalReturnWaiting = superEasySession?.refreshProposal?.() === 'waiting';
     superEasy = mountSuperEasy({
       root,
       state: () => store.get(),
@@ -285,6 +564,62 @@ export function mountEasyStudio(root: HTMLElement, baseHost: EasyHost, deps: Eas
       }),
       snapshot: () => superEasySnapshot,
       onGenerate: (input) => onSuperEasyGenerate(input),
+      proposal: () => superEasySession?.proposal() ?? null,
+      onApproveProposal: () => { void approveSuperEasyProposal(); },
+      onReviseProposal: (note) => { void superEasySession?.reviseProposal(note); },
+      onReviseNarration: () => { void superEasySession?.reviseNarration(); },
+      onReviewEditPlan: (packageId) => {
+        const current = store.get();
+        store.patch({ plan: { ...current.plan, status: 'ready', error: null, errorAt: null, wordsChanged: false } });
+        requestFullPlanReview(current.productionId ?? 'new');
+        openStudioFromSuperEasy('plan', packageId);
+      },
+      setup: () => readSuperEasySetup(),
+      onMotionModelChange: (motionModel) => {
+        saveSuperEasySetup({ ...readSuperEasySetup(), motionModel });
+        superEasy?.render({ forceHome: true });
+      },
+      onLengthChange: (lengthS) => {
+        const current = store.get();
+        store.patch({ idea: { ...current.idea, lengthS } });
+      },
+      onAspectChange: (aspect) => {
+        const current = store.get();
+        store.patch({ idea: { ...current.idea, aspect } });
+      },
+      onVideoTypeChange: (videoType) => patchSuperEasyInputs({ videoType }),
+      onSongTrimChange: (songTrim) => patchSuperEasyInputs({ songTrim }),
+      onLyricsStyleChange: (lyricsStyle) => patchSuperEasyInputs({ lyricsStyle }),
+      onLyricsLrcChange: (lyricsLrc) => patchSuperEasyInputs({ lyricsLrc }),
+      attachments: contextAttachments,
+      previewFetch: (input, init) => host.apiFetch(input, init),
+      onFontUpload: async (file) => {
+        const chatId = await ensureEasyConversation();
+        const response = await host.apiFetch(`/api/chat/${encodeURIComponent(chatId)}/supplied-font`, {
+          method: 'POST',
+          headers: { 'content-type': 'font/ttf', 'x-filename': encodeURIComponent(file.name), 'x-rights-asserted': 'true' },
+          body: file,
+        });
+        const body = await response.json() as { error?: string; font?: { filename?: string } };
+        if (!response.ok) throw new Error(body.error || 'Font upload failed.');
+        const current = store.get();
+        patchSuperEasyInputs({ attachmentRevision: current.attachmentRevision + 1 });
+        return `${body.font?.filename || 'Font'} uploaded and will be used in the video.`;
+      },
+      onFontRemove: async () => {
+        const chatId = store.get().chatId;
+        if (!chatId) return 'No supplied font to remove.';
+        const response = await host.apiFetch(`/api/chat/${encodeURIComponent(chatId)}/supplied-font`, { method: 'DELETE' });
+        if (!response.ok) throw new Error('Font removal failed.');
+        const current = store.get();
+        patchSuperEasyInputs({ attachmentRevision: current.attachmentRevision + 1 });
+        return 'Supplied font removed for future videos.';
+      },
+      onSetup: () => { void openSuperEasySetup(); },
+      onChangeAnything: (change = '') => {
+        openStudioFromSuperEasy('review');
+        void ask?.openAsk(change);
+      },
       captureArmed: () => readCaptureArmed(search()),
       onCaptureToggle: (armed) => writeCaptureArmed(armed),
       onMoreControl: () => openStudioFromSuperEasy(),
@@ -293,10 +628,14 @@ export function mountEasyStudio(root: HTMLElement, baseHost: EasyHost, deps: Eas
       onRetry: () => {
         void superEasySession?.retry();
       },
+      onRecoverDownloadedOutputs: () => { void superEasySession?.recoverDownloadedOutputs?.(); },
       onReview: (packageId) => openStudioFromSuperEasy('review', packageId),
       onExport: (packageId) => openStudioFromSuperEasy('export', packageId),
       stages: (snapshot) => superEasyStages(snapshot),
+      gallery: (snapshot) => mergeLiveGallery(buildGalleryModel(snapshot), liveGalleryItems),
       onMakeAnother: () => {
+        superEasySession?.stop();
+        superEasySession = null;
         resetPlanDecisionAnswers();
         store.startNew();
       },
@@ -376,12 +715,19 @@ export function mountEasyStudio(root: HTMLElement, baseHost: EasyHost, deps: Eas
         snapshot = null;
       }
     }
-    const message = await approveAndGenerate(store.get(), {
-      api: api as never,
-      store,
-      snapshot,
-      go: (step) => go(step),
-    });
+    let message: string | undefined;
+    try {
+      message = await approveAndGenerate(store.get(), {
+        api: api as never,
+        store,
+        snapshot,
+        go: (step) => go(step),
+      });
+    } catch (error) {
+      message = error instanceof Error && error.message.trim() !== '' && error.message !== 'OFFLINE'
+        ? error.message
+        : COPY.plan.approveFailed;
+    }
     if (typeof message === 'string' && message) {
       procedure.fail(message);
       shell?.alert(message);
@@ -429,7 +775,7 @@ export function mountEasyStudio(root: HTMLElement, baseHost: EasyHost, deps: Eas
       go,
       rerender: () => showStep(currentStep),
       dialogs: {},
-      writePlan: () => writePlan(store.get(), { api, host, store }),
+      writePlan: () => writePlan(store.get(), { api, host, store }, { persistIteration: true }),
       approveAndGenerate: () => approveFromStudio(),
       retryShot: async (shotId, chip) => {
         const pending = await retryShot(store.get(), { api: api as never, store, go: (step) => go(step) }, shotId, chip);
@@ -493,7 +839,8 @@ export function mountEasyStudio(root: HTMLElement, baseHost: EasyHost, deps: Eas
     showStep(step);
   }
 
-  function makeItSimple(): void {
+  function makeItSimple(event?: Event): void {
+    event?.preventDefault();
     setPreferStudio(false);
     const url = escapeToHome(search());
     view?.history?.pushState({}, '', url === '' ? './' : url);
@@ -506,7 +853,10 @@ export function mountEasyStudio(root: HTMLElement, baseHost: EasyHost, deps: Eas
 
   function startNewVideo(event: Event): void {
     event.preventDefault();
+    superEasySession?.stop();
+    superEasySession = null;
     resetPlanDecisionAnswers();
+    contextAttachments.reset();
     store.startNew();
     refreshVideoName();
     go('idea');
@@ -528,7 +878,7 @@ export function mountEasyStudio(root: HTMLElement, baseHost: EasyHost, deps: Eas
     stopStep();
     stopStepper();
     releasePlayer();
-    destroySuperEasy();
+    destroySuperEasy(true);
     root.innerHTML = renderHomeScreen([]);
     bindMakeItSimple();
     bindNewVideo();
@@ -590,6 +940,7 @@ export function mountEasyStudio(root: HTMLElement, baseHost: EasyHost, deps: Eas
       onSettings: () => { void settings?.open(); },
       onOpenEditor: () => host.openEditor(),
     });
+    bindMakeItSimple();
     const nameHost = root.querySelector<HTMLElement>('[data-easy-name]');
     if (nameHost) {
       projectName = mountProjectName(nameHost, {
@@ -610,10 +961,22 @@ export function mountEasyStudio(root: HTMLElement, baseHost: EasyHost, deps: Eas
     showStep(route.step);
   }
 
+  function clearEditorViewForEasy(): void {
+    const params = new URLSearchParams(search().replace(/^\?/, ''));
+    if (!params.has('view')) return;
+    params.delete('view');
+    const query = params.toString();
+    const url = query ? `?${query}` : (view?.location?.pathname ?? './');
+    if (view?.history?.replaceState) view.history.replaceState({}, '', url);
+    else if (view?.history?.pushState) view.history.pushState({}, '', url);
+    else globalThis.history?.replaceState?.({}, '', url);
+  }
+
   function applyShell(mode: Mode): void {
     const html = doc.documentElement;
     const app = doc.getElementById('app');
     if (mode === 'easy') {
+      clearEditorViewForEasy();
       html.dataset.shell = 'easy';
       root.hidden = false;
       if (app) {
@@ -649,6 +1012,15 @@ export function mountEasyStudio(root: HTMLElement, baseHost: EasyHost, deps: Eas
     stopStepper = mountStepper(stepperHost, { onSelect: (next) => go(next) });
   });
   const stopMode = subscribeMode((mode) => applyShell(mode));
+  const stopProposalSave = host.editorStore?.subscribeSaveState?.(() => {
+    if (!superEasy || !proposalReturnWaiting) return;
+    const ticket = superEasyTicket;
+    // Host package subscriptions finish before reading the acknowledged save.
+    queueMicrotask(() => {
+      if (!superEasy || !proposalReturnWaiting || ticket !== superEasyTicket) return;
+      proposalReturnWaiting = superEasySession?.refreshProposal?.() === 'waiting';
+    });
+  });
   const onCaptureToggle = (event: Event): void => {
     const target = event.target as HTMLInputElement | null;
     if (superEasy || !target?.matches?.('[data-procedure-capture-toggle]')) return;
@@ -666,6 +1038,11 @@ export function mountEasyStudio(root: HTMLElement, baseHost: EasyHost, deps: Eas
     }
     // A saved editor session stays in the editor. Easy still resumes its step.
     if (getMode() !== 'easy') return;
+    const params = new URLSearchParams(search());
+    if (narrationRecoveryReady && !params.has('step')) {
+      showSuperEasy();
+      return;
+    }
     if (boot.view === 'superEasy') {
       if (!superEasy) showSuperEasy();
       return;
@@ -674,15 +1051,19 @@ export function mountEasyStudio(root: HTMLElement, baseHost: EasyHost, deps: Eas
   });
 
   return () => {
+    stopCorrectionShutdown();
     stopStore();
     stopMode();
+    stopProposalSave?.();
     root.removeEventListener('change', onCaptureToggle);
     procedure.destroy();
     view?.removeEventListener('popstate', onPopState);
     stopStep();
     stopStepper();
     releasePlayer();
-    destroySuperEasy();
+    destroySuperEasy(true);
+    contextAttachments.destroy();
+    store.invalidateSession();
     ask?.destroy();
     settings?.destroy();
     destroyShellChrome();

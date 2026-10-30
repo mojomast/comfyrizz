@@ -32,12 +32,12 @@ function planEvent(actions) {
 }
 
 function snapshot(overrides = {}, actions = [
-  { id: 'act_1', kind: 'shot.generate', targetId: 'shot_1', upperBound: 4, reuse: false },
-  { id: 'act_2', kind: 'shot.generate', targetId: 'shot_2', upperBound: 5, reuse: false },
+  { id: 'act_1', kind: 'shot.generate', targetId: 'shot_1', upperBound: 4, assetIds: ['a_1'], reuse: false },
+  { id: 'act_2', kind: 'shot.generate', targetId: 'shot_2', upperBound: 5, assetIds: ['a_2'], reuse: false },
 ]) {
   return {
     productionId: PRODUCTION_ID,
-    production: { id: PRODUCTION_ID, revision: 4 },
+    production: { id: PRODUCTION_ID, revision: 4, iteration: { policy: { level: 'balanced' }, level: 'balanced' } },
     revision: 4,
     events: [planEvent(actions)],
     gap: false,
@@ -93,7 +93,9 @@ function fakeApi(extra = {}) {
     },
     async startRun(body) {
       calls.push({ kind: 'run', body });
-      return { runId: 'run_1' };
+      assert.equal(body.expected.productionRevision, nextRevision);
+      nextRevision += 1;
+      return { runId: 'run_1', revision: nextRevision };
     },
     async colabStatus() {
       calls.push({ kind: 'colab-status' });
@@ -101,7 +103,10 @@ function fakeApi(extra = {}) {
     },
     async getProduction(id) {
       calls.push({ kind: 'refetch', id });
-      return extra.refetch ?? snapshot();
+      return extra.refetch ?? snapshot({
+        production: { id: PRODUCTION_ID, revision: nextRevision, iteration: { policy: { level: 'balanced' }, level: 'balanced' } },
+        revision: nextRevision,
+      });
     },
     async proposeEasyPlan(id, body) {
       calls.push({ kind: 'propose', id, body });
@@ -128,7 +133,7 @@ test('Google Colab call order is spend-cap, approve, dispatch, then run', async 
   assert.equal(runs.length, 2);
   assert.deepEqual(
     runs.map((call) => call.body.expected.productionRevision),
-    [7, 8],
+    [8, 9],
   );
   for (const call of runs) {
     assert.equal(call.body.budgetUnits, 12);
@@ -139,6 +144,8 @@ test('Google Colab call order is spend-cap, approve, dispatch, then run', async 
     assert.equal(call.body.authority.planId, 'plan_1');
     assert.equal(call.body.authority.planHash, PLAN_HASH);
   }
+  assert.deepEqual(runs.map(call => call.body.assets), [['a_1'], ['a_2']]);
+  assert.ok(runs.every(call => call.body.includeReady === true));
   assert.deepEqual(
     calls.filter((item) => item.kind === 'dispatch').map((item) => item.body.payload),
     [
@@ -150,6 +157,52 @@ test('Google Colab call order is spend-cap, approve, dispatch, then run', async 
   assert.equal(spend.ceiling, 12);
   assert.deepEqual(spend.expected, { productionRevision: 4 });
   assert.equal(calls.find((item) => item.kind === 'approve').command.expected.productionRevision, 5);
+});
+
+test('chat correction approval dispatches the server-owned take without a second run request', async () => {
+  const store = memoryStore();
+  const { api, calls } = fakeApi();
+  await approveAndGenerate(store.get(), { api, store, snapshot: snapshot({}, [{
+    id: 'act_1', kind: 'shot.generate', targetId: 'shot_1', upperBound: 4,
+    assetIds: ['a_1'], executor: 'chat-correction-take', reuse: false,
+  }]) });
+  assert.deepEqual(kinds(calls), ['spend-cap', 'approve', 'dispatch']);
+});
+
+test('final mode starts one whole-production run and reports its id', async () => {
+  const store = memoryStore();
+  const { api, calls } = fakeApi();
+  const started = [];
+  await approveAndGenerate(store.get(), {
+    api,
+    store,
+    snapshot: snapshot({}, [{ id: 'act_super_easy_final', kind: 'final', upperBound: 9, reuse: false }]),
+  }, {
+    runMode: 'final',
+    onRunStarted(runId, response) {
+      started.push({ runId, response });
+    },
+  });
+  assert.deepEqual(kinds(calls), ['spend-cap', 'approve', 'dispatch', 'run']);
+  const run = calls.find(call => call.kind === 'run').body;
+  assert.equal(run.mode, 'final');
+  assert.equal(run.authority.actionId, 'act_super_easy_final');
+  assert.equal(started.length, 1);
+  assert.equal(started[0].runId, 'run_1');
+});
+
+test('final mode never fakes a paid run for zero-cost actions', async () => {
+  const store = memoryStore();
+  const { api, calls } = fakeApi();
+  await approveAndGenerate(store.get(), {
+    api,
+    store,
+    snapshot: snapshot({ production: { id: PRODUCTION_ID, revision: 4 } }, [
+      { id: 'act_free', kind: 'audition', engine: 'kokoro', upperBound: 1, reuse: false },
+      { id: 'act_zero', kind: 'final', upperBound: 0, reuse: false },
+    ]),
+  }, { runMode: 'final' });
+  assert.deepEqual(kinds(calls), ['spend-cap', 'approve']);
 });
 
 test('a stale card refetches, marks the plan stale, and does not dispatch', async () => {

@@ -273,6 +273,22 @@ test('a video card shows its duration badge and uses the label as alt text', () 
   assert.equal(formatDuration(3661), '1:01:01');
 });
 
+test('an audio card shows song role and duration without a fake image', () => {
+  const song = reference('ref_song', {
+    kind: 'audio', label: 'Master.mp3', role: 'song', durationSec: 212.5,
+    thumbUrl: '/api/chat/chat_abc/references/ref_song/thumb',
+  });
+  const html = renderReferencePanel({
+    references: [song], assignments: [], pending: [], questions: {}, message: '', messageError: false, loading: false,
+  });
+  assert.match(html, /ref-thumb-audio[^>]*>Audio</u);
+  assert.match(html, /data-duration="3:33"/u);
+  assert.match(html, /Audio · 3:33/u);
+  assert.match(html, /<option value="song" selected>Song<\/option>/u);
+  assert.doesNotMatch(html, /<img/iu);
+  assert.doesNotMatch(html, /data-ref-thumb=/u);
+});
+
 test('the agent question badge and upload errors render with escaped user text', () => {
   const dirty = reference('ref_x', {
     label: '<img src=x onerror="alert(1)">',
@@ -321,11 +337,15 @@ test('the drop zone is a keyboard-operable button and the picker accepts multipl
   assert.match(html, /<input class="ref-file-input" data-ref-file type="file" multiple hidden accept="/);
   assert.ok(ACCEPT_ATTRIBUTE.includes('image/png'));
   assert.ok(ACCEPT_ATTRIBUTE.includes('video/mp4'));
+  assert.ok(ACCEPT_ATTRIBUTE.includes('audio/wav'));
+  assert.ok(ACCEPT_ATTRIBUTE.includes('audio/mpeg'));
 });
 
 test('client pre-check mirrors the server limits and rejects unsafe types', () => {
   assert.equal(LIMITS.imageMaxBytes, 20 * MB);
   assert.equal(LIMITS.videoMaxBytes, 200 * MB);
+  assert.equal(LIMITS.audioMaxBytes, 100 * MB);
+  assert.equal(LIMITS.audioMaxSeconds, 300);
   assert.equal(LIMITS.maxReferences, 24);
   assert.equal(LIMITS.noteMaxChars, 1000);
 
@@ -337,6 +357,13 @@ test('client pre-check mirrors the server limits and rejects unsafe types', () =
 
   assert.equal(precheckFile(file('ok.mp4', 'video/mp4', 200 * MB)).ok, true);
   assert.equal(precheckFile(file('big.mp4', 'video/mp4', 200 * MB + 1)).ok, false);
+  const wav = precheckFile(file('ok.wav', '', 100 * MB));
+  assert.equal(wav.ok, true);
+  assert.equal(wav.ok && wav.kind, 'audio');
+  assert.equal(wav.ok && wav.mime, 'audio/wav');
+  assert.equal(precheckFile(file('big.mp3', 'audio/mpeg', 100 * MB + 1)).ok, false);
+  assert.equal(precheckFile({ ...file('long.mp3', 'audio/mpeg', 10), durationSec: 301 }).ok, false);
+  assert.equal(precheckFile({ ...file('trimmed.mp3', 'audio/mpeg', 10), durationSec: 300 }).ok, true);
   assert.equal(precheckFile(file('empty.png', 'image/png', 0)).ok, false);
   assert.equal(!precheckFile(file('logo.svg', 'image/svg+xml', 10)).ok, true);
   assert.equal(!precheckFile(file('page.html', 'text/html', 10)).ok, true);

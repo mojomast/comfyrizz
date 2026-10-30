@@ -76,7 +76,8 @@ async function runApproval(run: () => Promise<string | undefined>): Promise<stri
   try {
     return recordFailure(await run());
   } catch (error) {
-    lastFailure = { message: COPY.plan.approveFailed };
+    const detail = error instanceof Error && typeof error.message === 'string' ? error.message.trim() : '';
+    lastFailure = { message: detail !== '' && detail !== 'OFFLINE' ? detail : COPY.plan.approveFailed };
     throw error;
   }
 }
@@ -87,7 +88,19 @@ export function approveButtonLabel(idle = COPY.plan.approve): string {
 
 type Go = (step: 'generate') => void;
 
-interface ApproveDeps {
+export type ApproveRunMode = 'take' | 'final';
+export type RunStartedCallback = (runId: string, response: unknown) => void | Promise<void>;
+
+export interface ApproveAndGenerateOptions {
+  /** Existing Easy Studio calls remain per-shot take runs by default. */
+  runMode?: ApproveRunMode;
+  onRunStarted?: RunStartedCallback;
+  /** Approval still happens when a server-priced plan needs no paid dispatch. */
+  dispatchActions?: boolean;
+  expectedPackageRevision?: number;
+}
+
+interface ApproveDeps extends ApproveAndGenerateOptions {
   api: {
     setSpendCap: (id: string, body: { ceiling: number | null; expected: { productionRevision: number }; commandId?: string; idempotencyKey?: string }) => Promise<unknown>;
     sendCommand: (id: string, command: unknown) => Promise<unknown>;
@@ -159,6 +172,11 @@ function runBackendId(status: { backendId?: string } | null | undefined): string
   return raw !== '' ? raw : 'colab';
 }
 
+function isPaidAction(action: PlanCard['actions'][number]): boolean {
+  if (!(typeof action.upperBound === 'number' && action.upperBound > 0)) return false;
+  return !(action.kind === 'audition' && action.engine === 'kokoro');
+}
+
 async function markStale(deps: ApproveDeps, state: EasyState): Promise<string> {
   const id = productionId(state);
   if (id) await deps.api.getProduction(id);
@@ -174,7 +192,13 @@ async function finish(deps: ApproveDeps): Promise<void> {
   deps.go?.('generate');
 }
 
-async function approveBody(state: EasyState, deps: ApproveDeps, snapshot: unknown, includeSpendCap: boolean): Promise<string | undefined> {
+async function approveBody(
+  state: EasyState,
+  deps: ApproveDeps,
+  snapshot: unknown,
+  includeSpendCap: boolean,
+  options: ApproveAndGenerateOptions,
+): Promise<string | undefined> {
   const card = readPlanCard(snapshot);
   const decisions = planDecisionAnswers(card);
   const id = productionId(state);
@@ -213,7 +237,7 @@ async function approveBody(state: EasyState, deps: ApproveDeps, snapshot: unknow
         ...built.command.payload,
         ...(Object.keys(decisions).length > 0 ? { decisions } : {}),
       },
-      expected: { productionRevision: revision },
+      expected: { productionRevision: revision, ...(options.expectedPackageRevision !== undefined ? { packageRevision: options.expectedPackageRevision } : {}) },
     };
     const approved = await sendPlanApproval(
       { sendCommand: (next) => deps.api.sendCommand(id, next) },
@@ -222,11 +246,12 @@ async function approveBody(state: EasyState, deps: ApproveDeps, snapshot: unknow
     revision = revisionOf(approved, revision);
   }
 
-  if (colab && built.ok === true) {
+  if (colab && built.ok === true && options.dispatchActions !== false) {
     const backendId = deps.productionDispatchOnly ? 'colab' : runBackendId(await deps.api.colabStatus());
-    const actions = card.actions.filter((action) => typeof action?.id === 'string' && action.id !== '');
+    const actions = card.actions.filter((action) => typeof action?.id === 'string'
+      && action.id !== '' && (options.runMode !== 'final' || isPaidAction(action)));
     if (deps.productionDispatchOnly && actions.length === 0) return 'This plan has no Google Colab work to run.';
-    const dispatched: Array<{ actionId: string; response: unknown; revision: number }> = [];
+    const dispatched: Array<{ actionId: string; assetIds: string[]; serverExecuted: boolean; response: unknown; revision: number }> = [];
     for (const action of actions) {
       const commandId = stableId('cmd_dispatch', [...identity, action.id, revision]);
       let response: unknown;
@@ -234,7 +259,7 @@ async function approveBody(state: EasyState, deps: ApproveDeps, snapshot: unknow
         response = await deps.api.dispatchAction(id, {
           commandId,
           idempotencyKey: stableId('idem_dispatch', [...identity, action.id, revision]),
-          expected: { productionRevision: revision },
+          expected: { productionRevision: revision, ...(options.expectedPackageRevision !== undefined ? { packageRevision: options.expectedPackageRevision } : {}) },
           payload: { planId: card.planId, planRevision: card.proposalRevision, actionId: action.id },
         });
       } catch (error) {
@@ -242,14 +267,28 @@ async function approveBody(state: EasyState, deps: ApproveDeps, snapshot: unknow
         response = null;
       }
       revision = revisionOf(response, revision);
-      dispatched.push({ actionId: action.id, response, revision });
+      dispatched.push({
+        actionId: action.id,
+        assetIds: Array.isArray(action.assetIds) ? action.assetIds.filter((id): id is string => typeof id === 'string' && id !== '') : [],
+        serverExecuted: action.executor === 'chat-correction-take',
+        response,
+        revision,
+      });
     }
     for (const item of deps.productionDispatchOnly ? [] : dispatched) {
+      if (item.serverExecuted) continue;
       try {
-        await deps.api.startRun({
+        // Later dispatches advance the production revision. An action's revision
+        // from dispatch time is therefore stale by the time its run starts.
+        const current = await deps.api.getProduction(id);
+        const expectedRevision = revisionOf(current, revision);
+        const started = await deps.api.startRun({
           packageId: state.packageId,
           backendId,
-          mode: 'take',
+          mode: options.runMode === 'final' ? 'final' : 'take',
+          ...(options.runMode !== 'final' && item.assetIds.length > 0
+            ? { includeReady: true, assets: item.assetIds }
+            : {}),
           budgetUnits: state.spendCap,
           authority: {
             productionId: id,
@@ -257,8 +296,15 @@ async function approveBody(state: EasyState, deps: ApproveDeps, snapshot: unknow
             planHash: card.planHash,
             actionId: item.actionId,
           },
-          expected: { productionRevision: item.revision },
+          expected: { productionRevision: expectedRevision, ...(options.expectedPackageRevision !== undefined ? { packageRevision: options.expectedPackageRevision } : {}) },
         });
+        revision = revisionOf(started, expectedRevision);
+        const runId = started && typeof started === 'object'
+          ? (started as { runId?: unknown }).runId
+          : null;
+        if (typeof runId === 'string' && runId !== '') {
+          await options.onRunStarted?.(runId, started);
+        }
       } catch (error) {
         if (!alreadyStarted(error)) throw error;
       }
@@ -270,11 +316,21 @@ async function approveBody(state: EasyState, deps: ApproveDeps, snapshot: unknow
 }
 
 /** Approve the plan on screen and, on Google Colab, dispatch each action and start its run. */
-export async function approveAndGenerate(state: EasyState, deps: ApproveDeps): Promise<string | undefined> {
+export async function approveAndGenerate(
+  state: EasyState,
+  deps: ApproveDeps,
+  options: ApproveAndGenerateOptions = {},
+): Promise<string | undefined> {
   if (locked) return COPY.plan.approving;
   locked = true;
+  const resolved: ApproveAndGenerateOptions = {
+    runMode: options.runMode ?? deps.runMode ?? 'take',
+    onRunStarted: options.onRunStarted ?? deps.onRunStarted,
+    dispatchActions: options.dispatchActions ?? deps.dispatchActions ?? true,
+    expectedPackageRevision: options.expectedPackageRevision ?? deps.expectedPackageRevision,
+  };
   try {
-    return await runApproval(() => approveBody(state, deps, deps.snapshot, true));
+    return await runApproval(() => approveBody(state, deps, deps.snapshot, true, resolved));
   } finally {
     locked = false;
   }
@@ -304,7 +360,11 @@ export async function retryShot(
       if (locked) return COPY.plan.approving;
       locked = true;
       try {
-        return await runApproval(() => approveBody(state, deps, snapshot, false));
+        return await runApproval(() => approveBody(state, deps, snapshot, false, {
+          runMode: deps.runMode ?? 'take',
+          onRunStarted: deps.onRunStarted,
+          dispatchActions: deps.dispatchActions ?? true,
+        }));
       } finally {
         locked = false;
       }

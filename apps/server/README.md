@@ -92,6 +92,11 @@ acceptable and the deterministic plan was used instead. Live SVG markup is opt-i
 `COMFYRIZZ_LIVE_SVG=1`; by default SVG assets come from the deterministic A5 stub so a live run
 stays within the client timeout.
 
+`GET /api/agent/progress?sessionId=...` exposes the live planning phase, step, elapsed time,
+first model milestones, per-model/per-tool durations and recent sanitized events. The easy planner
+polls this endpoint while `/api/agent` is pending. Prompts, reasoning text, tool arguments and
+provider credentials are excluded; schema failures retain their actionable paths and messages.
+
 ### C8: a second provider and the edit loop
 
 `/api/agent` accepts any of the three presets (`opencode-go`, `openrouter`, `custom`). The

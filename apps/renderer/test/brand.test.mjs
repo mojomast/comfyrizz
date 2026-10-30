@@ -28,10 +28,11 @@ test('B1: brandFontEntries keeps only family+file and brandFontFamily falls back
 test('B1: the renderer loads the brand fonts and typesets with the brand family', () => {
   const theme = read('theme.ts');
   assert.match(theme, /export function ensureBrandFonts/);
-  assert.match(theme, /url: staticFile\(font\.file\)/);
+  assert.match(theme, /const url = previewSources == null \? staticFile\(font\.file\) : previewSources\[font\.file\]/);
+  assert.match(theme, /if \(!url\) continue/);
   assert.match(theme, /FontFamilyContext\.Provider|FontFamilyContext = createContext/);
   const player = read('player.tsx');
-  assert.match(player, /ensureBrandFonts\(pkg\)/);
+  assert.match(player, /ensureBrandFonts\(pkg, fontSources\)/);
   assert.match(player, /FontFamilyContext\.Provider/);
   assert.match(player, /brandFontFamily\(pkg\)/);
 });

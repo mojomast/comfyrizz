@@ -191,7 +191,9 @@ test("stop fails twice, then succeeds: the VM is stopped, not abandoned", async 
   const fake = installFakeColab(dir, {
     state: { usage: "Current balance: 387.05 compute units\nUsage rate: 8.90/hr\nActive assignments: 0\n", stopFailsTimes: 2 },
   });
-  const backend = colabBackendFor({ dir, fake });
+  // Count teardown's retries, not a detached watchdog racing the 1.2 s fixture
+  // deadline under suite load. Watchdog arm/disarm has its own test below.
+  const backend = colabBackendFor({ dir, fake, options: { watchdogMinutes: 0 } });
   await backend.ensureUp({ approved: true });
 
   const teardown = await backend.teardown("done");
@@ -205,7 +207,7 @@ test("stop fails twice, then succeeds: the VM is stopped, not abandoned", async 
 test("stop that never confirms is surfaced as stop_unconfirmed, with the manual command", async () => {
   const dir = workspace();
   const fake = installFakeColab(dir, { state: { usage: "Current balance: 387.05 compute units\nUsage rate: 8.90/hr\nActive assignments: 0\n", keepAfterStop: true } });
-  const backend = colabBackendFor({ dir, fake, options: { teardownRetries: 3 } });
+  const backend = colabBackendFor({ dir, fake, options: { teardownRetries: 3, watchdogMinutes: 0 } });
   await backend.ensureUp({ approved: true });
 
   const teardown = await backend.teardown("user");

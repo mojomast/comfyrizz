@@ -1,4 +1,5 @@
 // Full-reference prompt contract, based on MiniMax's official ref-mode guide.
+import { sceneAssetPlacements } from './reachable.mjs';
 // This supports the shipped two-image / one-audio graph and a single shot/voice.
 // It is prompt conditioning, not a guarantee of composition or exact speech.
 const text = (value, name) => {
@@ -63,7 +64,7 @@ ${retention}
 
 detailed_description:
 The visual style and lighting follow the supplied references.
-[Shot 1] ${composition} ${count === 0 ? 'The setting is unoccupied throughout.' : `Exactly ${count} visible character${count === 1 ? '' : 's'} occupy the shot.`} ${camera} ${action} ${speech} Hold the resulting state through the remaining source duration of ${sourceSeconds.toFixed(3)} seconds.
+[Shot 1] At the first clear appearance of <Subject 1>, preserve this exact identity without age or design drift: ${subject}. ${composition} ${count === 0 ? 'The setting is unoccupied throughout.' : `Exactly ${count} visible character${count === 1 ? '' : 's'} occupy the shot.`} ${camera} ${action} ${speech} Hold the resulting state through the remaining source duration of ${sourceSeconds.toFixed(3)} seconds.
 
 overall_soundscape:
 ${soundscape}
@@ -74,13 +75,16 @@ N/A`;
 
 /** Check every scene use, not just the first occurrence of a reused asset. */
 export function fastH3SlotSeconds(pkg, assetId, requested) {
-  const uses = (pkg.scenes ?? []).filter(scene => scene.background?.asset === assetId);
+  const uses = (pkg.scenes ?? []).filter(scene => sceneAssetPlacements(scene, assetId).length > 0);
   const slots = uses.map(scene => {
-    if (scene.background?.speed !== undefined && scene.background.speed !== 1) {
-      throw new Error(`FastH3 ${assetId}: directed native speech/motion needs natural-speed playback`);
-    }
-    if (scene.background?.trim?.startSeconds || scene.background?.trim?.endSeconds !== undefined) {
-      throw new Error(`FastH3 ${assetId}: apply source trims after reviewing the generated performance`);
+    for (const placement of sceneAssetPlacements(scene, assetId)) {
+      const host = placement.value;
+      if (host?.speed !== undefined && host.speed !== 1) {
+        throw new Error(`FastH3 ${assetId}: directed native speech/motion needs natural-speed playback`);
+      }
+      if (host?.trim?.startSeconds || host?.trim?.endSeconds !== undefined) {
+        throw new Error(`FastH3 ${assetId}: apply source trims after reviewing the generated performance`);
+      }
     }
     return scene.preferredFrames / pkg.format?.fps;
   });

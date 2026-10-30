@@ -15,9 +15,8 @@ test('REMOTION_BROWSER wins over the platform default', () => {
   assert.equal(resolveBrowserExecutable({ REMOTION_BROWSER: '  C:\\Chrome\\chrome.exe  ' }), 'C:\\Chrome\\chrome.exe');
 });
 
-test('a platform default exists when no override is set', () => {
+test('an installed browser is used, otherwise Remotion manages its own', () => {
   const browser = resolveBrowserExecutable({});
-  assert.equal(typeof browser, 'string');
-  assert.notEqual(browser, '');
-  if (process.platform !== 'win32') assert.equal(browser, '/usr/bin/google-chrome');
+  assert.ok(browser === null || (typeof browser === 'string' && existsSync(browser)));
+  assert.notEqual(browser, '/usr/bin/google-chrome');
 });

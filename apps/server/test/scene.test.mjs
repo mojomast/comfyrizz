@@ -49,7 +49,7 @@ test('a one-scene re-render reuses every other scene segment and keeps the frame
   const server = createServer(app.handler);
   await new Promise((done) => server.listen(0, '127.0.0.1', done));
   try {
-    const first = await postSceneRender(server, { packageId: pkg.id, sceneId: 's_title' });
+    const first = await postSceneRender(server, { packageId: pkg.id, sceneId: 's_title', intent: 'draft' });
     assert.equal(first.status, 200, JSON.stringify(first.json));
     const timeline = compileTimeline(pkg);
     assert.equal(Number(first.headers['x-comfyrizz-frames']), timeline.durationInFrames);
@@ -66,7 +66,7 @@ test('a one-scene re-render reuses every other scene segment and keeps the frame
     app.store.save(pkg.id, edited, pkg.revision);
 
     // Verify the output MP4 really has the full frame count.
-    const second = await postSceneRender(server, { packageId: pkg.id, sceneId: 's_title' });
+    const second = await postSceneRender(server, { packageId: pkg.id, sceneId: 's_title', intent: 'draft' });
     assert.equal(second.status, 200, JSON.stringify(second.json));
     const output = join(runtime, 'scene.mp4');
     writeFileSync(output, second.body);

@@ -19,6 +19,8 @@ import { createByoBackend } from '../../../packages/backends/src/byo-backend.mjs
 import { installFakeColab, makeCli, settleScratchProcesses } from '../../../packages/backends/test/helpers.mjs';
 import { repoRoot } from '../../renderer/scripts/render-package-lib.mjs';
 import { compileTimeline } from '../../../packages/planner/dist/src/index.js';
+import { planJobs } from '../../../packages/jobs/src/index.mjs';
+import { assertModelContribution } from '../../../packages/jobs/src/model-contribution.mjs';
 
 const TOKEN = 'c9-token-0123456789abcdef';
 // H16/G4-1: runPackage bootstraps the VM, and bootstrap refuses (correctly, before spending anything)
@@ -55,16 +57,16 @@ after(async () => {
   assert.deepEqual(ours, [], 'a C9 run left a process behind');
 });
 
-/** A one-scene package with a single pending FLUX still, shrinking the real render to 30 frames. */
+/** A two-second visible still, including the conservative one-second entry allowance. */
 function runPackageFixture() {
   const base = JSON.parse(readFileSync(join(repoRoot, 'examples', 'data-story', 'package.json'), 'utf8'));
   const scene = structuredClone(base.scenes.find((entry) => entry.id === 's_plate'));
   scene.id = 's_plate';
-  scene.preferredFrames = 30;
+  scene.preferredFrames = 60;
   scene.transitionOut = { type: 'fade', frames: 0 };
   scene.foreground = [{ asset: 'a_data_still', x: 0.5, y: 0.5, w: 0.8, anim: 'fade-in' }];
   const asset = structuredClone(base.assets.a_data_still);
-  asset.gen.workflow_sha256 = '0'.repeat(64);
+  asset.gen.workflow_sha256 = createHash('sha256').update(readFileSync(join(repoRoot, asset.gen.workflow))).digest('hex');
   return {
     ...base,
     id: 'pkg_c9run00000001',
@@ -139,12 +141,15 @@ test('colab: brief -> package -> spend confirm -> run -> collected plate -> MP4 
   }
   const runtime = mkdtempSync(join(tmpdir(), 'comfyrizz-c9-colab-'));
   scratchRoots.push(runtime);
-  const platePath = join(runtime, 'remote', 'comfyrizz', 'out', 'assets', 'a_data_still.png');
-  mkdirSync(join(runtime, 'remote', 'comfyrizz', 'out', 'assets'), { recursive: true });
+  const platePath = join(runtime, 'remote', 'out', 'assets', 'a_data_still.png');
+  mkdirSync(join(runtime, 'remote', 'out', 'assets'), { recursive: true });
   const plate = realPlate(platePath);
+  const jobsDoc = planJobs(runPackageFixture(), { root: repoRoot });
+  writeFileSync(platePath.replace('.png', '.workflow.api.json'), readFileSync(join(repoRoot, 'workflows/flux3_klein_t2i.api.json')));
   const manifest = {
     v: 1,
     run_id: 'run_c9',
+    jobsHash: jobsDoc.hash,
     packageId: 'pkg_c9run00000001',
     complete: true,
     counts: { succeeded: 1 },
@@ -162,6 +167,7 @@ test('colab: brief -> package -> spend confirm -> run -> collected plate -> MP4 
             sha256: plate.sha256,
             bytes: plate.bytes.length,
             measured: { width: 960, height: 512 },
+            workflow_submitted: true,
           },
         ],
       },
@@ -193,10 +199,10 @@ test('colab: brief -> package -> spend confirm -> run -> collected plate -> MP4 
     const started = await httpJson(server, 'POST', '/api/run', { backendId: 'colab', packageId: pkgId, budgetUnits: 50, approved: true });
     assert.equal(started.status, 200);
     const finished = await app.runs.wait(started.json.runId);
-    assert.equal(finished.status, 'done');
+    assert.equal(finished.status, 'done', JSON.stringify(finished.result?.verification));
     assert.equal(finished.teardown.state, 'stopped', 'the VM was stopped and verified');
     const phases = finished.events.filter((event) => event.event === 'run_phase').map((event) => event.phase);
-    assert.deepEqual(phases, ['planned', 'allocating', 'up', 'bootstrapping', 'bootstrapped', 'checking_health', 'generating', 'ran', 'applied', 'gated', 'stopping', 'teardown']);
+    assert.deepEqual(phases, ['planned', 'allocating', 'up', 'bootstrapping', 'bootstrapped', 'checking_health', 'generating', 'ran', 'verified', 'verify', 'applied', 'gated', 'stopping', 'teardown']);
     assert.equal(finished.applied.length, 1);
     assert.equal(finished.applied[0].asset, 'a_data_still');
 
@@ -266,7 +272,7 @@ test('BYO: a package runs against the fake ComfyUI with no spend gate', async (t
     if (id !== 'byo-comfyui') throw new Error(`BYO test asked for backend ${id}`);
     const backend = createByoBackend({
       comfyuiUrl: opts.comfyuiUrl,
-      proxyCommand: (port) => [PYTHON, FAKE_COMFY, '--port', String(port), '--lifetime-seconds', '120'],
+      proxyCommand: (port) => [PYTHON, FAKE_COMFY, '--port', String(port), '--bytes-kind', 'image', '--lifetime-seconds', '120'],
       pythonBin: PYTHON,
       outDir: opts.outDir,
       healthTimeoutMs: 5000,
@@ -280,7 +286,10 @@ test('BYO: a package runs against the fake ComfyUI with no spend gate', async (t
     runtimeDir: runtime,
     backendFactory: factory,
     agentRunner: async () => ({ package: runPackageFixture(), svgAssets: [], live: false }),
-    render: async () => ({ output: 'byo.mp4', bytes: 10, frames: 3, hash: 'byo' }),
+    render: async (_path, output) => {
+      writeFileSync(output, 'mock-byo-video');
+      return { output, bytes: 14, frames: 60, hash: 'byo' };
+    },
   });
   const server = createServer(app.handler);
   await new Promise((done) => server.listen(0, '127.0.0.1', done));
@@ -292,8 +301,9 @@ test('BYO: a package runs against the fake ComfyUI with no spend gate', async (t
     assert.notEqual(started.json.approvalRequired, true);
     assert.equal(started.json.budget.state, 'external');
     const finished = await app.runs.wait(started.json.runId);
-    assert.equal(finished.status, 'done');
+    assert.equal(finished.status, 'done', finished.renderError ?? finished.error ?? JSON.stringify(finished.events));
     assert.ok(finished.applied.some((entry) => entry.asset === 'a_data_still'), 'the collected still was applied');
+    assertModelContribution({ pkg: app.store.read(pkgId), packageDir: app.store.dir });
   } finally {
     app.close();
     await new Promise((done) => server.close(done));
@@ -308,7 +318,7 @@ function ffprobeFrames(file) {
 }
 
 function startFakeComfy() {
-  const child = spawn(PYTHON, [FAKE_COMFY, '--port', '0', '--lifetime-seconds', '120'], { stdio: ['ignore', 'pipe', 'pipe'] });
+  const child = spawn(PYTHON, [FAKE_COMFY, '--port', '0', '--bytes-kind', 'image', '--lifetime-seconds', '120'], { stdio: ['ignore', 'pipe', 'pipe'] });
   children.push(child);
   return new Promise((resolvePromise, reject) => {
     let buffer = '';

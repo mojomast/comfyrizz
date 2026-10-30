@@ -126,6 +126,38 @@ export const MUTATIONS = [
     expect: { schemaOk: true, semantic: ["SEM_AUDIO_ASSET_NOT_READY"] },
   },
   {
+    name: "audio-music-trim-order",
+    base: "generated-first",
+    ops: [["set", "audio", { music: { asset: "a_narr", trim: { startSeconds: 2, endSeconds: 1 } } }]],
+    expect: { schemaOk: true, semantic: ["SEM_AUDIO_TRIM_INVALID"] },
+  },
+  {
+    name: "lyrics-caption-without-cues",
+    base: "generated-first",
+    ops: [["set", "audio", {
+      music: { asset: "a_narr", trim: { startSeconds: 0, endSeconds: 30 } },
+      lyricsStyle: "caption",
+      lyrics: [],
+    }]],
+    expect: { schemaOk: true, semantic: ["SEM_LYRICS_INVALID"] },
+  },
+  {
+    name: "lyrics-without-music-trim",
+    base: "generated-first",
+    ops: [["set", "audio", {
+      music: { asset: "a_narr" },
+      lyricsStyle: "caption",
+      lyrics: [{ startSeconds: 0, text: "A cue without its source window" }],
+    }]],
+    expect: { schemaOk: true, semantic: ["SEM_LYRICS_MUSIC_REQUIRED"] },
+  },
+  {
+    name: "drawing-invalid-timing",
+    base: "generated-first",
+    ops: [["set", "scenes.0.drawing", { background: "#ffffff", elements: [{ type: "path", color: "#000000", width: 4, points: [[0, 0], [100, 100]], start: 10, end: 5 }] }]],
+    expect: { schemaOk: true, semantic: ["SEM_DRAWING_TIMING"] },
+  },
+  {
     name: "audio-sfx-unknown-scene",
     base: "generated-first",
     ops: [["set", "audio", { sfx: [{ asset: "a_narr", scene: "s99" }] }]],
@@ -567,6 +599,24 @@ export const DERIVED_VALID = [
       ["set", "assets.a_cutout.cast", "c_pip"],
       ["set", "presenter", { enabled: false, portrait: "c_pip", cast: "c_pip" }],
     ],
+    expect: { schemaOk: true, semantic: [], warnings: [] },
+  },
+  {
+    name: "music-lyrics",
+    base: "generated-first",
+    ops: [["set", "audio", {
+      music: { asset: "a_narr", trim: { startSeconds: 0, endSeconds: 30 } },
+      lyricsStyle: "reel",
+      lyrics: [
+        {
+          startSeconds: 0,
+          endSeconds: 2.5,
+          text: "Two free assets",
+          words: [{ startSeconds: 0, text: "Two " }, { startSeconds: 0.5, text: "free " }, { startSeconds: 1, text: "assets" }],
+        },
+        { startSeconds: 2.5, text: "One box" },
+      ],
+    }]],
     expect: { schemaOk: true, semantic: [], warnings: [] },
   },
   {

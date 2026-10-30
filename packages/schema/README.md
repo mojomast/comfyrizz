@@ -111,7 +111,7 @@ The Python mirror is `comfyrizz_pipeline.motion_lint` (`lint_motion`, `autofix_m
 - Asset `kind`: `image | video | audio | svg | vector-anim`. `svg` and `vector-anim` are the
   procedural-vector kinds; `vector-anim` is a keyframed part driven by the Remotion frame,
   not by SMIL clocks.
-- `gen.generator`: `llm-svg | flux3-klein | ltx25 | kokoro | qwen3-tts`.
+- `gen.generator`: `llm-svg | procedural-audio | flux3-klein | ltx25 | ltx25-a2v | fasth3-omni | kokoro | qwen3-tts`.
 - `gen.sanitizer_version` + `gen.render_check` are **required** for `llm-svg` assets, and a
   `ready` `llm-svg` asset must have `render_check.ok === true` (A5's sanitize → render-check
   → auto-fix loop gate).

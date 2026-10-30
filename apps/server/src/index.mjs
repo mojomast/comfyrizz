@@ -18,6 +18,42 @@ export const DEFAULT_DEMO = 'pip-night-shift';
 /** The original bundled demo, kept as a second seeded project. */
 export const LAUNCH_DEMO = 'launch-demo';
 
+/**
+ * Node's http.Server defaults (requestTimeout 300000 ms, headersTimeout
+ * 60000 ms) cut a socket while a long /api/agent plan is still producing
+ * tokens. The planning-stress harness reads that as HTTP 0 / transport even
+ * though the provider billed the turn. Keep the window at 30 minutes by
+ * default; COMFYRIZZ_REQUEST_TIMEOUT_MS can raise it, and 0 disables it. The
+ * app's own plan/repair deadlines still stop genuinely stuck work, and normal
+ * shutdown is unchanged because closeAllConnections() ignores this window.
+ */
+export const DEFAULT_REQUEST_TIMEOUT_MS = 30 * 60 * 1000;
+const DEFAULT_HEADERS_TIMEOUT_MS = 60 * 1000;
+
+/**
+ * Resolve the agent socket window from the environment. Invalid or negative
+ * values fall back to the default instead of silently disabling the guard;
+ * an explicit 0 disables requestTimeout.
+ */
+export function agentRequestTimeoutMs(env = process.env) {
+  const raw = env?.COMFYRIZZ_REQUEST_TIMEOUT_MS;
+  if (raw === undefined || raw === null || raw === '') return DEFAULT_REQUEST_TIMEOUT_MS;
+  const value = Number(raw);
+  if (!Number.isInteger(value) || value < 0) return DEFAULT_REQUEST_TIMEOUT_MS;
+  return value;
+}
+
+/** Apply the long-turn request window to a freshly created http.Server. */
+export function configureServerTimeouts(server, env = process.env) {
+  if (!server || typeof server !== 'object') throw new Error('server is required');
+  const requestTimeout = agentRequestTimeoutMs(env);
+  server.requestTimeout = requestTimeout;
+  server.headersTimeout = requestTimeout === 0
+    ? DEFAULT_HEADERS_TIMEOUT_MS
+    : Math.min(DEFAULT_HEADERS_TIMEOUT_MS, requestTimeout);
+  return server;
+}
+
 const PACKAGE_ID_RE = /^[A-Za-z0-9_.-]+$/;
 
 /**
@@ -113,7 +149,7 @@ export function seedProjects(options = {}) {
 
 async function startServer() {
   const port = Number(process.env.COMFYRIZZ_PORT ?? 4319);
-  const host = process.env.COMFYRIZZ_HOST || '127.0.0.1';
+  const host = process.env.COMFYRIZZ_HOST ?? '127.0.0.1';
   const runtimeDir = process.env.COMFYRIZZ_RUNTIME ?? join(repoRoot, 'apps', 'server', '.runtime');
   mkdirSync(runtimeDir, { recursive: true });
 
@@ -166,6 +202,7 @@ async function startServer() {
     });
     privateAdminServer.listen(privateAdminPort, '127.0.0.1');
   }
+  configureServerTimeouts(server, process.env);
   server.listen(port, host, () => {
     console.log('Comfyrizz local server');
     if (process.env.COMFYRIZZ_HOSTED_INVITES === '1') console.log(`  listen http://${host}:${port}/`);

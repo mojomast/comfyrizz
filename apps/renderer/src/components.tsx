@@ -5,7 +5,7 @@ import { useGeneratedAssets, type InlineAsset } from './generated-assets-context
 
 export { GeneratedAssetsProvider, type InlineAsset } from './generated-assets-context';
 import { COPY_LIMITS, SAFE_AREA, TYPE_SCALE, color, palette, textColors, useFontFamily } from './theme';
-import { proceduralStyle } from './background-model.js';
+import { proceduralStyle, readableMediaScrim } from './background-model.js';
 import { statLines } from './stat-model.js';
 import { chartSeries } from './chart-model.js';
 import { LowerThird, MediaFill, MediaPanel, MissingMediaPlaceholder, Scrim, isRenderableMedia, resolveSceneMedia, type MediaSidecar } from './media';
@@ -24,7 +24,7 @@ import { resolveRecipe } from './recipes/model.js';
 import { cueDiagnostic, sceneCuePlan } from './recipes/cues.js';
 import { listRowBoxes } from './recipes/geometry.js';
 import { sketchAnnotations, sketchPaths } from './recipes/sketch.js';
-import { activeGroupAt, kineticPlan, kineticWordState } from './recipes/kinetic.js';
+import { activeGroupAt, kineticPlan, kineticWords, kineticWordState } from './recipes/kinetic.js';
 
 /* ------------------------------------------------------------------ *
  * Motion: the eased entry tokens live in ./motion (MS1). Every layout uses
@@ -71,7 +71,7 @@ function ProceduralBackground({ pattern, seed, colors }: { pattern: string; seed
     const blobs = random.slice(0, 5).map((value, index) => ({
       x: 10 + value * 80,
       y: 15 + random[index + 5] * 70,
-      size: 34 + random[(index + 3) % 12] * 28,
+      size: 22 + random[(index + 3) % 12] * 18,
       tone: [accent, mid, soft][index % 3],
     }));
     return (
@@ -87,7 +87,7 @@ function ProceduralBackground({ pattern, seed, colors }: { pattern: string; seed
               height: `${blob.size}%`,
               transform: 'translate(-50%, -50%)',
               borderRadius: '50%',
-              background: `radial-gradient(closest-side, ${blob.tone}66, transparent)`,
+              background: `radial-gradient(closest-side, ${blob.tone}24, transparent)`,
             }}
           />
         ))}
@@ -123,7 +123,7 @@ function Background({ scene, pkg, media }: { scene: Scene; pkg: PackageV1; media
           {...(background?.speed !== undefined ? { speed: background.speed } : {})}
           {...(background?.trim ? { trim: background.trim } : {})}
         />
-        <Scrim opacity={resolved.scrim} />
+        <Scrim opacity={readableMediaScrim(scene, resolved.scrim)} />
       </>
     );
   }
@@ -167,6 +167,7 @@ function VectorAsset({ assetId, frame, entry }: { assetId: string; frame: number
 
 function Foreground({ scene, pkg, frame }: { scene: Scene; pkg: PackageV1; frame: number }) {
   const { durationInFrames } = useVideoConfig();
+  const fullBleedMedia = (scene.foreground ?? []).some(item => item.frame !== 'pip' && (item.w ?? 0.4) >= 0.95 && isRenderableMedia(pkg.assets?.[item.asset]));
   return (
     <>
       {(scene.foreground ?? []).map((item, index) => {
@@ -205,6 +206,7 @@ function Foreground({ scene, pkg, frame }: { scene: Scene; pkg: PackageV1; frame
           </div>
         );
       })}
+      {fullBleedMedia ? <Scrim opacity={readableMediaScrim(scene, scene.background?.scrim ?? 0)} zIndex={6} /> : null}
     </>
   );
 }
@@ -344,38 +346,40 @@ function AnimatedHeadline({
     const accent = palette(pkg)[2];
     return (
       <div
-        style={{ ...style, display: 'block', lineHeight: style?.lineHeight ?? 1.06 }}
+        style={{ ...style, whiteSpace: 'pre-wrap', display: 'block', lineHeight: style?.lineHeight ?? 1.06 }}
         data-recipe="kinetic"
         data-cue-source={cuePlan.source}
         data-cue-fallback={cuePlan.fallback ? 'true' : 'false'}
       >
+        {content.match(/^\s*/)?.[0]}
         {plan.words.map(word => {
           const state = kineticWordState({ word, frame, fps, activeGroup });
           return (
-            <span
-              key={`${word.text}-${word.index}`}
-              style={{
-                display: 'inline-block',
-                overflow: 'hidden',
-                verticalAlign: 'top',
-                marginRight: word.trailing ? '0.24em' : 0,
-                paddingBottom: '0.08em',
-                marginBottom: '-0.08em',
-              }}
-            >
+            <React.Fragment key={`${word.text}-${word.index}`}>
               <span
                 style={{
                   display: 'inline-block',
-                  opacity: state.opacity,
-                  transform: `translateY(${state.translateYPercent}%) scale(${state.scale})`,
-                  transformOrigin: 'left bottom',
-                  color: state.active ? accent : undefined,
-                  textShadow: state.active ? `0 0 32px ${accent}55` : undefined,
+                  overflow: 'hidden',
+                  verticalAlign: 'top',
+                  paddingBottom: '0.08em',
+                  marginBottom: '-0.08em',
                 }}
               >
-                {word.text}
+                <span
+                  style={{
+                    display: 'inline-block',
+                    opacity: state.opacity,
+                    transform: `translateY(${state.translateYPercent}%) scale(${state.scale})`,
+                    transformOrigin: 'left bottom',
+                    color: state.active ? accent : undefined,
+                    textShadow: state.active ? `0 0 32px ${accent}55` : undefined,
+                  }}
+                >
+                  {word.text}
+                </span>
               </span>
-            </span>
+              {word.trailing}
+            </React.Fragment>
           );
         })}
       </div>
@@ -384,17 +388,22 @@ function AnimatedHeadline({
 
   if (entry === 'waterfall') {
     const plan = waterfallPlan(content, highlight);
+    const tokens = kineticWords(content);
     return (
-      <div style={{ ...style, display: 'flex', flexWrap: 'wrap', gap: '0 0.28em', alignItems: 'baseline' }}>
+      <div style={{ ...style, whiteSpace: 'pre-wrap' }}>
+        {content.match(/^\s*/)?.[0]}
         {plan.map((word, index) => {
           const anim = waterfallEntry({ frame, fps, index, anchor: word.anchor, delay, distance: dist });
           const inner = word.highlight
             ? <HighlightBand scene={scene} pkg={pkg} frame={frame} fps={fps}>{word.word}</HighlightBand>
             : word.word;
           return (
-            <span key={`${word.word}-${index}`} style={{ display: 'inline-block', opacity: anim.opacity, transform: `translateY(${anim.translateY}px) rotate(${anim.rotate}deg)` }}>
-              {inner}
-            </span>
+            <React.Fragment key={`${word.word}-${index}`}>
+              <span style={{ display: 'inline-block', opacity: anim.opacity, transform: `translateY(${anim.translateY}px) rotate(${anim.rotate}deg)` }}>
+                {inner}
+              </span>
+              {tokens[index]?.trailing}
+            </React.Fragment>
           );
         })}
       </div>
@@ -402,7 +411,9 @@ function AnimatedHeadline({
   }
 
   let anim: React.CSSProperties;
-  if (entry === 'maskRise') {
+  if (entry === 'none') {
+    anim = { opacity: 1 };
+  } else if (entry === 'maskRise') {
     const rise = maskRise({ frame, fps, delay, duration: duration + 4 });
     anim = { opacity: rise.opacity, transform: `translateY(${rise.translateYPercent}%) rotate(${rise.rotate}deg)` };
   } else if (entry === 'pop') {
@@ -420,12 +431,12 @@ function AnimatedHeadline({
 
   if (entry === 'maskRise') {
     return (
-      <div style={{ overflow: 'hidden', ...style }}>
+      <div style={{ overflow: 'hidden', ...style, whiteSpace: 'pre-wrap' }}>
         <div style={anim}>{body}</div>
       </div>
     );
   }
-  return <div style={{ ...style, ...anim }}>{body}</div>;
+  return <div style={{ ...style, ...anim, whiteSpace: 'pre-wrap' }}>{body}</div>;
 }
 
 /** A stat value that counts up when `motion.entry` is `countUp`, else springs in as before. */
@@ -477,7 +488,7 @@ function TitleLayout({ scene, pkg, frame, media }: LayoutProps) {
       <BrandLogo pkg={pkg} />
       <div style={{ position: 'relative', zIndex: 7, display: 'flex', flexDirection: 'column', gap: 26, alignItems: 'center' }}>
         <Kicker text={copy.kicker} />
-        <AnimatedHeadline scene={scene} pkg={pkg} frame={frame} text={copy.headline} delay={2} duration={22} style={{ fontSize: outro ? TYPE_SCALE.headlineLg : TYPE_SCALE.headlineXl, fontWeight: 800, letterSpacing: -2 }} />
+        <AnimatedHeadline scene={scene} pkg={pkg} frame={frame} text={copy.headline} delay={2} duration={22} style={{ fontSize: scene.headline_size ?? (outro ? TYPE_SCALE.headlineLg : TYPE_SCALE.headlineXl), ...(scene.headline_size !== undefined ? { lineHeight: 1.05 } : {}), fontWeight: 800, letterSpacing: -2 }} />
         {copy.sub ? (
           <div style={{ fontSize: TYPE_SCALE.sub, color: text.muted, maxWidth: 1100, opacity: sub.opacity, transform: `translateY(${sub.translateY}px)` }}>{copy.sub}</div>
         ) : null}
@@ -585,6 +596,7 @@ function StatLayout({ scene, pkg, frame, media }: LayoutProps) {
       <div style={{ position: 'relative', zIndex: 7, display: 'flex', flexDirection: 'column', justifyContent: 'center', height: '100%', padding: `0 ${SAFE_AREA.x}px`, gap: 18 }}>
         <Kicker text={lines.kicker} />
         <StatNumber scene={scene} frame={frame} fps={fps} value={value} style={{ fontSize: TYPE_SCALE.stat, fontWeight: 800, letterSpacing: -6, lineHeight: 1, color: colors[2] }} />
+        {!copy.body && first?.label && copy.sub !== first.label ? <div style={{ fontSize: TYPE_SCALE.sub, color: text.primary }}>{first.label}</div> : null}
         {copy.sub ? <div style={{ fontSize: TYPE_SCALE.sub, color: text.primary, opacity: 0.85 }}>{copy.sub}</div> : null}
         {lines.sourceLine ? <div style={{ fontSize: TYPE_SCALE.footnote, color: text.primary, opacity: 0.6 }}>{lines.sourceLine}</div> : null}
         {lines.footnote ? <div style={{ fontSize: TYPE_SCALE.footnote, color: text.primary, opacity: 0.6 }}>{lines.footnote}</div> : null}

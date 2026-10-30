@@ -1,12 +1,13 @@
 // U2 slice 2: the guided sign-in is a relay - live lines, redacted, and no credential anywhere.
 import assert from "node:assert/strict";
-import { mkdtempSync } from "node:fs";
+import { mkdtempSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 import { EventEmitter } from "node:events";
 
 import { startColabAuth } from "../src/colab-auth.mjs";
+import { EventLog } from "../src/events.mjs";
 
 /** A child that prints the given lines and exits with the given code, like `colab auth` does. */
 function fakeChild(lines, { code = 0, error = null } = {}) {
@@ -40,6 +41,34 @@ test("the sign-in relays the CLI's own lines and reports how it ended (U2)", asy
   assert.match(result.lines[1], /accounts\.google\.com/, "the URL the user has to open survives");
 });
 
+test("OAuth lines are published to the existing event log before auth closes", async () => {
+  const child = new EventEmitter();
+  child.stdout = new EventEmitter();
+  child.stderr = new EventEmitter();
+  child.kill = () => {};
+  const events = new EventLog();
+  let closed = false;
+  const pending = startColabAuth({
+    home: "/nonexistent-home",
+    spawn: () => child,
+    onLine: line => events.publish({ type: "colab_auth", line }),
+  });
+  child.stdout.emit("data", "Open https://accounts.google.com/o/oauth2/auth?client_id=abc\n");
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(closed, false);
+  const published = events.replay(0);
+  assert.equal(published.length, 1);
+  assert.equal(published[0].type, "colab_auth");
+  assert.match(published[0].line, /accounts\.google\.com/);
+  const appSource = readFileSync(new URL("../src/app.mjs", import.meta.url), "utf8");
+  assert.match(appSource, /events\?\.publish\?\.\(\{ type: 'colab_auth', line \}\)/);
+  child.emit("close", 0);
+  closed = true;
+  const outcome = await pending;
+  assert.equal(outcome.ok, true);
+  events.closeAll();
+});
+
 test("a credential in a URL never reaches the card or a log (U2)", async () => {
   const result = await startColabAuth({
     home: "/nonexistent-home",
@@ -58,6 +87,37 @@ test("a credential in a URL never reaches the card or a log (U2)", async () => {
   // is that the value is gone, not which of the two redactors got there first
   assert.match(text, /colab-runtime-proxy-token=\[REDACTED\]/);
   assert.match(text, /\[redacted\]|access_token=\[REDACTED\]/i);
+});
+
+test("chunk boundaries cannot split a credential past the redactor", async () => {
+  const child = new EventEmitter();
+  child.stdout = new EventEmitter();
+  child.stderr = new EventEmitter();
+  child.kill = () => {};
+  const pending = startColabAuth({ home: "/nonexistent-home", spawn: () => child });
+  child.stdout.emit("data", "Visit https://colab.example/auth?token=SECRET");
+  child.stdout.emit("data", "VALUE\n");
+  child.emit("close", 0);
+  const result = await pending;
+  assert.equal(result.lines.join("\n").includes("SECRETVALUE"), false);
+  assert.match(result.lines[0], /token=\[REDACTED\]|token=\[redacted\]/i);
+});
+
+test("a second tab gets a busy error instead of starting a duplicate OAuth process", async () => {
+  const child = new EventEmitter();
+  child.stdout = new EventEmitter();
+  child.stderr = new EventEmitter();
+  child.kill = () => {};
+  const first = startColabAuth({ home: "/nonexistent-home", spawn: () => child });
+  const second = await startColabAuth({
+    home: "/nonexistent-home",
+    spawn: () => { throw new Error("must not spawn twice"); },
+  });
+  assert.equal(second.ok, false);
+  assert.equal(second.busy, true);
+  assert.match(second.reason, /already in progress/);
+  child.emit("close", 0);
+  assert.equal((await first).ok, true);
 });
 
 test("a sign-in that fails says so instead of looking successful (U2)", async () => {

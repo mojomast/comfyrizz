@@ -27,6 +27,9 @@ export interface AskDrawerOptions {
   /** Store subscription used to tear the chat down when the project changes. */
   subscribe?: (listener: () => void) => () => void;
   createChat?: typeof createProjectChat;
+  /** Persist the server-returned binding (normally `store.patch({ chatId })`). */
+  onChatIdChange?: (chatId: string) => void;
+  onReviewPlan?: (productionId: string) => void;
   log?: (message: string) => void;
   onError?: (error: unknown) => void;
 }
@@ -110,12 +113,6 @@ export function createAskDrawer(options: AskDrawerOptions): AskDrawerController 
   function onClick(event: Event): void {
     const target = event.target;
     if (!(target instanceof HTMLElement) || !aside) return;
-    const build = target.closest('#project-plan-build');
-    if (build && aside.contains(build)) {
-      event.preventDefault();
-      event.stopImmediatePropagation();
-      return;
-    }
     const closeButton = target.closest('[data-easy-ask-close]');
     if (closeButton && aside.contains(closeButton)) {
       event.preventDefault();
@@ -237,19 +234,39 @@ export function createAskDrawer(options: AskDrawerOptions): AskDrawerController 
       }
       const chatHost = requiredElement<HTMLElement>('[data-easy-ask-chat]');
       const createChat = options.createChat ?? createProjectChat;
+      let liveScopeKey = scopeKey;
+      const isLiveScope = () => current === operation && askScopeKey(readScope()) === liveScopeKey;
       chat = createChat(chatHost, {
         apiFetch: (input, init) => options.host.apiFetch(input, init),
+        getAgentProgress: async (sessionId) => {
+          const response = await options.host.apiFetch(`/api/agent/progress?sessionId=${encodeURIComponent(sessionId)}`);
+          if (!response.ok) throw new Error(`Progress HTTP ${response.status}`);
+          return await response.json();
+        },
+        onReviewPlan: (productionId) => options.onReviewPlan?.(productionId),
         applyProject: (project) => {
           // A late reply from the previous project must never replace the
           // project the user switched to while the turn was in flight.
-          if (askScopeKey(readScope()) !== scopeKey) return;
+          if (!isLiveScope() || (scope.packageId && project?.package?.id !== scope.packageId)) return;
           options.host.adoptBuiltPackage(project);
+        },
+        onConversationChange: (conversation) => {
+          if (!isLiveScope() || !options.onChatIdChange) return;
+          if (scope.packageId && conversation.projectId && conversation.projectId !== scope.packageId) return;
+          const nextScope = { ...readScope(), chatId: conversation.id };
+          const nextScopeKey = askScopeKey(nextScope);
+          // store.patch() may synchronously invoke refreshScope(). Publish the
+          // new canonical key before persisting so that binding a chat id does
+          // not look like a project switch and close the drawer.
+          liveScopeKey = nextScopeKey;
+          openScope = nextScopeKey;
+          options.onChatIdChange(conversation.id);
         },
         provider: providerForChat,
         log: (message) => options.log?.(message),
         restoreSaved: false,
         ...(scope.chatId ? { initialConversationId: scope.chatId } : {}),
-        ...(scope.packageId ? { expectedPackageId: scope.packageId } : {}),
+        ...(scope.packageId ? { expectedPackageId: scope.packageId, adoptPackageId: scope.packageId } : {}),
       });
       focusComposer(prefill);
     } catch (error) {

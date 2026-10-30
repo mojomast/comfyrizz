@@ -19,5 +19,5 @@ test('C-pres: the presenter controls match the agent vocabulary', () => {
   for (const hook of ['data-presenter-scene', 'data-presenter-coverage', 'data-presenter-placement', 'data-presenter-label']) {
     assert.ok(source.includes(hook), `storyboard wires ${hook}`);
   }
-  assert.ok(source.includes("'/api/presenter/set'"), 'the toolbar posts to /api/presenter/set');
+  assert.ok(source.includes("type: 'SetPresenter'"), 'the toolbar uses the canonical presenter command and autosave');
 });

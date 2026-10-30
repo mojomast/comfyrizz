@@ -28,6 +28,8 @@ import { spawnSync } from "node:child_process";
 
 import { applyManifestToPackage, checkJobsDoc, planJobs } from "../../jobs/src/index.mjs";
 import { validatePackage } from "../../schema/src/index.mjs";
+import { fingerprintJobFiles } from "./approved-files.mjs";
+import { recordGenerationReceipts } from '../../jobs/src/model-contribution.mjs';
 
 /** Where the python side of the pipeline lives (the quality gate runs from here). */
 const PIPELINE_DIR = fileURLToPath(new URL("../../../pipeline-py/", import.meta.url));
@@ -269,6 +271,8 @@ export async function runPackage(backend, pkg, opts = {}) {
     assets = null,
     apply = true,
     dryRun = false,
+    expectedJobs = null,
+    expectedFiles = null,
     teardownMode = "done",
   gateCommand = DEFAULT_GATE_COMMAND,
   } = opts;
@@ -287,6 +291,9 @@ export async function runPackage(backend, pkg, opts = {}) {
 
   // 2. plan: the same pure planner the CLI and the tests use
   const jobsDoc = planJobs(pkg, { includeReady, assets: assets || undefined });
+  if (expectedJobs !== null && JSON.stringify(jobsDoc.jobs) !== JSON.stringify(expectedJobs)) {
+    throw new Error('The generation jobs changed after approval; nothing was allocated.');
+  }
   const problems = checkJobsDoc(jobsDoc);
   if (problems.length) throw new Error(`the planned jobs are not usable: ${problems[0]}`);
   mkdirSync(workDir, { recursive: true });
@@ -303,6 +310,9 @@ export async function runPackage(backend, pkg, opts = {}) {
         `${staged.missing.map((entry) => `${entry.asset} -> ${entry.file}`).join(", ")}` +
         (packageDir ? ` (looked in ${packageDir})` : " (no packageDir was given to runPackage)"),
     );
+  }
+  if (expectedFiles !== null && JSON.stringify(fingerprintJobFiles(jobsDoc.jobs, workDir)) !== JSON.stringify(expectedFiles)) {
+    throw new Error('The generation input files changed after approval; nothing was allocated.');
   }
   const jobsFile = join(workDir, "jobs.json");
   writeFileSync(jobsFile, `${JSON.stringify(jobsDoc, null, 2)}\n`, "utf8");
@@ -436,6 +446,9 @@ export async function runPackage(backend, pkg, opts = {}) {
       }
     }
 
+    if (verification?.verified) {
+      result.generationReceipts = recordGenerationReceipts({ manifest: result.manifest, jobsDoc, outputDir: collectedDir, backend: backend.id });
+    }
     if (apply) {
       // the tag the schema accepts for the assets this run produced: the backend decides, because
       // "colab:G4" needs the session's hardware and "byo-comfyui" needs nothing (H-fix7)

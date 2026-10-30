@@ -4,6 +4,7 @@ import { createServer } from 'node:http';
 import { createHash } from 'node:crypto';
 import { execFileSync } from 'node:child_process';
 import { dirname, join } from 'node:path';
+import { tmpdir } from 'node:os';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { createApp } from '../src/app.mjs';
 import { compileTimeline } from '../../../packages/planner/dist/src/index.js';
@@ -14,7 +15,7 @@ const source = new URL('../../../examples/composition-stories/', import.meta.url
 const token = 'composition-drafts-test-token';
 
 async function setup(t) {
-  const runtimeDir = mkdtempSync('/tmp/opencode/composition-drafts-');
+  const runtimeDir = mkdtempSync(join(tmpdir(), 'composition-drafts-'));
   const pkg = JSON.parse(readFileSync(new URL('package.json', source)));
   pkg.assets.a_marker = { kind: 'image', origin: 'upload', status: 'ready', file: 'assets/marker.png',
     sha256: createHash('sha256').update('original asset').digest('hex'),
@@ -71,7 +72,7 @@ async function setup(t) {
   const request = async (route, body) => {
     const response = await fetch(base + route, { method: 'POST', headers: {
       'content-type': 'application/json', 'x-comfyrizz-token': token, origin: base,
-    }, body: JSON.stringify(body) });
+    }, body: JSON.stringify({ intent: 'draft', ...body }) });
     const text = await response.text();
     // Client consumption and the server's finish/close cleanup are independent
     // event-loop callbacks. Assert eventual cleanup, not their scheduling order.
@@ -121,7 +122,8 @@ test('draft export retains validated manifest and original assets in its archive
   assert.deepEqual(JSON.parse(execFileSync('unzip', ['-p', zip, 'compositions/manifest.json'])), { version: 1, scenes: [] });
   assert.equal(execFileSync('unzip', ['-p', zip, 'assets/marker.png'], { encoding: 'utf8' }), 'original asset');
   assert.equal(JSON.parse(execFileSync('unzip', ['-p', zip, 'package.json'])).title, 'Unsaved export');
-  assert.equal(h.calls.at(-1).dir, h.dir);
+  assert.notEqual(h.calls.at(-1).dir, h.dir, 'final export renders from an isolated delivery package');
+  assert.equal(existsSync(h.calls.at(-1).dir), false, 'delivery package is cleaned up');
   assert.equal(h.calls.at(-1).options.final, true);
   h.assertClean();
 });

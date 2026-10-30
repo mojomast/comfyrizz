@@ -1,5 +1,5 @@
 import { existsSync, statSync } from 'node:fs';
-import { extname, join, resolve, sep } from 'node:path';
+import { dirname, extname, join, resolve, sep } from 'node:path';
 import { serveStaticFile } from './static-file.mjs';
 
 const MIME = {
@@ -50,13 +50,14 @@ export function handleMedia({ request, response, url, sendJson, runtimeDir, stor
     sendJson(response, 400, { error: 'bad path' });
     return true;
   }
-  const file = safeMediaFile(join(runtimeDir, 'media', id), url.searchParams.get('path') ?? '');
+  const requestedPath = url.searchParams.get('path') ?? '';
+  const candidates = [join(runtimeDir, 'media', id), dirname(store.path(id))]
+    .map(root => safeMediaFile(root, requestedPath))
+    .filter(Boolean);
+  const file = candidates.find(candidate => existsSync(candidate) && statSync(candidate).isFile());
   if (!file) {
-    sendJson(response, 400, { error: 'bad path' });
-    return true;
-  }
-  if (!existsSync(file) || !statSync(file).isFile()) {
-    sendJson(response, 404, { error: 'not found' });
+    const validPath = candidates.length > 0;
+    sendJson(response, validPath ? 404 : 400, { error: validPath ? 'not found' : 'bad path' });
     return true;
   }
   serveStaticFile(request, response, file, {

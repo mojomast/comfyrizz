@@ -17,6 +17,7 @@
 //   illustrative numbers labelled as example data; critique scores each scene
 //   /10 and fixes only the weak ones; the judge is not the builder.
 import { existsSync, readFileSync } from 'node:fs';
+import { piRequest } from '../pi-runtime.js';
 import { dirname, join } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { STYLE_PRESETS, type StylePreset } from '../brief.js';
@@ -66,6 +67,10 @@ interface MotionLintModule {
   };
   MAX_TRANSITION_TYPES: number;
   MOTION_DEFAULTS: { energy: string; direction: string; depthDirection: string; fps: number };
+}
+
+interface AnimationCatalogueModule {
+  ANIMATION_RECIPES: readonly { id: string; layouts: readonly string[] }[];
 }
 
 export interface MotionFixInstruction {
@@ -135,7 +140,7 @@ export const STYLE_PRESET_ENERGY: Record<StylePreset, string> = {
   'editorial-flat': 'medium',
   'isometric-tech': 'medium',
   'paper-cut': 'medium',
-  'cinematic-dark': 'high',
+  'cinematic-dark': 'medium',
 };
 
 const STYLE_PRESET_ENERGY_REASON: Record<StylePreset, string> = {
@@ -144,7 +149,7 @@ const STYLE_PRESET_ENERGY_REASON: Record<StylePreset, string> = {
   'editorial-flat': 'editorial explainer',
   'isometric-tech': 'technical explainer',
   'paper-cut': 'layered explainer',
-  'cinematic-dark': 'launch or promo grade',
+  'cinematic-dark': 'cinematic grade; does not imply high-energy motion',
 };
 
 function repoRoot(): string {
@@ -207,6 +212,7 @@ for (const preset of STYLE_PRESETS) {
 }
 
 const motionLint: MotionLintModule = await import(pathToFileURL(join(schemaDir(), 'src', 'motion.mjs')).href);
+const animationCatalogue: AnimationCatalogueModule = await import(pathToFileURL(join(schemaDir(), 'src', 'animation.mjs')).href);
 
 for (const type of VOCABULARY.transitionTypes) {
   if (!motionLint.TRANSITIONS[type]) throw new Error(`schema transition ${type} has no linter duration band`);
@@ -249,6 +255,7 @@ export function motionSystemSection(): string {
     return `- ${energy}: ${types.join(', ')}`;
   });
   const bands = VOCABULARY.transitionTypes.map(type => band(type));
+  const recipeLines = animationCatalogue.ANIMATION_RECIPES.map(recipe => `- ${recipe.id}: ${recipe.layouts.join(', ')}`);
   return [
     '## Motion',
     'You pick motion parameters. You never write animation code: no Remotion, no CSS, no tweens, no springs written out as numbers. The renderer already implements every token below. Set package `motion` and each scene\'s `motion` and `transitionOut` with `storyboard.propose` and `storyboard.edit`.',
@@ -258,6 +265,22 @@ export function motionSystemSection(): string {
     '3. Beats in order.',
     '4. Motion verbs, expressed only as vocabulary tokens: counts up is entry `countUp`, draws on is entry `drawOn`, wipes in is transition `wipe`, a push is transition `push`. A slow push-in is one `zoom` in or one `push`, not a camera path.',
     `5. Final hold: the last scene stays readable for at least ${reading.finalHoldSeconds} s after it settles. Hold the final frame.`,
+    'Auto motion route (only when motion_model is auto):',
+    '- FastH3: character acting, dialogue and native sound. LTX-2.5: scenery, establishing, B-roll and camera-led shots.',
+    '- Character evidence is characterCount together with the shot subject or the action, never the composition or camera text. characterCount 0 is LTX unless the shot has dialogue or native sound.',
+    '- characterCount 1 or more with a person, a role noun (keeper, fisherman, diver) or a he/she/they subject or actor plus an acted verb (places, lifts, carries, guides, rows, reaches, kneels) is FastH3. The acted verb may sit in the subject or the action. Camera drift words never outrank a character acting.',
+    '- Reef, water, weather and other scenery nouns never override a character acting: subject "the same woman guiding the boat over the reef" with a scenery action is still FastH3, while a scenery-only shot is LTX-2.5.',
+    '- Example LTX-2.5: subject "the boat", action "scenery drifting past the hull", camera "a slow wide drift", characterCount 0.',
+    '- Example FastH3: subject "the same woman", action "she places the lantern", characterCount 1.',
+    '- Example FastH3: subject "the same woman guiding the boat over the reef", action "scenery drifting past the reef", characterCount 1.',
+    '- Example LTX-2.5: subject "the cliff", action "the camera pans left past the cottage", composition mentions a woman, characterCount 1.',
+    'Recipe by story purpose, never random variety: process or cause/effect → technical-flow; mechanism → sketch; before/after → morph or a compare layout; evidence/detail → focus; hook/chapter/conclusion → kinetic; history/profile/community → paper-cut.',
+    'Recommended recipe layouts (from the shared capability catalogue):',
+    ...recipeLines,
+    '- For a process, prefer technical-flow on list with editable items as nodes. scenes[].motion.diagram: flow | hub (connected steps or a shared hub).',
+    '- Bounded recipe fields: focus is {x,y,width,height}, normalized to the whole frame; x/y are 0..1, width/height are positive, and x + width <= 1 and y + height <= 1. morph is {from,to} using circle | square | triangle | blob only, not arbitrary media. seed is an integer 1..2147483647; intensity is 0..1.',
+    '- Timing cues: cue_phrases contains up to 6 exact phrases copied from that scene\'s narration in spoken order. Resolve them after narration timing; never invent alignment or claim estimated timing is forced alignment. Explicit scene-local cue_seconds take precedence over cue_phrases; clear stale seconds when switching to phrases.',
+    '- All meaningful text stays native, editable Remotion copy (including lower_third), never lettering baked into AI-generated pixels. Full typography requires media_only:false. media_only:true is for footage plus lower thirds/non-text decor, not full-layout typography.',
     'Vocabulary (these lists are the package schema enums; do not invent tokens):',
     `- motion.energy: ${list(VOCABULARY.energies)}. Default ${defaults.energy}.`,
     `- motion.direction, the film's one current: ${list(VOCABULARY.directions)}. Default ${defaults.direction}. Reserve up for a conclusion.`,
@@ -271,14 +294,16 @@ export function motionSystemSection(): string {
     'Numeric rules:',
     '- One focal point per frame. Decide what the viewer notices first, and do not animate a second element at the same time.',
     `- Reading hold, after the entrance settles: at least ${reading.minHoldSeconds} s, plus ${reading.perExtraWordSeconds} s for every word beyond ${reading.freeWords}. The final scene holds at least ${reading.finalHoldSeconds} s. Text that is meant to be read stays still.`,
-    `- ${budget - 1}-${budget} transition types in one film (none and cut do not count). One primary type covers most cuts; one or two accents are enough. Never a different type on every scene.`,
+    '- Hard cuts (cut, 0 frames) are the default; use another transition only when it expresses the relationship between adjacent beats. The actual final scene in scenes[] has no outgoing transition: omit transitionOut; never give it a positive-duration transition.',
+    `- If using non-cut transitions, use ${budget - 1}-${budget} transition types in one film (none and cut do not count). One primary type covers most cuts; one or two accents are enough. Never a different type on every scene.`,
     '- One current direction for ordinary next-point cuts. Do not reverse it on the next cut. up means conclusion, zoom in means deeper, zoom out means arrival.',
+    '- One expressive gesture per scene: one recipe or motion idea carries the beat; do not stack effects for variety.',
     '- One hero moment. Build to it.',
     `- Stillness before the climax: hold ${STILLNESS_BEFORE_CLIMAX.minSeconds}-${STILLNESS_BEFORE_CLIMAX.maxSeconds} s between an action and its result.`,
     '- No idle wobble. Do not bob, breathe, or float a foreground element to fill time. A plate or a procedural background may drift; the type stays still while it is read.',
     `- Exits are faster than entries (${EXIT_TO_ENTRY}).`,
     '- Do not invent numbers. A figure with no source in the brief is labelled "Example data".',
-    'Style preset → default motion.energy (use this when the brief names a look):',
+    'Style preset → fallback motion.energy (only when motion intensity is unspecified; explicit calm/restrained/gentle motion wins over any look):',
     ...presetLines,
     'Transition length at the package fps, in seconds (frames = round(seconds × fps), inside the band):',
     ...bands.map(line => `- ${line}`),
@@ -301,6 +326,8 @@ export function normalizeSceneMotion(raw: unknown): Record<string, unknown> | un
   if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return undefined;
   const src = raw as Record<string, unknown>;
   const allow: Record<string, readonly string[]> = {
+    recipe: ['sketch', 'paper-cut', 'morph', 'technical-flow', 'focus', 'kinetic'],
+    diagram: ['flow', 'hub'],
     entry: VOCABULARY.entries,
     ease: VOCABULARY.easing,
     spring: VOCABULARY.springs,
@@ -316,6 +343,39 @@ export function normalizeSceneMotion(raw: unknown): Record<string, unknown> | un
   if (typeof src.highlight === 'string') {
     const text = src.highlight.trim();
     if (text.length >= 1 && text.length <= 60) out.highlight = text;
+  }
+  if (Number.isInteger(src.seed) && Number(src.seed) >= 1 && Number(src.seed) <= 2147483647) out.seed = src.seed;
+  if (typeof src.intensity === 'number' && Number.isFinite(src.intensity) && src.intensity >= 0 && src.intensity <= 1) out.intensity = src.intensity;
+  if (Array.isArray(src.cue_phrases)) {
+    const phrases = src.cue_phrases
+      .filter((phrase): phrase is string => typeof phrase === 'string')
+      .map(phrase => phrase.trim())
+      .filter(phrase => phrase.length > 0 && phrase.length <= 600)
+      .slice(0, 6);
+    if (phrases.length > 0) out.cue_phrases = phrases;
+  }
+  if (Array.isArray(src.cue_seconds)) {
+    const seconds = src.cue_seconds
+      .filter((second): second is number => typeof second === 'number' && Number.isFinite(second) && second >= 0 && second <= 20)
+      .slice(0, 6);
+    if (seconds.length > 0) out.cue_seconds = seconds;
+  }
+  if (src.focus && typeof src.focus === 'object' && !Array.isArray(src.focus)) {
+    const focus = src.focus as Record<string, unknown>;
+    const values = ['x', 'y', 'width', 'height'].map(key => focus[key]);
+    if (values.every(value => typeof value === 'number' && Number.isFinite(value))) {
+      const [x, y, width, height] = values as number[];
+      if (x >= 0 && x <= 1 && y >= 0 && y <= 1 && width > 0 && width <= 1 && height > 0 && height <= 1 && x + width <= 1 + 1e-9 && y + height <= 1 + 1e-9) {
+        out.focus = { x, y, width, height };
+      }
+    }
+  }
+  if (src.morph && typeof src.morph === 'object' && !Array.isArray(src.morph)) {
+    const morph = src.morph as Record<string, unknown>;
+    const shapes = ['circle', 'square', 'triangle', 'blob'];
+    if (typeof morph.from === 'string' && shapes.includes(morph.from) && typeof morph.to === 'string' && shapes.includes(morph.to)) {
+      out.morph = { from: morph.from, to: morph.to };
+    }
   }
   return Object.keys(out).length > 0 ? out : undefined;
 }
@@ -596,11 +656,11 @@ export async function runMotionCritique(options: {
     sessionId: 'motion-critique',
   };
   let raw = '';
-  for await (const chunk of options.provider.stream(request)) {
+  await piRequest(options.provider, request, chunk => {
     if (chunk.type === 'text') raw += chunk.delta;
     else if (chunk.type === 'error') {
-      return { enabled: true, raw, request, rubric: parseCritiqueReply(raw || '{}', round) };
+      raw = raw || '{}';
     }
-  }
+  });
   return { enabled: true, raw, request, rubric: parseCritiqueReply(raw, round) };
 }

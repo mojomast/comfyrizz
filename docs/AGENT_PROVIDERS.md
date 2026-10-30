@@ -3,6 +3,38 @@
 Open **Agent settings** in the top bar to configure the agent. The provider and
 model used for each brief are visible beside the button.
 
+## Production runtime and output allowance
+
+**Pi 1.4 is the default production agent runtime**, covering initial planning,
+project chat, proposal/narration revisions, repairs and continuation. It uses the
+configured ComfyRizz transport for model requests, credentials, streaming, tool
+validation and usage reporting. Node.js **22.19.0+** is required. See the
+[runtime and trust-boundary reference](PI_PIPELINE_MIGRATION.md).
+
+The language-model provider is separate from ComfyUI media inference. On the
+default managed media path, ComfyRizz deploys the GPU inference stack on Google
+Colab; see [Colab automation](features/google-colab.md). Planning/revision calls
+can incur provider charges even before any Colab generation is approved.
+
+The shared preset now supplies **65,536 output tokens** for these exact routes:
+
+| Connection | Model | Default reasoning effort |
+| --- | --- | --- |
+| OpenCode Go | `deepseek-v4.1-flash` | `low` |
+| Custom, `https://api.deepseek.com/v1` | `deepseek-flash` | `low` |
+
+The limit applies with thinking enabled or disabled. Reasoning and emitted output
+share the allowance; an earlier 8,192-token thinking run exhausted it before any
+tool call. This is a ceiling, not a requirement to spend 64K tokens per turn.
+Other providers/models retain their own configuration, and specialized tasks can
+apply smaller bounds. Thinking is not universally better: choose it for the task
+and inspect latency, usage and results. The experimental Pi Title CLI also reads
+the resolved preset limit; historical trials retain their recorded 8K settings.
+
+Source: [DeepSeek Chat Completions API](https://api-docs.deepseek.com/api/create-chat-completion).
+Transport tests verify the outgoing allowance; they do not prove live provider
+acceptance or successful film production.
+
 ## OpenCode Go
 
 1. Select **OpenCode Go** in Agent settings.

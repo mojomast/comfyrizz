@@ -1,9 +1,7 @@
-// Pick the Chromium Remotion should drive. The Linux default is unchanged;
-// Windows needs one of its installed Chrome or Edge executables.
+// Pick an installed Chromium Remotion should drive. Returning null lets
+// Remotion use its managed browser instead of assuming a Linux-only path.
 import { existsSync } from 'node:fs';
 import { join } from 'node:path';
-
-const LINUX_DEFAULT = '/usr/bin/google-chrome';
 
 function windowsCandidates(env) {
   const roots = new Set([
@@ -25,6 +23,10 @@ function windowsCandidates(env) {
 export function resolveBrowserExecutable(env = process.env) {
   const configured = typeof env.REMOTION_BROWSER === 'string' ? env.REMOTION_BROWSER.trim() : '';
   if (configured !== '') return configured;
-  if (process.platform !== 'win32') return LINUX_DEFAULT;
-  return windowsCandidates(env).find((path) => existsSync(path)) ?? LINUX_DEFAULT;
+  const candidates = process.platform === 'win32'
+    ? windowsCandidates(env)
+    : process.platform === 'darwin'
+      ? ['/Applications/Google Chrome.app/Contents/MacOS/Google Chrome', '/Applications/Microsoft Edge.app/Contents/MacOS/Microsoft Edge']
+      : ['/usr/bin/google-chrome', '/usr/bin/chromium', '/usr/bin/chromium-browser'];
+  return candidates.find(path => existsSync(path)) ?? null;
 }

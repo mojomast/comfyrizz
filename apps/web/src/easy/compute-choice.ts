@@ -7,6 +7,10 @@ export interface ComputeColabStatus {
   signedIn?: boolean | null;
   installed?: boolean;
   units?: number | null;
+  /** File presence is not readiness; both access checks must have succeeded. */
+  tokenPresent?: boolean;
+  tokenReady?: boolean | null;
+  tokenChecked?: boolean;
   [key: string]: unknown;
 }
 
@@ -17,6 +21,8 @@ export interface ComputeView {
   spent?: number | string | null;
   /** The status request is still in flight; do not call it "not connected" yet. */
   checking?: boolean;
+  /** Override the approval explanation for one-time setup; normal Studio keeps its default. */
+  soFarText?: string;
   /** Keep DOM ids unique when more than one picker is mounted in the page. */
   idPrefix?: string;
 }
@@ -39,6 +45,13 @@ const CAP_ERROR_SUFFIX = 'cap-error';
 const SO_FAR_SUFFIX = 'cap-so-far';
 const NOT_CONNECTED_SUFFIX = 'not-connected';
 const CAP_SUFFIX = 'cap';
+
+export const COMPUTE_HF_NOT_READY = 'Check Hugging Face model access in Google Colab setup or choose This computer.';
+const HF_SETUP_SHORT = 'Hugging Face model access is not verified';
+
+function hfReady(status: ComputeColabStatus | null | undefined): boolean {
+  return status?.tokenChecked === true && status.tokenReady === true;
+}
 
 let connectCounter = 0;
 
@@ -68,6 +81,7 @@ export function validateCap(value: unknown): string | null {
 export function computeBlockReason(state: ComputeBlockState, colabStatus: ComputeColabStatus | null): string | null {
   if (state.compute !== 'colab') return null;
   if (colabStatus?.signedIn !== true) return COPY.compute.blockNotConnected;
+  if (!hfReady(colabStatus)) return COMPUTE_HF_NOT_READY;
   if (validateCap(state.spendCap) !== null) return COPY.compute.capError;
   return null;
 }
@@ -86,11 +100,12 @@ function option(
   return `<label class="easy-compute-card${disabled ? ' easy-is-disabled' : ''}"><input class="easy-compute-input" type="radio" name="easy-compute" value="${value}"${checkedAttribute}${disabledAttribute}${describedByAttribute} /><span class="easy-compute-title">${escapeHtml(title)}</span><span class="easy-compute-body">${escapeHtml(body)}</span></label>`;
 }
 
-export function renderCompute({ compute, colabStatus, spendCap, spent, checking = false, idPrefix = DEFAULT_ID_PREFIX }: ComputeView): string {
+export function renderCompute({ compute, colabStatus, spendCap, spent, checking = false, soFarText, idPrefix = DEFAULT_ID_PREFIX }: ComputeView): string {
   const selected: ComputeChoice = compute === 'colab' ? 'colab' : 'cpu';
   const connected = colabStatus?.signedIn === true;
+  const ready = connected && hfReady(colabStatus);
   const waiting = checking === true && colabStatus == null;
-  const colabDisabled = !connected && !waiting;
+  const colabDisabled = !ready && !waiting;
   const prefix = idPrefix || DEFAULT_ID_PREFIX;
   const notConnectedId = `${prefix}-${NOT_CONNECTED_SUFFIX}`;
   const colabDescription = waiting || colabDisabled ? notConnectedId : null;
@@ -101,7 +116,7 @@ export function renderCompute({ compute, colabStatus, spendCap, spent, checking 
   const notConnected = waiting
     ? `<div class="easy-compute-status" id="${notConnectedId}"><span>${escapeHtml(COPY.compute.checking)}</span></div>`
     : colabDisabled
-      ? `<div class="easy-compute-status" id="${notConnectedId}"><span>${escapeHtml(COPY.compute.notConnected)}</span><button type="button" class="btn btn-secondary easy-compute-connect" data-easy-compute-connect>${escapeHtml(COPY.compute.connect)}</button></div>`
+      ? `<div class="easy-compute-status" id="${notConnectedId}"><span>${escapeHtml(connected ? HF_SETUP_SHORT : COPY.compute.notConnected)}</span><button type="button" class="btn btn-secondary easy-compute-connect" data-easy-compute-connect>${escapeHtml(COPY.compute.connect)}</button></div>`
       : '';
 
   const cap = capText(spendCap);
@@ -112,7 +127,7 @@ export function renderCompute({ compute, colabStatus, spendCap, spent, checking 
   const describedBy = capError ? `${soFarId} ${capErrorId}` : soFarId;
   const capBlock =
     selected === 'colab'
-      ? `<fieldset class="easy-compute-cap"><legend class="easy-compute-cap-legend">${escapeHtml(COPY.compute.capLegend)}</legend><label class="easy-compute-cap-label" for="${capId}">${escapeHtml(COPY.compute.capLabel)}</label><div class="easy-compute-cap-row"><input id="${capId}" class="easy-compute-cap-input" name="easy-cap" type="number" min="0.5" max="500" step="0.5" inputmode="decimal" value="${escapeHtml(cap)}" aria-describedby="${describedBy}"${capError ? ' aria-invalid="true"' : ''} /><span class="easy-compute-cap-suffix">${escapeHtml(COPY.compute.capSuffix)}</span></div><p class="easy-compute-so-far" id="${soFarId}">${escapeHtml(fill(COPY.compute.soFar, { spent: spentText(spent) }))}</p>${errorBlock}</fieldset>`
+      ? `<fieldset class="easy-compute-cap"><legend class="easy-compute-cap-legend">${escapeHtml(COPY.compute.capLegend)}</legend><label class="easy-compute-cap-label" for="${capId}">${escapeHtml(COPY.compute.capLabel)}</label><div class="easy-compute-cap-row"><input id="${capId}" class="easy-compute-cap-input" name="easy-cap" type="number" min="0.5" max="500" step="0.5" inputmode="decimal" value="${escapeHtml(cap)}" aria-describedby="${describedBy}"${capError ? ' aria-invalid="true"' : ''} /><span class="easy-compute-cap-suffix">${escapeHtml(COPY.compute.capSuffix)}</span></div><p class="easy-compute-so-far" id="${soFarId}">${escapeHtml(soFarText ?? fill(COPY.compute.soFar, { spent: spentText(spent) }))}</p>${errorBlock}</fieldset>`
       : '';
 
   return `<fieldset class="easy-compute"><legend class="easy-compute-legend">${escapeHtml(COPY.compute.legend)}</legend><div class="easy-compute-grid"><div class="easy-compute-option">${option('cpu', COPY.compute.cpuTitle, COPY.compute.cpuBody, selected === 'cpu', false, null)}</div><div class="easy-compute-option">${option('colab', COPY.compute.colabTitle, COPY.compute.colabBody, selected === 'colab', colabDisabled, colabDescription)}${notConnected}</div></div></fieldset>${capBlock}`;
@@ -130,8 +145,9 @@ async function openConnectDialog(opener: HTMLElement, options: ComputeMountOptio
     opener,
   });
   const host = document.getElementById(hostId);
-  if (host) mountSettingsCard(host, options.apiFetch);
+  const unmount = host ? mountSettingsCard(host, options.apiFetch) : null;
   await result;
+  unmount?.();
   const status = await options.colabStatus();
   options.onStatus?.(status);
 }

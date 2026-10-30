@@ -11,7 +11,15 @@ import assert from 'node:assert/strict';
 import { COPY } from '../copy.ts';
 import { defaultEasyState } from '../store.ts';
 import { createExportArtifactRecord, exportArtifactStorageKey, saveExportArtifact } from '../export-artifacts.ts';
-import { step } from './export.ts';
+import { step, renderExportDone } from './export.ts';
+
+test('a saved silent narration preview is not presented as a finished video', () => {
+  const pkg = { voice: { enabled: true, engine: 'kokoro' }, scenes: [{ narration: 'A line' }], assets: {} };
+  const html = renderExportDone({ pkg, blobUrl: 'blob:preview' });
+  assert.match(html, /Preview/);
+  assert.match(html, /Narration is planned but not yet available/);
+  assert.doesNotMatch(html, /Your video is ready/);
+});
 
 class FakeElement {
   constructor(tagName, ownerDocument) {
@@ -182,6 +190,31 @@ function exportHarness({
 }
 
 const flush = () => new Promise((resolve) => setTimeout(resolve, 0));
+
+test('export duration follows current video metadata and ignores stale events', async () => {
+  const harness = exportHarness({ revision: 5, blob: new Blob(['mp4']) });
+  const stop = step.bind(harness.el, harness.ctx);
+  await flush();
+  assert.match(harness.el.innerHTML, /data-easy-export-duration>Duration unavailable/);
+  assert.doesNotMatch(harness.el.innerHTML, /0:30/);
+  const video = { duration: 4.245 };
+  const label = { textContent: 'Duration unavailable' };
+  harness.el.querySelector = selector => selector === 'video[data-easy-player]' ? video
+    : selector === '[data-easy-export-duration]' ? label : null;
+  harness.el.fire('loadedmetadata', { type: 'loadedmetadata', target: video });
+  assert.equal(label.textContent, '0:04');
+  harness.el.fire('loadedmetadata', { type: 'loadedmetadata', target: { duration: 30 } });
+  assert.equal(label.textContent, '0:04');
+  video.duration = Infinity;
+  harness.el.fire('durationchange', { type: 'durationchange', target: video });
+  assert.equal(label.textContent, 'Duration unavailable');
+  video.duration = 4.245;
+  harness.el.fire('error', { type: 'error', target: video });
+  assert.equal(label.textContent, 'Duration unavailable');
+  stop();
+  harness.el.fire('loadedmetadata', { type: 'loadedmetadata', target: video });
+  assert.equal(label.textContent, 'Duration unavailable');
+});
 
 function withBlobUrls(run) {
   const originalCreate = URL.createObjectURL;
@@ -533,4 +566,28 @@ test('corrupt saved JSON is reported and ignored instead of looking like a fresh
     assert.match(harness.el.innerHTML, /data-easy-export-again/);
     stop();
   });
+});
+
+test('done actions open Ask and the editor in place without rerendering or exporting again', async () => {
+  const harness = exportHarness({ revision: 4, exportedRevision: 4, at: '2026-10-26T00:00:00.000Z' });
+  let asks = 0;
+  let editors = 0;
+  let rerenders = 0;
+  harness.ctx.openAsk = () => { asks += 1; };
+  harness.ctx.host.openEditor = () => { editors += 1; };
+  harness.ctx.rerender = () => { rerenders += 1; };
+  const stop = step.bind(harness.el, harness.ctx);
+  await flush();
+
+  const change = harness.fire('[data-easy-export-change]');
+  const editor = harness.fire('[data-easy-export-editor]');
+
+  assert.equal(change.prevented, true);
+  assert.equal(editor.prevented, true);
+  assert.equal(asks, 1);
+  assert.equal(editors, 1);
+  assert.equal(rerenders, 0);
+  assert.equal(harness.renders(), 0);
+  assert.match(harness.el.innerHTML, /data-easy-export-done/);
+  stop();
 });

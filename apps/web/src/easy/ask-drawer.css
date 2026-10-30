@@ -115,10 +115,6 @@
   outline-offset: var(--focus-ring-offset);
 }
 
-.easy-ask-drawer #project-plan-build {
-  display: none;
-}
-
 @media (max-width: 640px) {
   .easy-ask-drawer {
     inset: auto 0 0;

@@ -3,6 +3,8 @@ import type { Timeline } from '../../../packages/planner/dist/src/index.js';
 import type { InlineAsset } from '../../renderer/src/components';
 import { sceneNumberOf, slotLabel, type ReferenceAssignment } from './references/panel.ts';
 import { isRecoveryConflict, recoveryPanelHtml, recoveryRequest, type RecoveryConflict } from './chat-recovery.ts';
+import { randomUUID } from './uuid.ts';
+import { agentConsoleMarkup, mountAgentConsole, publishAgentProgress } from './easy/agent-console.ts';
 
 type ApiFetch = (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>;
 type ChatMessage = { role: 'user' | 'assistant'; content: string };
@@ -172,14 +174,36 @@ export type ProjectCastEntry = {
   orphaned?: boolean;
 };
 
-type Conversation = {
+export type ClipProposal = {
+  id: string; status: string; kind: 'correction' | 'select' | 'verdict' | string;
+  clipId: string; assetId?: string; takeId?: string; verdict?: string;
+  change?: { note?: string; [key: string]: unknown };
+  correction?: { note?: string; [key: string]: unknown };
+  planHash?: string | null; planId?: string | null; productionId?: string | null;
+  estimate?: unknown; runId?: string | null;
+  queued?: boolean; lastError?: string;
+};
+
+export type Conversation = {
   id: string; revision: number; messages: ChatMessage[]; plan: ProjectPlan | null;
   phase: 'chatting' | 'draft' | 'built'; projectId: string | null; projectRevision: number | null;
   referenceAssignments?: ReferenceAssignment[];
+  clipProposals?: ClipProposal[];
   castProposals?: CastProposal[];
   cast?: ProjectCastEntry[];
   castPlacements?: unknown[];
+  packageEdit?: { request: { packageId: string; expectedRevision: number }; diff: PackageEditDiff[] } | null;
+  lastPackageEdit?: { appliedRevision: number; diff: PackageEditDiff[] };
 };
+type PackageEditDiff = { path: string; before: unknown; after: unknown };
+
+export function renderPackageEditReview(conversation: Conversation | null): string {
+  const pending = conversation?.packageEdit;
+  const edit = pending ?? conversation?.lastPackageEdit;
+  if (!edit?.diff?.length) return '';
+  const value = (item: unknown) => item === null ? '(absent)' : typeof item === 'string' ? item : JSON.stringify(item);
+  return `<details class="project-plan-details" data-package-edit-review open><summary>${pending ? `Review package edits · revision ${pending.request.expectedRevision}` : `Applied package edits · revision ${conversation?.lastPackageEdit?.appliedRevision}`}</summary><ul>${edit.diff.map(change => `<li><b>${esc(change.path)}</b><div><del>${esc(value(change.before))}</del> → <ins>${esc(value(change.after))}</ins></div></li>`).join('')}</ul>${pending ? '<button type="button" id="project-package-edit-build" class="btn btn-sm btn-primary">Apply reviewed edits</button>' : ''}</details>`;
+}
 export type ChatProject = {
   package: PackageV1; revision: number; timeline: Timeline;
   generatedAssets: Record<string, InlineAsset>; pendingGpu: unknown[]; svgAssets: string[];
@@ -195,7 +219,7 @@ type RecoveryReply = ChatReply & {
   error?: string;
   recoveryConflict?: RecoveryConflict;
 };
-type TurnRequest = { conversationId: string; turnId: string; message: string; mode: 'plan' | 'express'; provider: string; model: string; baseRevision?: number; action?: 'build'; confirmAssignments?: string[]; confirmCastProposals?: string[]; rejectAssignments?: string[]; rejectCastProposals?: string[]; turnContext?: TurnContextChip[] };
+type TurnRequest = { conversationId: string; turnId: string; message: string; mode: 'plan' | 'express'; provider: string; model: string; baseRevision?: number; adoptPackageId?: string; expectedPackageId?: string; expectedPackageRevision?: number; action?: 'build' | 'authorizeClipProposals'; confirmAssignments?: string[]; confirmClipProposals?: string[]; confirmCastProposals?: string[]; rejectAssignments?: string[]; rejectCastProposals?: string[]; turnContext?: TurnContextChip[] };
 
 const esc = (value: unknown) => String(value ?? '').replace(/[&<>"']/g, char => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[char]!);
 const STORAGE_KEY = 'comfyrizz.project-chat';
@@ -505,6 +529,15 @@ export type CreateProjectChatOptions = {
   initialConversationId?: string;
   restoreSaved?: boolean;
   expectedPackageId?: string;
+  /** Bind this chat's first new/unbound turn to an existing generated package. */
+  adoptPackageId?: string;
+  /** Read at send time: Super Easy may have opened a package after this chat mounted. */
+  getEditContext?: () => { packageId: string; revision: number } | null;
+  /** Server snapshots only: fired before the host applies a built package. */
+  onConversationChange?: (conversation: Conversation) => void;
+  /** Optional live turn telemetry; tests and offline embeds may omit it. */
+  getAgentProgress?: (sessionId: string) => Promise<Record<string, unknown>>;
+  onReviewPlan?: (productionId: string) => void;
   brand?: () => unknown;
   referenceLabel?: (refId: string) => string | undefined;
   /**
@@ -546,6 +579,11 @@ function mountProjectChatController(options: ProjectChatControllerOptions) {
   let conflict = false;
   let recovery: RecoveryConflict | null = null;
   let recoveryHint = '';
+  let newVideoFromPackage: string | null = null;
+  function editContext() {
+    const context = options.getEditContext?.() ?? null;
+    return context?.packageId === newVideoFromPackage ? null : context;
+  }
   const dismissedContextChipIds = new Set<string>();
   const readTurnContext = options.getTurnContext ?? options.turnContext;
 
@@ -602,6 +640,36 @@ function mountProjectChatController(options: ProjectChatControllerOptions) {
     return `<div class="reference-proposals" data-reference-proposals><p><b>Proposed reference placements</b></p><ul>${rows}</ul></div>`;
   }
 
+  function clipProposalsHtml(): string {
+    const proposals = (conversation?.clipProposals ?? []).filter(proposal => proposal
+      && typeof proposal.id === 'string'
+      && ['proposed', 'approval_required', 'plan_pending', 'plan_ready', 'plan_error', 'confirmed'].includes(proposal.status));
+    if (!proposals.length) return '';
+    const rows = proposals.map(proposal => {
+      const action = proposal.kind === 'audio'
+        ? 'Add a procedural audio pass'
+        : proposal.kind === 'correction'
+          ? `Regenerate ${proposal.clipId}`
+          : proposal.kind === 'select' ? `Select a take for ${proposal.clipId}` : `Review ${proposal.clipId}`;
+      const note = proposal.change?.note ?? proposal.correction?.note ?? '';
+      const controls = proposal.status === 'proposed'
+        ? `<button type="button" class="btn btn-sm btn-primary" data-confirm-clip="${esc(proposal.id)}">${proposal.kind === 'correction' ? 'Prepare generation' : 'Apply change'}</button>`
+        : proposal.status === 'approval_required'
+          ? `<button type="button" class="btn btn-sm btn-primary" data-authorize-clip="${esc(proposal.id)}">Authorize &amp; generate</button>`
+          : proposal.status === 'plan_ready'
+            ? `<button type="button" class="btn btn-sm btn-primary" data-review-plan="${esc(proposal.productionId ?? '')}">Review &amp; edit full plan</button>`
+            : proposal.status === 'plan_pending'
+              ? '<small>Creating the revision plan…</small>'
+              : proposal.status === 'plan_error'
+                ? '<small>The revision plan was not created</small>'
+                : `<small>${proposal.kind === 'audio' ? 'Audio pass applied · render the film to hear it' : proposal.queued ? 'Generation queued' : proposal.runId ? `Generation started · ${esc(proposal.runId)}` : 'Change applied'}</small>`;
+      return `<li class="panel proposal-card" data-clip-proposal="${esc(proposal.id)}" data-clip-proposal-status="${esc(proposal.status)}">
+        <div class="proposal-body"><b>${esc(action)}</b>${note ? `<span>${esc(note)}</span>` : ''}<small>${proposal.status === 'approval_required' ? 'Paid Google Colab generation · reviewed plan waiting for authorization' : esc(proposal.status.replaceAll('_', ' '))}</small>${proposal.lastError ? `<small role="alert">${esc(proposal.lastError)}</small>` : ''}</div>
+        <div class="reference-proposal-actions">${controls}</div></li>`;
+    }).join('');
+    return `<div class="reference-proposals clip-proposals" data-clip-proposals><p><b>Clip changes and generations</b></p><ul>${rows}</ul></div>`;
+  }
+
   function proposedCastProposals(): Array<CastProposal & { id: string }> {
     return (conversation?.castProposals ?? []).filter(
       (proposal): proposal is CastProposal & { id: string } =>
@@ -622,9 +690,11 @@ function mountProjectChatController(options: ProjectChatControllerOptions) {
     const contextHtml = renderTurnContextChips(turnContextChips());
     const recoveryHtml = recovery ? recoveryPanelHtml(recovery, esc) : '';
     const recoveryHintHtml = recoveryHint ? `<p class="hint">${esc(recoveryHint)}</p>` : '';
+    const packageReview = recovery ? '' : renderPackageEditReview(conversation);
     if (!plan) {
       panel.hidden = false;
-      panel.innerHTML = `${contextHtml}${errorText ? `<p role="alert">${esc(errorText)}</p>` : recovery ? '' : '<p class="hint chat-welcome">Chat with the agent to develop your video.</p>'}${recovery ? recoveryHtml : `${renderSuggestedPrompts()}${proposalsHtml()}${castProposalsHtml()}<div class="project-plan-actions"><button type="button" id="project-new" class="btn btn-sm btn-ghost quiet">Start a new video</button>${pending && !conflict ? '<button type="button" id="project-retry" class="btn btn-sm btn-secondary">Retry this message</button>' : ''}${conflict ? '<button type="button" id="project-reload" class="btn btn-sm btn-secondary">Load latest conversation</button>' : ''}</div>`}${recoveryHintHtml}`;
+      panel.innerHTML = `${contextHtml}${errorText ? `<p role="alert">${esc(errorText)}</p>` : recovery ? '' : '<p class="hint chat-welcome">Chat with the agent to develop your video.</p>'}${recovery ? recoveryHtml : `${renderSuggestedPrompts()}${proposalsHtml()}${clipProposalsHtml()}${castProposalsHtml()}<div class="project-plan-actions"><button type="button" id="project-new" class="btn btn-sm btn-ghost quiet">Start a new video</button>${pending && !conflict ? '<button type="button" id="project-retry" class="btn btn-sm btn-secondary">Retry this message</button>' : ''}${conflict ? '<button type="button" id="project-reload" class="btn btn-sm btn-secondary">Load latest conversation</button>' : ''}</div>`}${recoveryHintHtml}`;
+      if (packageReview) panel.innerHTML = packageReview + panel.innerHTML;
       bindActions();
       return;
     }
@@ -632,7 +702,7 @@ function mountProjectChatController(options: ProjectChatControllerOptions) {
     const built = conversation?.phase === 'built';
     panel.hidden = false;
     panel.innerHTML = `
-      ${contextHtml}
+      ${contextHtml}${packageReview}
       <div class="project-plan-head">
         <div><b>${esc(plan.title)}</b><span class="hint">${plan.scenes.length} scenes · ${seconds.toFixed(0)}s · ${esc(plan.aspect)} · ${esc(plan.stylePreset)}</span></div>
         <span class="plan-state badge ${built ? 'badge-ok' : ''}">${built ? '✓ in project' : 'draft'}</span>
@@ -652,7 +722,7 @@ function mountProjectChatController(options: ProjectChatControllerOptions) {
         ${built ? '' : `<button type="button" id="project-plan-build" class="btn btn-sm btn-primary">Build this project</button>`}
         <button type="button" id="project-new" class="btn btn-sm btn-ghost quiet">Start a new video</button>
         <span class="hint">${built ? 'Edit scene copy directly in the storyboard.' : 'Ask for changes, or build to apply it.'}</span>
-      </div>`}${recovery ? '' : proposalsHtml()}${recovery ? '' : castProposalsHtml()}${errorText ? `<p role="alert">${esc(errorText)}</p>${!recovery && pending && !conflict ? '<button type="button" id="project-retry" class="btn btn-sm btn-secondary">Retry this message</button>' : ''}${!recovery && conflict ? '<button type="button" id="project-reload" class="btn btn-sm btn-secondary">Load latest conversation</button>' : ''}` : ''}${recoveryHintHtml}`;
+      </div>`}${recovery ? '' : proposalsHtml()}${recovery ? '' : clipProposalsHtml()}${recovery ? '' : castProposalsHtml()}${errorText ? `<p role="alert">${esc(errorText)}</p>${!recovery && pending && !conflict ? '<button type="button" id="project-retry" class="btn btn-sm btn-secondary">Retry this message</button>' : ''}${!recovery && conflict ? '<button type="button" id="project-reload" class="btn btn-sm btn-secondary">Load latest conversation</button>' : ''}` : ''}${recoveryHintHtml}`;
     panel.querySelector('#project-plan-build')?.addEventListener('click', () => {
       void send('Build this plan exactly as it is now.', 'express', 'build');
     });
@@ -660,6 +730,9 @@ function mountProjectChatController(options: ProjectChatControllerOptions) {
   }
 
   function bindActions(): void {
+    panel.querySelector('#project-package-edit-build')?.addEventListener('click', () => {
+      void send('Apply the reviewed saved-package edits exactly as shown.', 'express', 'build');
+    });
     panel.querySelector('#project-new')?.addEventListener('click', reset);
     panel.querySelector('#project-retry')?.addEventListener('click', () => { if (pending && !busy) void perform(pending); });
     panel.querySelector('#project-reload')?.addEventListener('click', () => { if (!busy) void load(); });
@@ -689,6 +762,24 @@ function mountProjectChatController(options: ProjectChatControllerOptions) {
         if (id) void decideProposal('reference', id, 'reject');
       });
     });
+    panel.querySelectorAll<HTMLElement>('[data-confirm-clip]').forEach(button => {
+      button.addEventListener('click', () => {
+        const id = button.getAttribute('data-confirm-clip');
+        if (id) void confirmClipProposals([id]);
+      });
+    });
+    panel.querySelectorAll<HTMLElement>('[data-authorize-clip]').forEach(button => {
+      button.addEventListener('click', () => {
+        const id = button.getAttribute('data-authorize-clip');
+        if (id) void authorizeClipProposals([id]);
+      });
+    });
+    panel.querySelectorAll<HTMLElement>('[data-review-plan]').forEach(button => {
+      button.addEventListener('click', () => {
+        const productionId = button.getAttribute('data-review-plan');
+        if (productionId) options.onReviewPlan?.(productionId);
+      });
+    });
     panel.querySelectorAll<HTMLElement>('[data-confirm-cast]').forEach(button => {
       button.addEventListener('click', () => {
         const id = button.getAttribute('data-confirm-cast');
@@ -711,17 +802,45 @@ function mountProjectChatController(options: ProjectChatControllerOptions) {
     panel.querySelectorAll<HTMLButtonElement>('button').forEach(button => { button.disabled = busy; });
   }
 
+  function validateReplyPackage(reply: ChatReply, requestedPackageId?: string): void {
+    const current = editContext()?.packageId;
+    if (requestedPackageId && current && current !== requestedPackageId) {
+      throw new Error('The open project changed while the agent was working. Reload its conversation.');
+    }
+    const expected = requestedPackageId ?? current ?? options.expectedPackageId;
+    if (!expected) return;
+    const conversationPackage = reply.conversation?.projectId;
+    const responsePackage = reply.project?.package?.id;
+    if ((conversationPackage && conversationPackage !== expected)
+      || (responsePackage && responsePackage !== expected)) {
+      throw new Error('The linked conversation belongs to a different project.');
+    }
+  }
+
+  function notifyConversation(): void {
+    if (!conversation) return;
+    try { options.onConversationChange?.(conversation); } catch { /* optional host observer */ }
+  }
+
   function adopt(reply: ChatReply, built: boolean): void {
+    validateReplyPackage(reply);
     conversation = reply.conversation;
     conversationId = reply.conversation.id;
     localStorage.setItem(STORAGE_KEY, conversationId);
-    if (reply.project && built) options.applyProject(reply.project, built);
+    // The host may synchronously publish a package/store change from
+    // applyProject. Persist the server-returned chat binding first so that a
+    // scope subscriber does not tear down this still-current conversation.
+    notifyConversation();
+    const projectMoved = typeof reply.project?.revision === 'number'
+      && reply.project.revision !== conversation?.projectRevision;
+    if (reply.project && (built || projectMoved)) options.applyProject(reply.project, built);
     try { void options.onCastChanged?.(conversation.cast ?? []); } catch { /* optional observer */ }
     render();
   }
 
   function reset(): void {
     if (busy) return;
+    newVideoFromPackage = options.getEditContext?.()?.packageId ?? null;
     conversationId = null;
     conversation = null;
     pending = null; errorText = ''; conflict = false; recovery = null; recoveryHint = '';
@@ -745,14 +864,13 @@ function mountProjectChatController(options: ProjectChatControllerOptions) {
       }
       if (!response.ok) throw new Error(body.error ?? `HTTP ${response.status}`);
       const reply = body as ChatReply;
-      if (options.expectedPackageId && reply.project?.package?.id !== options.expectedPackageId) {
-        throw new Error('The linked conversation belongs to a different project.');
-      }
+      validateReplyPackage(reply);
       conversation = reply.conversation;
       pending = null; errorText = ''; conflict = false; recoveryHint = '';
       recovery = isRecoveryConflict(body) ? (body.recoveryConflict ?? {}) : null;
       dismissedContextChipIds.clear();
       options.replace(reply.conversation.messages);
+      notifyConversation();
       if (reply.project) options.applyProject(reply.project, reply.conversation.phase === 'built');
       try { void options.onCastChanged?.(conversation.cast ?? []); } catch { /* optional observer */ }
       options.log(recovery
@@ -767,7 +885,7 @@ function mountProjectChatController(options: ProjectChatControllerOptions) {
   const loaded = load();
 
   function ensureConversationId(): string {
-    conversationId ??= `chat_${crypto.randomUUID()}`;
+    conversationId ??= `chat_${randomUUID()}`;
     localStorage.setItem(STORAGE_KEY, conversationId);
     return conversationId;
   }
@@ -776,6 +894,18 @@ function mountProjectChatController(options: ProjectChatControllerOptions) {
     const unique = [...new Set(ids)].filter(Boolean);
     if (unique.length === 0) return Promise.resolve();
     return send(unique.length === 1 ? 'Confirm the proposed reference placement.' : 'Confirm the proposed reference placements.', 'plan', undefined, unique);
+  }
+
+  function confirmClipProposals(ids: string[]): Promise<void> {
+    const unique = [...new Set(ids)].filter(Boolean);
+    if (unique.length === 0) return Promise.resolve();
+    return send(unique.length === 1 ? 'Prepare this clip change for my review.' : 'Prepare these clip changes for my review.', 'plan', undefined, undefined, undefined, unique);
+  }
+
+  function authorizeClipProposals(ids: string[]): Promise<void> {
+    const unique = [...new Set(ids)].filter(Boolean);
+    if (unique.length === 0) return Promise.resolve();
+    return send(unique.length === 1 ? 'Authorize this reviewed generation.' : 'Authorize these reviewed generations.', 'plan', 'authorizeClipProposals', undefined, undefined, unique);
   }
 
   function confirmCastProposals(ids: string[]): Promise<void> {
@@ -846,7 +976,7 @@ function mountProjectChatController(options: ProjectChatControllerOptions) {
         headers: { 'content-type': 'application/json', accept: 'application/json' },
         body: JSON.stringify({
           conversationId: ensureConversationId(),
-          turnId: crypto.randomUUID(),
+          turnId: randomUUID(),
           baseRevision: conversation?.revision ?? 0,
           ...(kind === 'reference'
             ? { rejectAssignments: [proposalId] }
@@ -1004,18 +1134,26 @@ function mountProjectChatController(options: ProjectChatControllerOptions) {
     }
   }
 
-  async function send(text: string, mode: 'plan' | 'express', action?: 'build', confirm?: string[], confirmCast?: string[]): Promise<void> {
+  async function send(text: string, mode: 'plan' | 'express', action?: 'build' | 'authorizeClipProposals', confirm?: string[], confirmCast?: string[], confirmClip?: string[]): Promise<void> {
     if (busy || recovery || !text.trim()) return;
     busy = true;
     await loaded;
     const turnContext = turnContextChips();
     options.append('user', text.trim());
     try {
+      const editing = editContext();
+      if (editing && conversation?.projectId && conversation.projectId !== editing.packageId) {
+        throw new Error('The conversation belongs to a different project. Open the current project’s conversation before editing.');
+      }
       const provider = await options.provider();
-      pending = { conversationId: ensureConversationId(), turnId: crypto.randomUUID(), message: text, mode,
+      pending = { conversationId: ensureConversationId(), turnId: randomUUID(), message: text, mode,
         provider: provider.provider, model: provider.model,
-        ...(conversation ? { baseRevision: conversation.revision } : {}), ...(action ? { action } : {}),
+        ...(editing ? { expectedPackageId: editing.packageId, expectedPackageRevision: editing.revision } : {}),
+        ...(conversation ? { baseRevision: conversation.revision } : {}),
+        ...(options.adoptPackageId && !conversation?.projectId ? { adoptPackageId: options.adoptPackageId } : {}),
+        ...(action ? { action } : {}),
         ...(confirm?.length ? { confirmAssignments: confirm } : {}),
+        ...(confirmClip?.length ? { confirmClipProposals: confirmClip } : {}),
         ...(confirmCast?.length ? { confirmCastProposals: confirmCast } : {}),
         ...(turnContext.length ? { turnContext } : {}) };
       await perform(pending);
@@ -1029,12 +1167,14 @@ function mountProjectChatController(options: ProjectChatControllerOptions) {
   /** Apply a get-style recovery body without treating it as a new turn. */
   function applyRecoveryBody(body: RecoveryReply): void {
     if (!body || !body.conversation || typeof body.conversation !== 'object') return;
+    validateReplyPackage(body);
     conversation = body.conversation;
     if (typeof body.conversation.id === 'string' && body.conversation.id) {
       conversationId = body.conversation.id;
       localStorage.setItem(STORAGE_KEY, conversationId);
     }
     options.replace(Array.isArray(body.conversation.messages) ? body.conversation.messages : []);
+    notifyConversation();
     if (body.project) options.applyProject(body.project, body.conversation.phase === 'built');
     try { void options.onCastChanged?.(body.conversation.cast ?? []); } catch { /* optional observer */ }
   }
@@ -1100,6 +1240,25 @@ function mountProjectChatController(options: ProjectChatControllerOptions) {
     busy = true;
     errorText = ''; conflict = false; render();
     options.setBusy(true, 'the agent is writing the next version…');
+    const getProgress = options.getAgentProgress;
+    const progressStartedAt = new Date().toISOString();
+    if (getProgress) {
+      publishAgentProgress({
+        sessionId: request.turnId, status: 'running', activity: 'starting', startedAt: progressStartedAt,
+        elapsedMs: 0, usage: { input: 0, output: 0, total: 0 },
+        recentEvents: [{ type: 'request', brief: request.message, at: progressStartedAt }],
+      });
+    }
+    const pollProgress = async (): Promise<void> => {
+      if (!getProgress) return;
+      try {
+        publishAgentProgress(await getProgress(request.turnId));
+      } catch {
+        // The response remains authoritative; telemetry retries on the next tick.
+      }
+    };
+    const progressTimer = getProgress ? setInterval(() => { void pollProgress(); }, 1500) : null;
+    if (getProgress) void pollProgress();
     let failureBody: RecoveryReply | null = null;
     try {
       const response = await options.apiFetch('/api/agent/chat', {
@@ -1114,6 +1273,7 @@ function mountProjectChatController(options: ProjectChatControllerOptions) {
         throw new Error(body.error ?? `HTTP ${response.status}`);
       }
       const reply = body as ChatReply;
+      validateReplyPackage(reply, request.expectedPackageId);
       pending = null;
       options.replace(reply.conversation.messages);
       adopt(reply, reply.built);
@@ -1131,6 +1291,8 @@ function mountProjectChatController(options: ProjectChatControllerOptions) {
         options.log(`Video conversation failed: ${(error as Error).message}`);
       }
     } finally {
+      if (progressTimer !== null) clearInterval(progressTimer);
+      await pollProgress();
       busy = false;
       dismissedContextChipIds.clear();
       options.setBusy(false);
@@ -1144,6 +1306,8 @@ function mountProjectChatController(options: ProjectChatControllerOptions) {
     send,
     ensureConversationId,
     confirmAssignments,
+    confirmClipProposals,
+    authorizeClipProposals,
     confirmCastProposals,
     confirmCastProposal: confirmCastProposals,
     confirmCast: confirmCastProposals,
@@ -1166,7 +1330,7 @@ let projectChatInstance = 0;
 export function createProjectChat(host: HTMLElement, options: CreateProjectChatOptions) {
   projectChatInstance += 1;
   const promptId = `project-chat-${projectChatInstance}-prompt`;
-  host.innerHTML = `<div class="project-chat-log" data-project-chat-log role="log" aria-live="polite" aria-label="Chat messages"></div>
+  host.innerHTML = `${agentConsoleMarkup()}<div class="project-chat-log" data-project-chat-log role="log" aria-live="polite" aria-label="Chat messages"></div>
     <div data-project-chat-panel></div>
     <form class="project-chat-composer" data-project-chat-form>
       <label for="${promptId}">Message</label>
@@ -1182,6 +1346,8 @@ export function createProjectChat(host: HTMLElement, options: CreateProjectChatO
     host.innerHTML = '';
     throw new Error('Could not create the project chat.');
   }
+
+  const stopAgentConsole = mountAgentConsole(host);
 
   const append = (role: 'user' | 'assistant', text: string): void => {
     const message = log.ownerDocument.createElement('div');
@@ -1232,6 +1398,7 @@ export function createProjectChat(host: HTMLElement, options: CreateProjectChatO
     destroy(): void {
       if (destroyed) return;
       destroyed = true;
+      stopAgentConsole();
       form.removeEventListener('submit', submit);
       form.innerHTML = '';
       panel.innerHTML = '';

@@ -102,5 +102,5 @@ test('the three style tools are registered and motion-style is a bundled skill',
     assert.equal(tools[name].definition.name, name);
   }
   assert.ok(BUNDLED_SKILL_IDS.includes('motion-style'));
-  assert.equal(SKILL_CATALOG_VERSION, '1.5.0');
+  assert.equal(SKILL_CATALOG_VERSION, '1.5.1');
 });

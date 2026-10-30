@@ -15,6 +15,9 @@ const defaultHome = () => process.env.HOME || process.env.USERPROFILE || os.home
 /** How long the CLI gets to finish an interactive sign-in before the card offers to try again. */
 export const AUTH_TIMEOUT_MS = 5 * 60 * 1000;
 
+// The local server owns one interactive CLI exchange, even if two tabs open the card.
+let authInFlight = false;
+
 /**
  * Start `colab auth` and stream what it prints.
  *
@@ -34,13 +37,44 @@ export async function startColabAuth({ onLine = null, home = defaultHome(), spaw
     return { ok: false, code: null, lines: [], reason: error.message, install: true };
   }
 
+  if (authInFlight) {
+    return { ok: false, code: null, lines: [], reason: "Google Colab sign-in is already in progress", busy: true };
+  }
+  authInFlight = true;
+
   return await new Promise((resolve) => {
     const lines = [];
+    const partial = new Map([["stdout", ""], ["stderr", ""]]);
     let settled = false;
+    let timer = null;
+    const emit = (raw) => {
+      const text = String(raw).replace(/\r$/, "");
+      if (!text.trim()) return;
+      // Redact complete lines only: a token split between chunks must never
+      // escape merely because a redactor saw only half of it.
+      const line = redactForLog(text);
+      lines.push(line);
+      if (onLine) onLine(line);
+    };
+    const relay = (stream, chunk) => {
+      if (settled) return;
+      const parts = `${partial.get(stream) ?? ""}${String(chunk)}`.split("\n");
+      partial.set(stream, parts.pop() ?? "");
+      for (const raw of parts) emit(raw);
+    };
+    const flush = () => {
+      for (const stream of ["stdout", "stderr"]) {
+        const raw = partial.get(stream) ?? "";
+        partial.set(stream, "");
+        if (raw) emit(raw);
+      }
+    };
     const finish = (result) => {
       if (settled) return;
+      flush();
       settled = true;
-      clearTimeout(timer);
+      authInFlight = false;
+      if (timer) clearTimeout(timer);
       resolve({ ...result, lines });
     };
 
@@ -52,7 +86,7 @@ export async function startColabAuth({ onLine = null, home = defaultHome(), spaw
       return;
     }
 
-    const timer = setTimeout(() => {
+    timer = setTimeout(() => {
       try {
         child.kill("SIGTERM");
       } catch {
@@ -62,18 +96,8 @@ export async function startColabAuth({ onLine = null, home = defaultHome(), spaw
       finish({ ok: false, code: null, reason: `sign-in did not finish within ${window}` });
     }, timeoutMs);
 
-    const relay = (chunk) => {
-      for (const raw of String(chunk).split("\n")) {
-        if (!raw.trim()) continue;
-        // the CLI's own line, with any credential in a URL scrubbed on the way out
-        const line = redactForLog(raw);
-        lines.push(line);
-        if (onLine) onLine(line);
-      }
-    };
-
-    child.stdout?.on("data", relay);
-    child.stderr?.on("data", relay);
+    child.stdout?.on("data", chunk => relay("stdout", chunk));
+    child.stderr?.on("data", chunk => relay("stderr", chunk));
     child.on("error", (error) => finish({ ok: false, code: null, reason: `could not run the CLI: ${error.message}` }));
     child.on("close", (code) => {
       finish({

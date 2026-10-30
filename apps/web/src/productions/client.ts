@@ -1,4 +1,5 @@
 // IP28: web client for the production snapshot and event journal.
+import { randomUUID } from '../uuid.ts';
 //
 // The client is deliberately small. The server (IP19) owns truth; this module
 // only reconstructs local state from:
@@ -852,7 +853,7 @@ function requireProductionId(value: unknown): string {
 }
 
 function freshIterationId(prefix: string): string {
-  return `${prefix}_${globalThis.crypto.randomUUID()}`;
+  return `${prefix}_${randomUUID()}`;
 }
 
 function isIterationRange(value: unknown): value is IterationRange {

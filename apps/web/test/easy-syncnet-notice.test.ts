@@ -69,7 +69,7 @@ test('the Plan, Generate and Review steps show the SyncNet warning before the ne
   });
   assert.match(plan, /data-easy-plan/);
   assert.match(plan, /data-easy-syncnet-warning/);
-  assert.match(plan, /lip-sync will not be checked/);
+  assert.match(plan, /lip-sync will not be checked/i);
 
   const review = renderReview({
     shots: [],

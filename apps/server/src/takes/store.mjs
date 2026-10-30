@@ -1,11 +1,13 @@
 import * as nodeFs from 'node:fs';
 import { createHash } from 'node:crypto';
 import { basename, dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
+import { recoverPendingReferenceFingerprint, recoveredSourceBytesChanged } from './source-fingerprint-recovery.mjs';
 import {
   MAX_TAKES_PER_ASSET,
   TAKES_SCHEMA,
   TAKE_EXTENSIONS,
   VERDICTS,
+  genFingerprint,
   shouldAutoSelect,
   validateTakes,
 } from './model.mjs';
@@ -355,6 +357,28 @@ export function createTakeStore(options = {}) {
     const doc = read(pkgId) ?? emptyDoc(pkgId);
     let changed = false;
 
+    // Read-time, server-owned recovery for the versioned preview-ingest bug.
+    // Preserve original evidence in the proof; a verdict is never changed.
+    for (const [assetId, entry] of Object.entries(doc.clips ?? {})) {
+      for (const take of entry.takes ?? []) {
+        const evidence = {
+          pkg, assetId, take, runtimeDir: runtimeRoot, packageDir: packagesRoot, takeRoot: packageRoot(pkgId),
+        };
+        if (recoveredSourceBytesChanged(evidence)) {
+          // Restore the original recorded fingerprint, never manufacture a new
+          // stale hash. Recovery can only be reinstated by the full proof.
+          take.sourceGenFingerprint = take.sourceGenFingerprintRecovery.from;
+          take.sourceGenFingerprintRecovery.invalidated = 'evidence-bytes-changed';
+          changed = true;
+        }
+        const proof = recoverPendingReferenceFingerprint(evidence);
+        if (!proof) continue;
+        take.sourceGenFingerprint = proof.to;
+        take.sourceGenFingerprintRecovery = proof;
+        changed = true;
+      }
+    }
+
     for (const [assetId, asset] of Object.entries(isPlainObject(pkg.assets) ? pkg.assets : {})) {
       if (!isPlainObject(asset) || asset.status !== 'ready') continue;
       if (!isPlainObject(asset.gen) || typeof asset.gen.generator !== 'string' || asset.gen.generator.length === 0) continue;
@@ -381,6 +405,7 @@ export function createTakeStore(options = {}) {
         bytes: bytes.length,
         media: isPlainObject(asset.media) ? clone(asset.media) : {},
         gen: clone(asset.gen),
+        sourceGenFingerprint: genFingerprint(asset.gen, pkg),
         correction: { note: 'adopted from the existing asset', diff: [], by: 'initial' },
         createdAt: clockIso(clock),
         verdict: 'unreviewed',

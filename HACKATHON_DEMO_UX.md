@@ -1,77 +1,78 @@
-# Hackathon demo: the one-shot judge path
+# Hackathon demo: the judge path
 
-This is the path a first-time judge should take: one prompt in, a downloaded MP4 out, without
-opening Easy Studio's settings or the Advanced editor. It runs on **This computer** (CPU) with the
-built-in scripted model, so it needs no API key, no GPU and no Google Colab.
+The product path is **one prompt → a short proposal → an impressive film → agent-led
+changes**. The demo should prove that path with real assets and a real MP4, not a
+production-management tour.
 
-## Before the judge arrives
+## Judges: managed inference
 
-```bash
+Open the deployed link supplied with the submission. Agent inference, Google Colab
+and model access are already configured. There is **no setup wizard, API key,
+Google Colab CLI or Hugging Face token to enter**. Choose a model route, review the
+proposal and generate. Server-side rate and credit limits protect the shared demo;
+changing browser storage cannot raise them. The two-minute video remains a backup
+if a judge cannot run the app.
+
+## Self-host users: install and connect
+
+```sh
 pnpm install --frozen-lockfile
 pnpm -r --if-present run build
-cd apps/server && npm start
+npm --prefix apps/server start
 ```
 
-Open the URL the server prints (`http://127.0.0.1:4319/#token=…`). Use a fresh browser profile, or
-clear site data, so the judge lands on Super Easy and not on a resumed video.
+Open the printed loopback URL in a fresh browser profile. On the home screen choose
+**Set up AI & Google Colab**:
+
+1. Connect and test the agent provider/model.
+2. Test Google Colab CLI and complete OAuth if needed. The sign-in URL appears
+   while authentication is pending.
+3. Accept and verify access to FLUX 3 Image Klein, LTX-2.5 and MiniMax H3 Omni.
+4. Save Google Colab and a per-video credit ceiling. Later runs do not repeat
+   spending approval.
+
+Native Windows uses `py -m pip install --user google-colab-cli`; POSIX uses
+`python3 -m pip install --user google-colab-cli`. The no-key scripted CPU path is
+still available for a motion-graphics preview. See [One prompt setup](docs/ONE_PROMPT.md).
 
 ## Click by click
 
-| Step | What the judge does | What they see |
+| Step | Action | What it proves |
 | --- | --- | --- |
-| 1 | Opens the link. | **Make a video**: one prompt box, a coaching hint ("One sentence is enough… no GPU and no Google Colab"), **Generate**, **Try an example** and three idea chips. |
-| 2 | Clicks an idea chip, for example **How a coffee bean becomes your morning cup**, or types one sentence. | The prompt fills in. A too-short prompt shows an inline message instead of a browser tooltip. |
-| 3 | Clicks **Generate**. | **Making your video**: the overall gauge and the **Plan** gauge move at once, and running gauges sweep so the screen never looks frozen. |
-| 4 | Waits a few seconds. | **Your preview is ready** appears at the top of the column. **Plan** and **Shots** read **Done**, **Characters** and **Voice** read **Skipped** when the video has no cast or narration, and **Video** reads **Preview ready** at 90%. |
-| 5 | Clicks **Download MP4**. | Easy Studio opens directly on **Export** and starts the CPU render. The header says **Saved**. |
-| 6 | Waits about 90 seconds. | **Your video is ready**: a playable MP4 with its length, shape and size. |
-| 7 | Clicks **Download MP4**. | The browser saves `<video-name>.mp4`. |
+| 1 | Enter one specific sentence. | A real user brief, not a preselected project. |
+| 2 | Choose **Auto**, **H3**, **LTX** or **Klein only**. | A structured model route before planning. Auto uses Klein identity/keyframe art plus LTX and H3 for their respective shot roles. |
+| 3 | Click **Generate**. | The agent writes a creative plan; no GPU has started. |
+| 4 | Read the title, short logline, look, duration, soundtrack and model route. | A concise creative checkpoint, not raw storyboard JSON. |
+| 5 | Optionally revise the proposal, then click **Make this film**. | Production starts only after creative approval. The saved credit cap governs the run. |
+| 6 | Watch the live gallery. | Real collected characters, keyframes, clips and audio appear with honest states. |
+| 7 | Play the finished MP4 with sound and click **Download**. | The app rendered and delivered the result, not just a preview or a manifest. |
+| 8 | Ask **What would you like to change?** or open **Advanced mode**. | The agent edits the same project; timeline/take controls are available without losing work. |
 
-That is four clicks after the page opens: idea chip, **Generate**, **Download MP4**, **Download MP4**.
-**Watch and review** on the preview card is the slower path through Review if the judge wants to
-look at each shot first.
+Tick **Record this run** before Generate to capture the real tab and redacted step
+log. `pnpm capture:procedure` records a separate, clearly labelled fixture for
+capture testing; it spends nothing and is not evidence of model output.
 
-Measured on the build in this PR: about 5 seconds from **Generate** to the preview card and about
-100 seconds from **Generate** to a 30-second, 3.6 MB MP4, with no page errors.
+## Four-route comparison
 
-## What this PR fixed on that path
+The planned real-output comparison uses four distinct, art-directed four-shot briefs:
 
-- **The app crashed before Super Easy appeared.** The production bundle included the Easy step
-  `*.test.ts` files; their first `test()` call threw and left a half-drawn Advanced editor. The
-  e2e suite had been stubbing those files, which hid the crash. The glob now excludes them, and the
-  full-app e2e runs without the stub and fails on any page error.
-- **Export always failed** with "commandId or idempotencyKey is required on a production-bound
-  request", because Super Easy creates a production and the web export never sent the command id
-  or production revision. It now sends both and retries once or twice if another production
-  command lands first.
-- **A false "Can't reach the Comfyrizz server. Retrying…"** showed in the Studio header after every
-  Super Easy run. The server-saved revision of the built package is now acknowledged, so it reads
-  **Saved**.
-- **The gauges sat at Waiting / 0%** for the whole This computer run, because the production journal
-  stays empty until export. They now follow the run phase and the built package, and only ever move
-  forward from what the server reports.
-- **The next action was hidden.** The preview card rendered unstyled below the fold, outside the
-  column. It now sits above the gauges and leads with **Download MP4**.
-- **The home scolded instead of coaching.** "Tell us what you want to make first." showed even
-  after typing. It is now an inline message only after a too-short **Generate**; the always-on hint
-  explains what will happen, and idea chips give a one-click start.
+1. Klein only — stills plus code motion;
+2. H3 only — recurring characters and native sound;
+3. LTX only — cinematic motion plates;
+4. Auto — Klein + H3 + LTX.
 
-## Known gaps (out of scope for this PR)
+Each run has its own proposal, recording, result log and MP4. The authorized total
+for these examples, including setup, failures and retries, is 40 credits, with at
+most 10 credits per example. Proposal approval precedes each paid run. Actual
+spend and output limitations must be recorded in `docs/submission/STATUS.md`;
+do not call the routes verified before those outputs exist.
 
-- **Narration and GPU art need more than this path.** With the scripted model and no AI provider,
-  the video is a templated motion-graphics explainer with narration off, so **Voice** reads
-  **Skipped**. A narrated film needs an AI provider plus local voice (Python) for VO, and FLUX
-  stills or LTX motion plates need Google Colab. Those belong to the film and VO tracks.
-- **Super Easy never plays the video itself.** The preview plays in Easy Studio; the **Video** tile
-  in the Super Easy gallery stays a placeholder on the This computer path.
-- **Export screen polish.** "Your video is ready" appears twice. "This export cannot be reopened
-  after reload." and "Delivery facts not recorded for this file." read as warnings to a judge. The
-  duration line can disagree with the player (0:30 against 0:36).
-- **Review counts.** Review can say "4 of 4 shots kept" beside six shots.
-- **The scripted title is truncated** with a trailing "Le…" in the header and title card.
-- **Background noise in the hidden editor.** While the bundled example project sits behind Super
-  Easy, the parked Advanced player requests `/assets/music-bed.wav` hundreds of times a second
-  (404). It is not visible but wastes the network panel. `/src/ui/palette.css` also 404s in the
-  production build, so the command palette is unstyled.
-- **Unit tests already failing on `main`.** Ten web unit tests fail on `main` before this PR
-  (banned-word, Google Colab naming, layout and SyncNet copy checks). This PR adds no new failures.
+## Current evidence and limits
+
+The web unit suite, focused server suites, browser/capture tests, production
+build, TypeScript check and release scan are green. A real no-GPU Easy Studio
+brief-to-MP4 path passed. Real four-route generation and native-Windows smoke are
+separate verification steps; fixtures do not prove them.
+
+See [current status](docs/submission/STATUS.md) for the authoritative checklist
+and the [product contract](docs/submission/ONE_PROMPT_PRODUCT_SPEC.md).

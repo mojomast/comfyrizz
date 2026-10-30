@@ -91,7 +91,8 @@ export function audioPlanWindows({ pkg, timeline } = {}) {
   const durationFrames = Math.max(0, Math.floor(timeline.durationInFrames ?? 0));
   const windows = [];
 
-  const narration = narrationAudio(pkg);
+  const mix = resolveAudioMix(pkg, timeline);
+  const narration = mix.music?.master === true ? null : narrationAudio(pkg);
   if (narration) {
     windows.push({
       id: clock(0, durationFrames),
@@ -114,7 +115,6 @@ export function audioPlanWindows({ pkg, timeline } = {}) {
   // planAudioBuses is the executed plan but intentionally carries no scene id
   // (the ffmpeg graph does not need one). resolveAudioMix is the renderer's
   // resolved mix and names the source scene, so join the two by file + start.
-  const mix = resolveAudioMix(pkg, timeline);
   const sceneBusIds = new Map();
   for (const item of [...mix.dialogue, ...mix.ambience, ...mix.sfx]) {
     if (typeof item.sceneId === 'string' && typeof item.file === 'string') {

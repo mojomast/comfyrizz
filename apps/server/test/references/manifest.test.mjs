@@ -205,6 +205,36 @@ test('R06: videos carry duration and a frame count while images stay compact', (
   assert.equal('frames' in manifest.get(noFrames.id), false);
 });
 
+test('R06: audio songs carry duration without dimensions, frames or stored paths', () => {
+  const song = makeRef({
+    id: 'ref_000000000000000a',
+    kind: 'audio',
+    role: 'song',
+    label: '../../music/theme.mp3',
+    file: '/private/references/ref_000000000000000a.mp3',
+    mime: 'audio/mpeg',
+    durationSec: 185.25,
+    codec: 'mp3',
+    sampleRate: 48000,
+    channels: 2,
+    frames: [],
+  });
+
+  const [entry] = buildManifest([song], []);
+  assert.equal(entry.kind, 'audio');
+  assert.equal(entry.role, 'song');
+  assert.equal(entry.label, 'theme.mp3');
+  assert.equal(entry.durationSec, 185.25);
+  assert.equal('width' in entry, false);
+  assert.equal('height' in entry, false);
+  assert.equal('frames' in entry, false);
+  const serialized = JSON.stringify(entry);
+  assert.equal(serialized.includes('/private/'), false);
+  assert.equal(serialized.includes('../'), false);
+  assert.equal(serialized.includes('audio/mpeg'), false);
+  assert.equal(serialized.includes(song.sha256), false);
+});
+
 test('R06: 24 refs with 1000-char notes stay inside the 2500-token budget', () => {
   const refs = Array.from({ length: 24 }, (_, index) => makeRef({
     id: `ref_${String(index + 1).padStart(16, '0')}`,

@@ -12,7 +12,7 @@
 //   * a wall-clock cap applies even if metering is stale                 -> admit()
 //   * unknown comfyrizz-* sessions are offered, never auto-stopped       -> orphans()
 import { createHash } from "node:crypto";
-import { copyFileSync, existsSync, mkdirSync, readdirSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { appendFileSync, copyFileSync, createReadStream, existsSync, lstatSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { withRunPackage, verifyAgainstManifest } from "./run-package.mjs";
 import { createLivePreviewCollector } from './live-previews.mjs';
 import { packageModelLock, fasth3JobMinutes } from './fasth3-profile.mjs';
@@ -55,6 +55,193 @@ import {
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const REPO = resolve(HERE, "..", "..", "..");
+
+// Stored ZIP avoids recompressing PNG/MP4 and bounds both CPU and expansion. Large
+// trees fail closed rather than silently reverting to hundreds of CLI connections.
+const COLLECTION_BUNDLE_THRESHOLD = 8;
+const COLLECTION_MAX_FILES = 4096;
+const COLLECTION_MAX_BYTES = 1024 * 1024 * 1024;
+const COLLECTION_ARCHIVE_OVERHEAD = 4 * 1024 * 1024;
+
+function validateCollectionEntries(entries) {
+  if (!entries.length || entries.length > COLLECTION_MAX_FILES) throw new Error("collection file count exceeds bound");
+  const names = new Set();
+  let total = 0;
+  for (const { path, bytes } of entries) {
+    if (typeof path !== "string" || path.length > 1024 || path.includes("\\") || path.includes("\0") || /^[A-Za-z]:/.test(path) || path.split("/").some(part => !part || part === "." || part === "..")) throw new Error("invalid collection path");
+    const key = path.toLowerCase();
+    if (names.has(key)) throw new Error("collection path collision");
+    names.add(key);
+    if (!Number.isSafeInteger(bytes) || bytes < 0 || bytes > COLLECTION_MAX_BYTES) throw new Error("invalid collection size");
+    total += bytes;
+  }
+  for (const name of names) {
+    const parts = name.split("/");
+    while (parts.length > 1) {
+      parts.pop();
+      if (names.has(parts.join("/"))) throw new Error("collection file/directory collision");
+    }
+  }
+  if (total > COLLECTION_MAX_BYTES) throw new Error("collection bytes exceed bound");
+}
+
+function safeCollectionDestination(root, relative = "") {
+  const target = resolve(root, relative);
+  // Check ancestors as well as the leaf, including a pre-existing scratch symlink.
+  for (let path = target; ; path = dirname(path)) {
+    try {
+      if (lstatSync(path).isSymbolicLink()) throw new Error("collection destination contains a symlink");
+    } catch (error) { if (error.code !== "ENOENT") throw error; }
+    if (path === dirname(path)) break;
+  }
+  return target;
+}
+
+async function collectionFileHash(path, signal, check = () => {}) {
+  const hash = createHash("sha256");
+  check();
+  for await (const chunk of createReadStream(path, { signal: signal || undefined })) {
+    check();
+    hash.update(chunk);
+  }
+  check();
+  return hash.digest("hex");
+}
+
+function verifyCollectedManifest(manifest, directory, options = {}) {
+  const result = verifyAgainstManifest(manifest, directory, options);
+  for (const entry of manifest?.jobs || []) {
+    for (const output of entry.outputs || []) {
+      if (output.workflow_submitted !== true) continue;
+      const relative = output.relative || output.file;
+      const record = result.outputs.find(record => record.job === entry.job && record.relative === relative);
+      if (!record?.ok) continue;
+      const capture = relative.replace(/\.[^/.]+$/, ".workflow.api.json");
+      try {
+        const path = safeCollectionDestination(directory, capture);
+        if (!statSync(path).isFile() || statSync(path).size > 16 * 1024 * 1024) throw new Error("invalid captured workflow size/type");
+        const graph = JSON.parse(readFileSync(path, "utf8"));
+        if (!graph || typeof graph !== "object" || Array.isArray(graph)) throw new Error("invalid captured workflow JSON");
+      } catch {
+        record.ok = false;
+        record.problem = `${entry.job}: captured workflow ${capture} was not collected or is invalid`;
+        result.problems.push(record.problem);
+      }
+    }
+  }
+  result.verified = result.problems.length === 0;
+  return result;
+}
+
+function collectionBundleScript(config) {
+  // JSON encoded twice: data is never interpolated as Python syntax or shell code.
+  return `import json, os, stat, hashlib, zipfile\nfrom pathlib import Path\nc = json.loads(${JSON.stringify(JSON.stringify(config))})\n` + String.raw`
+root = Path(c["root"])
+archive = Path(c["archive"])
+temporary = archive.with_suffix(".part")
+try:
+    total = 0
+    with zipfile.ZipFile(temporary, "w", compression=zipfile.ZIP_STORED) as z:
+        for entry in c["entries"]:
+            path = root / entry["path"]
+            for ancestor in (path, *path.parents):
+                if ancestor.is_symlink():
+                    raise ValueError("invalid collection path: symlink")
+            before = path.stat()
+            if not stat.S_ISREG(before.st_mode) or before.st_size != entry["bytes"]:
+                raise ValueError("invalid collection size or file type")
+            total += before.st_size
+            if total > 1073741824:
+                raise ValueError("collection bytes exceed bound")
+            z.write(path, entry["path"])
+            after = path.stat()
+            if (before.st_size, before.st_mtime_ns, before.st_ino) != (after.st_size, after.st_mtime_ns, after.st_ino):
+                raise ValueError("collection file changed while packing")
+    os.replace(temporary, archive)
+    digest = hashlib.sha256()
+    with archive.open("rb") as f:
+        for chunk in iter(lambda: f.read(1048576), b""):
+            digest.update(chunk)
+    print("COLLECTION_BUNDLE " + json.dumps({"bytes": archive.stat().st_size, "sha256": digest.hexdigest()}), flush=True)
+    print("COMFYRIZZ_OK bundle-out", flush=True)
+finally:
+    temporary.unlink(missing_ok=True)
+`;
+}
+
+// No extractall: inventory, bounds and types are checked before opening any member.
+// Only regular stored files, with exactly the host-requested names and sizes, enter
+// a private staging directory. Hash/CRC verification finishes before publication.
+const EXTRACT_COLLECTION_BUNDLE = String.raw`
+import json, sys, zipfile, stat, hashlib
+from pathlib import Path
+c = json.loads(Path(sys.argv[1]).read_text())
+archive, staging = Path(c["archive"]), Path(c["staging"])
+if archive.stat().st_size != c["receipt"]["bytes"] or archive.stat().st_size > 1077936128:
+    raise ValueError("collection archive size mismatch")
+digest = hashlib.sha256()
+with archive.open("rb") as f:
+    for chunk in iter(lambda: f.read(1048576), b""):
+        digest.update(chunk)
+if digest.hexdigest() != c["receipt"]["sha256"]:
+    raise ValueError("collection archive sha256 mismatch")
+expected = {e["path"]: e["bytes"] for e in c["entries"]}
+hashes = {}
+with zipfile.ZipFile(archive) as z:
+    members = z.infolist()
+    if len(members) != len(expected) or len(members) > 4096:
+        raise ValueError("collection archive inventory mismatch")
+    seen, total = set(), 0
+    for info in members:
+        name = info.filename
+        if name not in expected or name in seen or info.file_size != expected[name]:
+            raise ValueError("collection archive member mismatch or collision")
+        seen.add(name)
+        mode = info.external_attr >> 16
+        if stat.S_IFMT(mode) != stat.S_IFREG or info.is_dir() or info.flag_bits & 1 or info.compress_type != zipfile.ZIP_STORED or info.compress_size != info.file_size:
+            raise ValueError("invalid collection archive member type/compression")
+        total += info.file_size
+        if total > 1073741824:
+            raise ValueError("collection archive expansion exceeds bound")
+    staging.mkdir(mode=0o700)
+    for info in members:
+        target = staging / info.filename
+        target.parent.mkdir(parents=True, exist_ok=True)
+        digest, count = hashlib.sha256(), 0
+        with z.open(info) as source, target.open("xb") as dest:
+            for chunk in iter(lambda: source.read(1048576), b""):
+                count += len(chunk)
+                if count > info.file_size:
+                    raise ValueError("collection archive member exceeds bound")
+                dest.write(chunk)
+                digest.update(chunk)
+        if count != info.file_size:
+            raise ValueError("collection archive member truncated")
+        hashes[info.filename] = digest.hexdigest()
+(staging.parent / "hashes.json").write_text(json.dumps(hashes))
+`;
+
+async function extractCollectionBundle(python, config, { wallMs, signal }) {
+  signal?.throwIfAborted();
+  await new Promise((resolve, reject) => {
+    const child = spawn(python, ["-c", EXTRACT_COLLECTION_BUNDLE, config], { stdio: ["ignore", "ignore", "pipe"] });
+    let tail = "", timedOut = false;
+    child.stderr.on("data", chunk => { tail = (tail + chunk).slice(-2000); });
+    const abort = () => child.kill("SIGKILL");
+    const timer = setTimeout(() => { timedOut = true; abort(); }, wallMs);
+    signal?.addEventListener("abort", abort, { once: true });
+    const clean = () => { clearTimeout(timer); signal?.removeEventListener("abort", abort); };
+    child.on("error", error => { clean(); reject(error); });
+    child.on("close", code => {
+      clean();
+      if (signal?.aborted) reject(signal.reason);
+      else if (timedOut) reject(new Error("collection extraction deadline reached; preserving stop reserve"));
+      else if (code !== 0) reject(new Error(`collection extraction failed: ${tail}`));
+      else resolve();
+    });
+    if (signal?.aborted) abort();
+  });
+}
 
 /** A production id is used as one path segment, so it may not carry a separator or a traversal part. */
 export const PRODUCTION_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/;
@@ -232,6 +419,7 @@ export function createColabBackend({
   newAttempts = 3,
   newRetryMs = 20000,
   allocationCleanupChecks = 6,
+  collectionRetryMs = 1000,
 } = {}) {
   // PO-3 review: priced from the per-accelerator table for *this* gpu, never one global figure.
   ratePerHour = ratePerHour ?? resolveRatePerHour({ gpu });
@@ -275,6 +463,9 @@ export function createColabBackend({
     recovery: null,
     // Set by the runPackage wrapper so ensureUp can look for collected output before allocating.
     runPackageWorkDir: null,
+    collectionAttempts: [],
+    collectionSignal: null,
+    collectionSpentMs: 0,
   };
 
   const emit = (onEvent, event) => {
@@ -398,7 +589,7 @@ export function createColabBackend({
     if (manifest?.complete !== true) {
       return { recovered: false, matched: Boolean(jobsDoc), local, manifest, reason: "the collected manifest is not complete" };
     }
-    const verification = verifyAgainstManifest(manifest, local, { hashes: true });
+    const verification = verifyCollectedManifest(manifest, local, { hashes: true });
     if (!verification.verified) {
       return {
         recovered: false,
@@ -997,6 +1188,7 @@ export function createColabBackend({
      * on the host ("a later failure never discards earlier outputs", §6.4).
      */
     async run(jobsFile, onEvent = () => {}, signal = null) {
+      state.collectionSignal = signal;
       const doc = JSON.parse(readFileSync(jobsFile, "utf8"));
       // IP10: a restarted process must continue from what the last one collected. A complete,
       // checksum-verified manifest for this exact plan is the run's result; no upload, no exec and no
@@ -1115,7 +1307,7 @@ export function createColabBackend({
         const lostBatch = isLost(exec) || runOutcome.sentinelMissing === true;
         if (runOutcome.sentinelMissing) emit(onEvent, { type: "run_sentinel_missing", batch: name, detail: runOutcome.note });
         ran.push({ batch: name, code: exec.code, lost: lostBatch, timedOut: Boolean(exec.timedOut), sentinel: runOutcome.ok });
-        state.lastExec = { code: exec.code, lost: lostBatch, timedOut: Boolean(exec.timedOut), batch: name };
+        state.lastExec = { code: exec.code, lost: lostBatch, timedOut: Boolean(exec.timedOut), batch: name, sentinel: runOutcome.ok };
         emit(onEvent, { type: "run_exec", batch: name, code: exec.code, lost: lostBatch, timedOut: Boolean(exec.timedOut) });
 
         if (lostBatch) {
@@ -1123,17 +1315,19 @@ export function createColabBackend({
           return { lost: true, batchesRun: ran, manifest: reconciled.manifest, reconcile: reconciled };
         }
         // collect after every batch, so a later failure never discards this batch's work
-        collect = await collectOut({ onEvent, expectComplete: false });
+        collect = await collectOut({ onEvent, expectComplete: false, signal });
+        if (collect.transferFailed) {
+          throw new ColabCliError(`output collection failed after the runner exec (success sentinel: ${runOutcome.ok}): ${collect.problems.join("; ")}`, { collect, runnerExec: state.lastExec });
+        }
         manifest = collect.manifest;
         if (collect.manifest) batchManifests.push(collect.manifest);
       }
 
-      // A single-batch plan already collected its whole tree in the loop above; collecting it a second
-      // time only lists it again and re-downloads nothing (the remembered listing skips every file),
-      // but it still costs a billed `colab exec`. A multi-batch plan needs the final collect to merge
-      // what the last batch wrote.
-      if (perBatch || !collect) {
-        collect = await collectOut({ onEvent, expectComplete: true });
+      // Every batch, including the last, was already collected above. Merge its
+      // manifests locally; another remote listing cannot add evidence after the runner stopped.
+      if (!collect) {
+        collect = await collectOut({ onEvent, expectComplete: true, signal });
+        if (collect.transferFailed) throw new ColabCliError(`output collection failed: ${collect.problems.join("; ")}`, { collect });
         manifest = collect.manifest || manifest;
       }
       if (perBatch && batchManifests.length) manifest = mergeBatchManifests([...batchManifests, ...(manifest ? [manifest] : [])], jobs);
@@ -1142,7 +1336,7 @@ export function createColabBackend({
         // "failed" with no reason. Say what was collected, what was not, and that the tree was listed.
         const missing = collect.missing.length ? `, ${collect.missing.length} file(s) did not download (${collect.missing.slice(0, 5).join(", ")})` : "";
         throw new ColabCliError(
-          `the VM's out/ produced no manifest: ${collect.fetched}/${collect.files} file(s) collected${missing}${collect.problems.length ? `; ${collect.problems.slice(0, 3).join("; ")}` : ""}`,
+          `collection produced no manifest from the VM's out/: ${collect.fetched}/${collect.files} file(s) collected${missing}${collect.problems.length ? `; ${collect.problems.slice(0, 3).join("; ")}` : ""}`,
         );
       }
       return { lost: false, batchesRun: ran, manifest, collect, missing: collect.missing };
@@ -1180,15 +1374,16 @@ export function createColabBackend({
      * tree is listed again on the VM and every file is downloaded again (`remember: null`), because a
      * retry follows a failed digest and the cached "size and mtime agreed" record cannot be trusted.
      */
-    async collect(manifest, destDir, { onEvent = null } = {}) {
+    async collect(manifest, destDir, { onEvent = null, signal = state.collectionSignal } = {}) {
       const downloaded = await downloadTree({
         remoteDir: `${REMOTE_ROOT}/out`,
         localDir: destDir,
         onEvent,
         remember: null,
+        signal,
       });
       const verification = downloaded.ok
-        ? verifyAgainstManifest(manifest, destDir, { hashes: true })
+        ? verifyCollectedManifest(manifest, destDir, { hashes: true })
         : {
             manifest,
             verified: false,
@@ -1204,6 +1399,8 @@ export function createColabBackend({
         fetched: downloaded.fetched ?? 0,
         skipped: downloaded.skipped ?? 0,
         missing: downloaded.missing ?? [],
+        collectionAttempts: downloaded.collectionAttempts ?? [],
+        transferFailed: downloaded.transferFailed === true,
       });
       return {
         ok: downloaded.ok && verification.verified,
@@ -1215,12 +1412,14 @@ export function createColabBackend({
         files: downloaded.files ?? 0,
         fetched: downloaded.fetched ?? 0,
         skipped: downloaded.skipped ?? 0,
+        collectionAttempts: downloaded.collectionAttempts ?? [],
+        transferFailed: downloaded.transferFailed === true,
       };
     },
 
     /** Pure verification (no transfer): the apply-time check over an already-collected directory. */
     async verify(manifest, destDir) {
-      return verifyAgainstManifest(manifest, destDir, { hashes: true });
+      return verifyCollectedManifest(manifest, destDir, { hashes: true });
     },
 
     /**
@@ -1338,17 +1537,49 @@ export function createColabBackend({
       return download({ remote: remotePath, local: localPath, optional: false });
     },
 
-    /** Download specific VM outputs (presenter clips) without collecting the whole tree. */
-    async downloadListed(relativePaths, localDir, { onEvent = null } = {}) {
-      const fetched = [];
+    /** Collect named VM outputs, reusing locally hashed bytes or bundling a larger request. */
+    async downloadListed(relativePaths, localDir, { onEvent = null, signal = state.collectionSignal } = {}) {
       for (const rel of relativePaths || []) {
-        if (typeof rel !== "string" || rel.split("/").some((part) => !part || part === "." || part === "..")) {
+        if (typeof rel !== "string" || rel.includes("\\") || rel.includes("\0") || /^[A-Za-z]:/.test(rel) || rel.split("/").some((part) => !part || part === "." || part === "..")) {
           throw new Error("Refusing a render path that escapes the project");
         }
-        const result = await download({ remote: `${REMOTE_ROOT}/out/${rel}`, local: join(localDir, rel), optional: true, onEvent });
-        if (result.ok) fetched.push(rel);
       }
-      return { fetched };
+      const fetched = [], problems = [];
+      let transferFailed = false;
+      const window = collectionWindow();
+      try {
+        const pending = [];
+        for (const rel of new Set(relativePaths || [])) {
+          signal?.throwIfAborted();
+          const seen = state.downloaded.get(`${REMOTE_ROOT}/out/${rel}`);
+          if (seen?.sha256 && existsSync(seen.local) && await collectionFileHash(safeCollectionDestination(seen.local), signal, () => requireCollectionTime(window)) === seen.sha256) {
+            safeCollectionDestination(localDir, rel);
+            const local = join(localDir, rel);
+            mkdirSync(dirname(local), { recursive: true });
+            if (resolve(local) !== resolve(seen.local)) copyFileSync(seen.local, local);
+            fetched.push(rel);
+            emit(onEvent, { type: "collection_progress", file: rel, reused: true });
+          } else pending.push(rel);
+        }
+        if (pending.length >= COLLECTION_BUNDLE_THRESHOLD) {
+          const result = await downloadTreeInWindow({ remoteDir: `${REMOTE_ROOT}/out`, localDir, window, onEvent, signal, relativePaths: pending, remember: state.downloaded });
+          if (result.ok) fetched.push(...pending);
+          else problems.push(result.detail || "named collection failed");
+          return { fetched, problems, collectionAttempts: window.attempts, transferFailed: !result.ok };
+        }
+        for (const rel of pending) {
+          signal?.throwIfAborted();
+          const result = await download({ remote: `${REMOTE_ROOT}/out/${rel}`, local: join(localDir, rel), optional: true, onEvent, window, signal });
+          if (result.ok) fetched.push(rel);
+          else {
+            problems.push(result.detail);
+            transferFailed ||= result.transferFailed === true;
+          }
+        }
+        return { fetched, problems, collectionAttempts: window.attempts, transferFailed };
+      } finally {
+        state.collectionSpentMs += collectionElapsed(window);
+      }
     },
 
     /**
@@ -1356,6 +1587,7 @@ export function createColabBackend({
      * never `--env`. `onEvent` receives JSON progress lines the script prints.
      */
     async execStep(script, stepName, { timeout = 900, silenceMs = null, signal = null, onEvent = null } = {}) {
+      state.downloaded.clear();
       await uploadProgressTap();
       const progress = progressLines(tapColabProgress((event) => {
         if (typeof onEvent === "function") onEvent(event);
@@ -1398,17 +1630,118 @@ export function createColabBackend({
     state,
   };
 
-  async function download({ remote, local, optional = false, onEvent = null }) {
+  // The admission reserve is COLLECT + STOP, not stop-only. Earmark at most one third
+  // for collection: C = min(120 s, R / 3), S = R - C. The default R=360 s therefore
+  // permits 120 s of collection while retaining 240 s for teardown. A shorter custom
+  // reserve scales both parts; zero/invalid reserve permits no collection.
+  // Allowed time = min(C, original wall time left, budget time left - S).
+  // If overruns leave less than R, only time above the fixed S is collectable; below S
+  // nothing is collected. Never enlarge the budget, wall cap or independent watchdog.
+  // Charge previous collections plus this window's elapsed time against the committed
+  // estimate floor, so another collect cannot spend the same earmarked budget twice.
+  function collectionAllowance(collectionElapsedMs = 0) {
+    const reserveMs = Number.isFinite(Number(reserveMinutes)) ? Math.max(0, Number(reserveMinutes) * 60000) : 0;
+    const collectionMs = Math.min(120000, reserveMs / 3);
+    const stopMs = reserveMs - collectionMs;
+    let available = collectionMs;
+    const started = state.startedAtMs;
+    if (started !== null) {
+      const elapsed = Math.max(0, now() - started);
+      if (wallClockCapMinutes > 0) available = Math.min(available, wallClockCapMinutes * 60000 - elapsed);
+      const collectionUnits = (state.collectionSpentMs + collectionElapsedMs) / 3600000 * ratePerHour;
+      const spent = Math.max(elapsed / 3600000 * ratePerHour, state.spentEstimate + state.committedEstimate + collectionUnits);
+      available = Math.min(available, (budgetUnits - spent) / ratePerHour * 3600000 - stopMs);
+    }
+    return available;
+  }
+
+  function collectionWindow() {
+    const available = collectionAllowance();
+    const startedAt = now(), realStartedAt = Date.now();
+    return { startedAt, realStartedAt, deadline: startedAt + available, realDeadline: realStartedAt + available, attempts: [] };
+  }
+
+  const collectionElapsed = (window) => Math.max(0, now() - window.startedAt, Date.now() - window.realStartedAt);
+  const collectionRemaining = (window) => Math.floor(Math.min(collectionAllowance(collectionElapsed(window)), window.deadline - now(), window.realDeadline - Date.now()));
+  function requireCollectionTime(window) {
+    if (collectionRemaining(window) <= 0) throw new Error("collection deadline/budget reached; preserving stop reserve");
+  }
+
+  function permanentCollectionFailure(result) {
+    const text = String(result.output || result.log || "");
+    // A terminal session/path/auth failure must not turn into a reconnect or allocation.
+    return /not found|no such|permission denied|forbidden|unauthorized|(?:HTTP\S*[: ]+|status(?: code)?[=: ]+|\()(?:401|403|404)\b|FileNotFoundError|PermissionError|invalid (?:path|manifest)|escapes/i.test(text);
+  }
+
+  function retryableCollectionFailure(result) {
+    if (result.aborted || result.spawnError || permanentCollectionFailure(result)) return false;
+    const text = String(result.output || result.log || "");
+    return Boolean(result.timedOut) || /Connection (?:was lost|reset|aborted|closed)|ECONNRESET|ETIMEDOUT|ReadTimeout|ConnectTimeout|TimeoutError|timed out|WebSocketConnectionClosed/i.test(text);
+  }
+
+  async function collectionStep({ operation, remote = null, window, signal, onEvent, run, outcome }) {
+    let last = null;
+    for (let attempt = 1; attempt <= 3; attempt += 1) {
+      signal?.throwIfAborted();
+      const remaining = collectionRemaining(window);
+      if (remaining <= 0) {
+        const detail = `${last?.detail ? `${last.detail}; ` : ""}collection deadline/budget reached; preserving stop reserve`;
+        emit(onEvent, { type: "collection_limit", operation, remote, detail });
+        return { ok: false, transferFailed: true, detail };
+      }
+      const result = await run(remaining);
+      const verdict = outcome(result);
+      const detail = verdict.ok ? null : `${verdict.note}${redactTail(result, 2000) ? `: ${redactTail(result, 2000)}` : ""}`;
+      const retryable = !verdict.ok && retryableCollectionFailure(result);
+      const receipt = {
+        type: "collection_attempt", operation, remote, attempt, ok: verdict.ok,
+        code: result.code, timedOut: Boolean(result.timedOut), aborted: Boolean(result.aborted || signal?.aborted),
+        retryable, detail, log: client.steps?.at(-1)?.log ?? null,
+      };
+      window.attempts.push(receipt);
+      state.collectionAttempts.push(receipt);
+      mkdirSync(logs, { recursive: true });
+      appendFileSync(join(logs, "collection-attempts.jsonl"), `${JSON.stringify(receipt)}\n`, { mode: 0o600 });
+      emit(onEvent, receipt);
+      signal?.throwIfAborted();
+      last = { ...verdict, result, detail, transferFailed: !verdict.ok && (retryable || permanentCollectionFailure(result)) };
+      if (verdict.ok || !retryable || attempt === 3) return last;
+      const delayMs = Math.min(1000, Math.max(0, Number(collectionRetryMs) || 0)) * attempt;
+      if (collectionRemaining(window) <= delayMs) {
+        return { ...last, detail: `${detail}; collection deadline/budget leaves no time for reconnect; preserving stop reserve` };
+      }
+      emit(onEvent, { type: "collection_retry", operation, remote, attempt, delayMs, detail });
+      await abortableSleep(delayMs, signal);
+    }
+  }
+
+  async function download({ remote, local, optional = false, onEvent = null, window = null, signal = null, attemptWallMs = 900000 }) {
     // G5-6: `colab download` writes the file and nothing else - it does not create the local parent,
     // and almost everything under out/ is in a subdirectory (assets/, attempts/, cache/, runs/...,
     // intermediates/). On a real VM 9 of the 13 files in the first collect failed with
     // "[Errno 2] No such file or directory", and the run lost the work the GPU had already done.
     mkdirSync(dirname(local), { recursive: true });
-    const result = await step(argvDownload({ session, remotePath: remote, localPath: local }), { label: "download", wallMs: 900000 });
-    if (result.code !== 0) {
-      emit(onEvent, { type: "download_failed", remote, code: result.code });
-      if (optional) return { ok: false, local, code: result.code };
-      throw new ColabCliError(`colab download ${remote} failed (exit ${result.code})`);
+    const target = window ? `${local}.collect-part` : local;
+    let transfer;
+    try {
+      const run = (remaining) => step(argvDownload({ session, remotePath: remote, localPath: target }), {
+        label: "download", wallMs: Math.min(attemptWallMs, remaining), signal,
+      });
+      const outcome = (result) => ({ ok: result.code === 0 && !result.timedOut && !result.aborted, note: `colab download ${remote} failed (exit ${result.code}${result.timedOut ? ", timed out" : ""})` });
+      if (window) transfer = await collectionStep({ operation: "download", remote, window, signal, onEvent, run, outcome });
+      else {
+        const result = await run(900000);
+        transfer = { ...outcome(result), result, detail: redactTail(result, 2000) };
+      }
+      if (transfer.ok && window) renameSync(target, local);
+    } finally {
+      if (window) rmSync(target, { force: true });
+    }
+    if (!transfer.ok) {
+      const detail = transfer.detail || transfer.note;
+      emit(onEvent, { type: "download_failed", remote, code: transfer.result?.code, detail });
+      if (optional) return { ok: false, local, code: transfer.result?.code, detail, transferFailed: transfer.transferFailed };
+      throw new ColabCliError(`colab download ${remote} failed: ${detail}`);
     }
     return { ok: true, local };
   }
@@ -1416,26 +1749,115 @@ export function createColabBackend({
   /**
    * Fetch the VM's `out/` tree (H13).
    *
-   * `colab download` takes one file, so the tree is listed on the VM (`colab/list_out.py`) and every
-   * file is fetched by its own remote path. Asking the CLI for the directory used to look correct only
-   * because the fake copied directories; on a real VM it fails.
+   * `colab download` takes one file. List once, then use individual downloads for small
+   * trees or pack the pending inventory into one stored ZIP for larger trees. Asking
+   * the CLI to download a directory is unsupported, including on the bulk path.
    */
-  async function downloadTree({ remoteDir, localDir, onEvent = null, timeout = 300, remember = null }) {
-    const listed = await execScript(listScript, { step: "list-out", timeout, onEvent });
-    const listOutcome = execOutcome(listed, "list-out");
-    emit(onEvent, { type: "list_out", code: listed.code, lost: isLost(listed), sentinel: listOutcome.ok });
-    if (!listOutcome.ok) return { ok: false, files: 0, listed: listed.code, detail: listOutcome.note };
+  async function downloadTree(options) {
+    const window = collectionWindow();
+    try {
+      return await downloadTreeInWindow({ ...options, window });
+    } finally {
+      state.collectionSpentMs += collectionElapsed(window);
+    }
+  }
+
+  // A CPU-only pack + one single-file download uses the CLI's supported transport. The
+  // same window covers listing, packing, reconnects, hashing and safe local extraction.
+  // Never fall back to N downloads after a failed bundle: that would spend the reserve twice.
+  async function downloadBundle({ entries, remoteDir, localDir, window, onEvent, remember, signal }) {
+    const temporary = mkdtempSync(join(scratch, "collection-"));
+    const archive = join(temporary, "collection.zip");
+    const staging = join(temporary, "files");
+    const remoteArchive = `${REMOTE_ROOT}/collection.zip`;
+    const script = join(temporary, "collection-bundle.py");
+    const failure = (detail) => ({ ok: false, files: entries.length, fetched: 0, skipped: 0, missing: entries.map(entry => entry.path), detail, transferFailed: true, collectionAttempts: window.attempts });
+    try {
+      validateCollectionEntries(entries);
+      if (remoteDir !== `${REMOTE_ROOT}/out`) throw new Error("invalid collection root");
+      writeFileSync(script, collectionBundleScript({ entries, root: remoteDir, archive: remoteArchive }), { mode: 0o600 });
+      const packed = await collectionStep({
+        operation: "bundle-out", window, signal, onEvent,
+        run: remaining => execScript(script, { step: "bundle-out", timeout: Math.max(1, Math.min(60, remaining / 1000)), wallMs: Math.min(60000, remaining), signal, onEvent }),
+        outcome: result => execOutcome(result, "bundle-out"),
+      });
+      if (!packed.ok) return failure(packed.detail);
+      const line = String(packed.result.output).split("\n").find(line => line.startsWith("COLLECTION_BUNDLE "));
+      const receipt = JSON.parse(line?.slice("COLLECTION_BUNDLE ".length) || "null");
+      if (!receipt || !/^[a-f0-9]{64}$/.test(receipt.sha256) || !Number.isSafeInteger(receipt.bytes) || receipt.bytes <= 0 || receipt.bytes > COLLECTION_MAX_BYTES + COLLECTION_ARCHIVE_OVERHEAD) {
+        throw new Error("invalid collection bundle receipt");
+      }
+      // A stalled first connection must leave room for a fresh CLI reconnect in
+      // the original two-minute window, rather than consuming the entire window.
+      const transfer = await download({ remote: remoteArchive, local: archive, optional: true, window, signal, onEvent, attemptWallMs: 60000 });
+      if (!transfer.ok) return failure(transfer.detail);
+      signal?.throwIfAborted();
+      const remaining = collectionRemaining(window);
+      if (remaining <= 0) throw new Error("collection deadline/budget reached; preserving stop reserve");
+      const config = join(temporary, "extract.json");
+      writeFileSync(config, JSON.stringify({ entries, archive, staging, receipt }), { mode: 0o600 });
+      await extractCollectionBundle(pythonBin, config, { wallMs: remaining, signal });
+      const hashes = JSON.parse(readFileSync(join(staging, "../hashes.json"), "utf8"));
+      // Validate every destination before publishing anything; existing evidence is retained
+      // on transport/extraction failure. No archive member is ever extracted into final out/.
+      for (const entry of entries) safeCollectionDestination(localDir, entry.path);
+      for (const entry of entries) {
+        signal?.throwIfAborted();
+        if (collectionRemaining(window) <= 0) throw new Error("collection deadline/budget reached; preserving stop reserve");
+        const local = join(localDir, entry.path);
+        mkdirSync(dirname(local), { recursive: true });
+        renameSync(join(staging, entry.path), local);
+        remember?.set(`${remoteDir}/${entry.path}`, { bytes: entry.bytes, mtime: entry.mtime, local, sha256: hashes[entry.path] });
+        emit(onEvent, { type: "collection_progress", completed: entries.indexOf(entry) + 1, total: entries.length, file: entry.path, bundled: true });
+      }
+      emit(onEvent, { type: "download_tree", files: entries.length, fetched: entries.length, skipped: 0, missing: 0, remoteDir, bundled: true });
+      return { ok: true, files: entries.length, fetched: entries.length, skipped: 0, missing: [], entries, collectionAttempts: window.attempts };
+    } catch (error) {
+      signal?.throwIfAborted();
+      return failure(`collection bundle rejected: ${error.message}`);
+    } finally {
+      rmSync(temporary, { recursive: true, force: true });
+    }
+  }
+
+  async function downloadTreeInWindow({ remoteDir, localDir, window, onEvent = null, timeout = 300, remember = null, relativePaths = null, signal = state.collectionSignal }) {
+    // Each invocation opens a fresh CLI connection to the stored session/kernel. Only this
+    // read-only listing is repeated: never ensureUp, run_jobs, reconcile or an upstream submit.
+    const listing = await collectionStep({
+      operation: "list-out", window, signal, onEvent,
+      run: (remaining) => execScript(listScript, { step: "list-out", timeout: Math.max(1, Math.min(timeout, 60, remaining / 1000)), wallMs: Math.min(60000, remaining), onEvent, signal }),
+      outcome: (result) => execOutcome(result, "list-out"),
+    });
+    const listed = listing.result;
+    emit(onEvent, { type: "list_out", code: listed?.code, lost: listed ? retryableCollectionFailure(listed) : false, sentinel: listing.ok, detail: listing.detail });
+    if (!listing.ok) return { ok: false, files: 0, listed: listed?.code, detail: listing.detail, transferFailed: listing.transferFailed, collectionAttempts: window.attempts };
     let entries;
     try {
-      entries = entriesForCollect(parseTreeListing(listed.output), state.collectPolicy);
+      const inventory = parseTreeListing(listed.output);
+      entries = relativePaths ? inventory.filter(entry => relativePaths.includes(entry.path)) : entriesForCollect(inventory, state.collectPolicy);
+      if (relativePaths?.some(path => !entries.some(entry => entry.path === path))) throw new Error("requested collection file was not found in out/");
     } catch (error) {
       emit(onEvent, { type: "list_out_unreadable", detail: error.message });
-      return { ok: false, files: 0, listed: listed.code, detail: error.message };
+      return { ok: false, files: 0, listed: listed.code, detail: error.message, transferFailed: true };
+    }
+    const pending = entries.filter(entry => {
+      const seen = remember?.get(`${remoteDir}/${entry.path}`);
+      return !(seen && seen.bytes !== null && seen.bytes === entry.bytes &&
+        resolve(seen.local || join(localDir, entry.path)) === resolve(localDir, entry.path) &&
+        (seen.mtime === null || entry.mtime === null || seen.mtime === entry.mtime) && existsSync(join(localDir, entry.path)));
+    });
+    if (pending.length >= COLLECTION_BUNDLE_THRESHOLD) {
+      for (const entry of pending) remember?.delete(`${remoteDir}/${entry.path}`);
+      const result = await downloadBundle({ entries: pending, remoteDir, localDir, window, onEvent, remember, signal });
+      return { ...result, files: entries.length, skipped: entries.length - pending.length, ...(result.ok ? { entries } : {}) };
     }
     let fetched = 0;
     let skipped = 0;
     const missing = [];
+    const problems = [];
+    let transferFailed = false;
     for (const entry of entries) {
+      signal?.throwIfAborted();
       const remote = `${remoteDir}/${entry.path}`;
       const local = join(localDir, ...entry.path.split("/"));
       // G5-14: every collect saw the whole tree (the last batch was collected twice in GPU test 5, and
@@ -1449,6 +1871,7 @@ export function createColabBackend({
         seen &&
         seen.bytes !== null &&
         seen.bytes === entry.bytes &&
+        resolve(seen.local || local) === resolve(local) &&
         (seen.mtime === null || entry.mtime === null || seen.mtime === entry.mtime) &&
         existsSync(local);
       if (unchanged) {
@@ -1456,33 +1879,41 @@ export function createColabBackend({
         emit(onEvent, { type: 'collection_progress', completed: fetched + skipped, total: entries.length, file: entry.path, reused: true });
         continue;
       }
-      const result = await download({ remote, local, optional: true, onEvent });
+      const result = await download({ remote, local, optional: true, onEvent, window, signal });
       if (result.ok) {
         fetched += 1;
-        if (remember) remember.set(remote, { bytes: entry.bytes, mtime: entry.mtime });
+        if (remember) remember.set(remote, { bytes: entry.bytes, mtime: entry.mtime, local, sha256: await collectionFileHash(local, signal, () => requireCollectionTime(window)) });
       } else {
+        remember?.delete(remote);
         missing.push(entry.path);
+        problems.push(result.detail);
+        transferFailed ||= result.transferFailed === true;
       }
       emit(onEvent, { type: 'collection_progress', completed: fetched + skipped, total: entries.length, file: entry.path, missing: missing.length });
     }
     emit(onEvent, { type: "download_tree", files: entries.length, fetched, skipped, missing: missing.length, remoteDir });
-    return { ok: fetched + skipped === entries.length, files: entries.length, fetched, skipped, missing, entries };
+    return { ok: fetched + skipped === entries.length, files: entries.length, fetched, skipped, missing, entries, detail: problems.join("; "), transferFailed, collectionAttempts: window.attempts };
   }
 
-  async function collectOut({ onEvent = null, expectComplete = true, jobsDoc = null } = {}) {
+  async function collectOut({ onEvent = null, expectComplete = true, jobsDoc = null, signal = state.collectionSignal } = {}) {
     const localOut = join(scratch, "out");
-    const result = await downloadTree({ remoteDir: `${REMOTE_ROOT}/out`, localDir: localOut, onEvent, remember: state.downloaded });
+    const result = await downloadTree({ remoteDir: `${REMOTE_ROOT}/out`, localDir: localOut, onEvent, remember: state.downloaded, signal });
     const manifestPath = join(localOut, "manifest.json");
     // G5-7: the manifest is the run's verdict and it lands with the rest of the tree. Requiring the
     // *whole* collect to have succeeded before reading it threw the verdict away whenever one sibling
     // failed - and the host was then left with `counts: null`, "applied 0" and no error text at all.
     let manifest = null;
-    if (existsSync(manifestPath)) manifest = JSON.parse(readFileSync(manifestPath, "utf8"));
+    const transferProblems = result.detail ? [result.detail] : [];
+    if (result.entries?.some((entry) => entry.path === "manifest.json") && !(result.missing ?? []).includes("manifest.json") && existsSync(manifestPath)) {
+      try { manifest = JSON.parse(readFileSync(manifestPath, "utf8")); }
+      catch (error) { transferProblems.push(`collected manifest.json is invalid: ${error.message}`); }
+    }
     const attemptsPath = join(localOut, "attempts");
     const attempts = existsSync(attemptsPath)
       ? readdirSync(attemptsPath).filter((name) => name.endsWith(".json")).map((name) => JSON.parse(readFileSync(join(attemptsPath, name), "utf8")))
       : [];
-    let verification = manifest ? verifyAgainstManifest(manifest, localOut) : { verified: false, problems: [] };
+    const verifyCollected = state.collectPolicy === "full" ? verifyCollectedManifest : verifyAgainstManifest;
+    let verification = manifest ? verifyCollected(manifest, localOut) : { verified: false, problems: [] };
     // PB-COLLECT: when final collect is incomplete, promote hash-verified live-preview artifacts
     // rather than treating a remote success as total loss.
     let previewPromoted = [];
@@ -1493,22 +1924,26 @@ export function createColabBackend({
         jobsDoc,
       });
       if (previewPromoted.length && manifest) {
-        verification = verifyAgainstManifest(manifest, localOut);
+        verification = verifyCollected(manifest, localOut);
       }
     }
     const outcome = classifyCollectionOutcome({
       manifest,
       verified: verification.verified,
       missing: result.missing ?? [],
-      problems: verification.problems,
+      problems: [...transferProblems, ...verification.problems],
       previewPromoted,
     });
+    if (verification.problems.some(problem => problem.includes(": captured workflow "))) result.transferFailed = true;
     emit(onEvent, {
       type: "collect",
       complete: manifest?.complete === true,
       attempts: attempts.length,
       verified: verification.verified,
-      problems: verification.problems,
+      problems: [...transferProblems, ...verification.problems],
+      transferFailed: result.transferFailed === true,
+      runnerExecSucceeded: state.lastExec?.sentinel === true,
+      collectionAttempts: result.collectionAttempts ?? [],
       expectComplete,
       // G5-7: a collect the UI can explain: what the VM listed, what arrived, and what did not
       files: result.files ?? 0,
@@ -1521,13 +1956,21 @@ export function createColabBackend({
       collectionComplete: outcome.collectionComplete,
       recoveredJobs: outcome.recoveredJobs,
     });
+    // Re-transferring bytes cannot repair a semantic/security error in a manifest path.
+    // Stop here rather than letting runPackage's digest-repair loop re-download the tree.
+    if (verification.problems.some((problem) => /has no relative path|contains a NUL byte|is absolute|escapes the collected directory/.test(problem))) {
+      throw new ColabCliError(`collected manifest rejected: ${verification.problems.join("; ")}`, { problems: verification.problems, local: localOut });
+    }
     return {
       ok: result.ok,
       manifest,
       attempts,
       local: localOut,
       verified: verification.verified,
-      problems: verification.problems,
+      problems: [...transferProblems, ...verification.problems],
+      transferFailed: result.transferFailed === true,
+      runnerExecSucceeded: state.lastExec?.sentinel === true,
+      collectionAttempts: result.collectionAttempts ?? [],
       missing: result.missing ?? [],
       files: result.files ?? 0,
       fetched: result.fetched ?? 0,

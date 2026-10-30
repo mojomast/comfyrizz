@@ -1,4 +1,5 @@
 import { copyFileSync, cpSync, existsSync, mkdirSync, readFileSync, rmSync, statSync } from 'node:fs';
+import { recordGenerationReceipts, assertModelContribution, recordRenderedContribution } from '../../../packages/jobs/src/model-contribution.mjs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { planJobs } from '../../../packages/jobs/src/index.mjs';
@@ -9,10 +10,11 @@ import { runQwenColab } from '../../../scripts/tts/qwen_colab.mjs';
 import { compileTimeline } from '../../../packages/planner/dist/src/index.js';
 import { narrationOptions, repoRoot } from '../../renderer/scripts/render-package-lib.mjs';
 import { renderPipeline } from '../../renderer/scripts/render-pipeline.mjs';
+import { resolveBrowserExecutable } from '../../renderer/scripts/browser-executable.mjs';
 import { pipelineCommand } from './pipeline-process.mjs';
 import { copyNamedAssets } from './run-assets.mjs';
 import { json, writeJson, preparePresenterInputs, correctPresenters, presenterScenes } from './pipeline-media.mjs';
-import { summarizeJobs, syncnetConfigured, SYNCNET_RUNTIME_SKIP_CODE, SYNCNET_SKIP_MESSAGE } from './pipeline-contract.mjs';
+import { summarizeJobs, syncnetConfigured, SYNCNET_RUNTIME_SKIP_CODE, SYNCNET_SKIP_MESSAGE, musicPerformanceScenes, MUSIC_SYNC_SKIP_CODE, MUSIC_SYNC_SKIP_MESSAGE } from './pipeline-contract.mjs';
 import { assessBudget, nextJobUpperEstimate, rateForGpu, reserveUnitsFor, spendingMinutes, COLLECT_AND_STOP_RESERVE_MINUTES } from '../../../packages/backends/src/budget.mjs';
 import { decideRenderFallback } from '../../../packages/backends/src/colab-render-plan.mjs';
 import { redactForLog } from '../../../packages/backends/src/colab-plan.mjs';
@@ -85,6 +87,9 @@ async function releaseHeld(reason) {
 
 async function main() {
   let pkg = json(packagePath), renderResult;
+  for (const scene of musicPerformanceScenes(pkg)) {
+    send({ kind: 'warning', stageId: 'preflight', sceneId: scene.id, code: MUSIC_SYNC_SKIP_CODE, message: MUSIC_SYNC_SKIP_MESSAGE });
+  }
   const syncnetReady = syncnetConfigured(process.env);
   const remoteRender = plan.remoteRender === true && plan.options?.backendId === 'colab' && plan.options?.renderLocation === 'colab';
   await stage('preflight', async () => {
@@ -92,7 +97,8 @@ async function main() {
     if (!validation.valid) throw new Error('Invalid pipeline input');
     await command('ffmpeg', ['-version']); await command('ffprobe', ['-version']);
     if (plan.voiced) await command(process.env.COMFYRIZZ_PYTHON || 'python3', ['-c', 'import numpy']);
-    if (!remoteRender && !existsSync(process.env.REMOTION_BROWSER || '/usr/bin/google-chrome') && render === renderPipeline) throw new Error('Configure REMOTION_BROWSER with an installed headless browser before starting generation.');
+    const configuredBrowser = typeof process.env.REMOTION_BROWSER === 'string' && process.env.REMOTION_BROWSER.trim() !== '';
+    if (!remoteRender && configuredBrowser && !existsSync(resolveBrowserExecutable()) && render === renderPipeline) throw new Error('REMOTION_BROWSER does not point to an installed headless browser. Fix the path or unset it to let Remotion manage a browser.');
     cpSync(join(repoRoot, 'workflows'), join(workDir, 'workflows'), { recursive: true });
     if (plan.presenters && syncnetReady) await command(process.env.COMFYRIZZ_SYNCNET_PYTHON, ['-c', 'import cv2, torch, numpy; assert hasattr(cv2, "CascadeClassifier")']);
     if (plan.voiced && !plan.remoteVoice) {
@@ -247,6 +253,16 @@ with zipfile.ZipFile(sys.argv[1]) as z:
       }
     }
     const collected = colab ? join(scratch, 'out') : outDir;
+    if (heldBackend && typeof heldBackend.downloadListed === 'function') {
+      // Remote rendering still requires local verification of generation provenance.
+      // Fetch the contribution and captured graph before paying for the render.
+      const files = (result.manifest?.jobs ?? []).filter(entry => entry.status === 'succeeded').flatMap(entry => (entry.outputs ?? []).flatMap(output => {
+        const file = output.relative ?? output.file;
+        return typeof file === 'string' ? [file, file.replace(/\.[^/.]+$/, '.workflow.api.json')] : [];
+      }));
+      await heldBackend.downloadListed(files, collected, { onEvent: sourceEvent });
+      recordGenerationReceipts({ manifest: result.manifest, jobsDoc: result.jobsDoc, outputDir: collected, backend: backend.id });
+    }
     copyNamedAssets({ pkg: result.package, outputDir: collected, packageDir: workDir });
     pkg = result.package; writeJson(packagePath, pkg);
   }, jobs.length === 0);
@@ -269,6 +285,7 @@ with zipfile.ZipFile(sys.argv[1]) as z:
   }, !plan.presenters);
 
   await stage('render', async () => {
+    assertModelContribution({ pkg: json(packagePath), packageDir: workDir });
     const localRender = async () => {
       renderResult = await render(packagePath, join(runDir, 'video.mp4'), { signal, onEvent: event => progress(event.phase, event.progress) });
       // Only the isolated run snapshot receives derived assets; the saved project
@@ -339,11 +356,14 @@ with zipfile.ZipFile(sys.argv[1]) as z:
     try {
       report.probe = JSON.parse((await command('ffprobe', ['-v', 'error', '-count_frames', '-show_entries', 'stream=codec_type,width,height,nb_read_frames,sample_rate:format=duration', '-of', 'json', join(runDir, 'video.mp4')])).stdout);
       const video = report.probe.streams.find(s => s.codec_type === 'video'), audio = report.probe.streams.find(s => s.codec_type === 'audio');
-      report.checks = { frames: Number(video?.nb_read_frames) === renderResult.frames, dimensions: video?.width === renderResult.width && video?.height === renderResult.height, duration: Math.abs(Number(report.probe.format.duration) - renderResult.frames / renderResult.fps) < 0.1, narrationStream: !plan.voiced || Boolean(audio) };
-      if (plan.voiced) {
+      const audioRequired = plan.requiresAudio === true || plan.voiced;
+      report.checks = { frames: Number(video?.nb_read_frames) === renderResult.frames, dimensions: video?.width === renderResult.width && video?.height === renderResult.height, duration: Math.abs(Number(report.probe.format.duration) - renderResult.frames / renderResult.fps) < 0.1, narrationStream: !audioRequired || Boolean(audio) };
+      if (audioRequired) {
         const measure = await command('ffmpeg', ['-hide_banner', '-nostats', '-i', join(runDir, 'video.mp4'), '-vn', '-af', 'volumedetect', '-f', 'null', '-']);
         const mean = /mean_volume:\s*(-?[\d.]+) dB/.exec(measure.stderr);
         report.checks.nonSilentAudio = Boolean(mean) && Number(mean[1]) > -60;
+      }
+      if (plan.voiced) {
         const narrationPath = join(runDir, 'audio-verification.json');
         rmSync(narrationPath, { force: true });
         const verdict = await command(process.env.COMFYRIZZ_PYTHON || 'python3', [join(repoRoot, 'scripts/tts/verify_mix.py'), '--video', join(runDir, 'video.mp4'), '--narration', join(workDir, 'audio/narration.norm.wav'), '--out', narrationPath], { allowedCodes: [0, 2] });
@@ -356,6 +376,9 @@ with zipfile.ZipFile(sys.argv[1]) as z:
         report.checks.narrationEnvelope = narration.passed === true;
       }
       if (Object.values(report.checks).some(value => !value)) throw new Error('Final video verification failed');
+      const verifiedPackage = json(packagePath);
+      report.modelContribution = recordRenderedContribution({ pkg: verifiedPackage, packageDir: workDir,
+        timeline: compileTimeline(verifiedPackage, narrationOptions(workDir)), videoPath: join(runDir, 'video.mp4') });
     } catch (error) {
       report.error = error.message;
       if (plan.voiced && report.checks.narrationEnvelope === undefined) report.checks.narrationEnvelope = false;

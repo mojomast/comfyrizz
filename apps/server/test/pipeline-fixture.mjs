@@ -5,15 +5,25 @@ import assert from 'node:assert/strict';
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
+import { plannedContribution, collectMockContribution } from './helpers/comfy-contribution.mjs';
 
 export function fixture(t) {
   const runDir = mkdtempSync(join(tmpdir(), 'pipeline-stages-')), workDir = join(runDir, 'work');
   mkdirSync(workDir); t.after(() => rmSync(runDir, { recursive: true, force: true }));
+  const previousPython = process.env.COMFYRIZZ_SYNCNET_PYTHON, previousDir = process.env.COMFYRIZZ_SYNCNET_DIR;
+  const fakePython = join(runDir, 'python'), modelDir = join(runDir, 'syncnet');
+  mkdirSync(modelDir); writeFileSync(fakePython, ''); writeFileSync(join(modelDir, 'syncnet_v2.model'), 'fixture');
+  process.env.COMFYRIZZ_SYNCNET_PYTHON = fakePython; process.env.COMFYRIZZ_SYNCNET_DIR = modelDir;
+  t.after(() => {
+    if (previousPython === undefined) delete process.env.COMFYRIZZ_SYNCNET_PYTHON; else process.env.COMFYRIZZ_SYNCNET_PYTHON = previousPython;
+    if (previousDir === undefined) delete process.env.COMFYRIZZ_SYNCNET_DIR; else process.env.COMFYRIZZ_SYNCNET_DIR = previousDir;
+  });
   const pkg = JSON.parse(readFileSync(new URL('../../../examples/data-story/package.json', import.meta.url)));
   pkg.voice = { enabled: true, engine: 'qwen3-tts', voice: 'fixture', strict: true };
   for (const asset of Object.values(pkg.assets)) if (asset.gen?.workflow) asset.gen.workflow_sha256 = '0'.repeat(64);
   pkg.presenter = { enabled: true, portrait: 'a_data_still', scenes: [pkg.scenes[0].id] };
   pkg.scenes[0].narration = 'Test narration.';
+  plannedContribution(pkg, { sceneId: 's_plate' });
   writeFileSync(join(workDir, 'package.json'), JSON.stringify(pkg));
   const plan = { packageId: pkg.id, baseRevision: pkg.revision, voiced: true, presenters: true, remoteVoice: true, options: { backendId: 'colab' }, budget: { narrationCeilingUnits: 2, mediaCeilingUnits: 5 } };
   const events = [], calls = [];
@@ -30,6 +40,7 @@ export function fixture(t) {
       preflight: async () => ({ ok: true, ready: true }), estimate: async () => ({ gpuMinutes: 1 }), usage: async () => ({ balance: 100 }),
       runPackage: async (_pkg, { onEvent }) => {
         calls.push('media'); onEvent({ event: 'job_start', job: 'test.still' });
+        collectMockContribution(pkg, workDir, { sceneId: 's_plate' });
         calls.push('stopped'); return { ok: true, package: pkg, teardown: { state: 'stopped' } };
       },
       teardown: async () => { calls.push('cleanup'); return { state: 'stopped' }; },

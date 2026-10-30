@@ -51,11 +51,11 @@ test('the Jobs hint is plain', () => {
   assert.equal(/fallback/i.test(indexHtml), false, 'fallback wording in the editor shell');
 });
 
-test('Settings names Level, not the old action, for the spend cap', () => {
-  assert.match(settings, /Set the spend cap in Level/);
-  const oldHint = ['Set the spend cap', 'in', 'Generate'].join(' ');
+test('Settings names Generate for the spend cap', () => {
+  assert.match(settings, /Set the spend cap in Generate/);
+  const oldHint = ['Set the spend cap', 'in', 'Level'].join(' ');
   assert.equal(settings.includes(oldHint), false);
-  assert.equal(/Set the spend cap[^<']*Generate/.test(settings), false);
+  assert.equal(/Set the spend cap[^<']*Level/.test(settings), false);
 });
 
 test('Settings labels the local option This computer, not the old CPU wording', () => {

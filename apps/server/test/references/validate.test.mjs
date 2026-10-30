@@ -3,6 +3,8 @@ import assert from 'node:assert/strict';
 import {
   validateUpload,
   LIMITS,
+  MAX_AUDIO_BYTES,
+  MAX_AUDIO_DURATION_SEC,
   MAX_IMAGE_BYTES,
   MAX_VIDEO_BYTES,
   MAX_VIDEO_DURATION_SEC,
@@ -46,6 +48,34 @@ function mp4Bytes(brand = 'isom') {
 
 function webmBytes() {
   return Buffer.from([0x1a, 0x45, 0xdf, 0xa3, 0x42, 0x86, 0x81, 0x01]);
+}
+
+function wavBytes(length = 44) {
+  const bytes = Buffer.alloc(length);
+  bytes.write('RIFF', 0, 'ascii');
+  bytes.writeUInt32LE(length - 8, 4);
+  bytes.write('WAVE', 8, 'ascii');
+  bytes.write('fmt ', 12, 'ascii');
+  bytes.writeUInt32LE(16, 16);
+  bytes.writeUInt16LE(1, 20);
+  bytes.writeUInt16LE(2, 22);
+  bytes.writeUInt32LE(44100, 24);
+  bytes.writeUInt32LE(176400, 28);
+  bytes.writeUInt16LE(4, 32);
+  bytes.writeUInt16LE(16, 34);
+  if (length >= 44) {
+    bytes.write('data', 36, 'ascii');
+    bytes.writeUInt32LE(length - 44, 40);
+  }
+  return bytes;
+}
+
+function mp3Bytes() {
+  return Buffer.concat([Buffer.from([0xff, 0xfb, 0x90, 0x64]), Buffer.alloc(413)]);
+}
+
+function id3Bytes() {
+  return Buffer.concat([Buffer.from([0x49, 0x44, 0x33, 0x04, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00]), mp3Bytes()]);
 }
 
 test('sniffs PNG and reports the sniffed type', () => {
@@ -129,6 +159,62 @@ test('sniffs every supported image and video magic', () => {
   }
 });
 
+test('sniffs WAV, ID3-tagged MP3 and raw MP3 frame signatures', () => {
+  const cases = [
+    ['song.wav', wavBytes(), 'audio/wav', 'wav'],
+    ['tagged.mp3', id3Bytes(), 'audio/mpeg', 'mp3'],
+    ['frames.mp3', mp3Bytes(), 'audio/mpeg', 'mp3'],
+  ];
+  for (const [filename, bytes, mime, ext] of cases) {
+    const result = validateUpload({ bytes, filename });
+    assert.equal(result.ok, true, filename);
+    assert.equal(result.kind, 'audio', filename);
+    assert.equal(result.mime, mime, filename);
+    assert.equal(result.ext, ext, filename);
+  }
+});
+
+test('audio content wins over misleading MIME and extension hints', () => {
+  const result = validateUpload({
+    bytes: wavBytes(),
+    filename: 'theme.mp3',
+    declaredMime: 'audio/mp3',
+  });
+  assert.equal(result.ok, true);
+  assert.equal(result.kind, 'audio');
+  assert.equal(result.mime, 'audio/wav');
+  assert.equal(result.ext, 'wav');
+  assert.equal(result.warnings.length, 2);
+
+  const spoofed = validateUpload({ bytes: pngBytes(), filename: 'song.mp3', declaredMime: 'audio/mpeg' });
+  assert.equal(spoofed.ok, true);
+  assert.equal(spoofed.kind, 'image');
+  assert.equal(spoofed.mime, 'image/png');
+});
+
+test('truncated ID3 and invalid MPEG audio headers cannot spoof MP3 support', () => {
+  const invalid = [
+    Buffer.from('ID3'),
+    Buffer.from([0x49, 0x44, 0x33, 0x04, 0x00, 0x00, 0x80, 0x00, 0x00, 0x00]),
+    Buffer.from([0xff, 0xeb, 0x90, 0x64]),
+    Buffer.from([0xff, 0xf1, 0x90, 0x64]),
+    Buffer.from([0xff, 0xfb, 0xf0, 0x64]),
+    Buffer.from([0xff, 0xfb, 0x9c, 0x64]),
+  ];
+  for (const bytes of invalid) {
+    const result = validateUpload({ bytes, filename: 'fake.mp3', declaredMime: 'audio/mpeg' });
+    assert.equal(result.ok, false);
+    assert.equal(result.code, 'UNSUPPORTED_TYPE');
+  }
+});
+
+test('audio uploads have their own 100 MiB cap', () => {
+  const result = validateUpload({ bytes: wavBytes(MAX_AUDIO_BYTES + 1), filename: 'huge.wav' });
+  assert.equal(result.ok, false);
+  assert.equal(result.code, 'TOO_LARGE');
+  assert.match(result.message, /100\.0 MB/);
+});
+
 test('acceptance: zero bytes is EMPTY', () => {
   const result = validateUpload({ bytes: Buffer.alloc(0), filename: 'empty.png' });
   assert.equal(result.ok, false);
@@ -203,6 +289,8 @@ test('unknown and plain-text bytes are rejected as UNSUPPORTED_TYPE', () => {
 test('limits are exported as constants and grouped', () => {
   assert.equal(MAX_IMAGE_BYTES, 20 * 1024 * 1024);
   assert.equal(MAX_VIDEO_BYTES, 200 * 1024 * 1024);
+  assert.equal(MAX_AUDIO_BYTES, 100 * 1024 * 1024);
+  assert.equal(MAX_AUDIO_DURATION_SEC, 300);
   assert.equal(MAX_VIDEO_DURATION_SEC, 60);
   assert.equal(MAX_VIDEO_DURATION_SECONDS, 60);
   assert.equal(MAX_REFERENCES, 24);
@@ -214,6 +302,9 @@ test('limits are exported as constants and grouped', () => {
   assert.equal(LIMITS.videoBytes, MAX_VIDEO_BYTES);
   assert.equal(LIMITS.videos.maxBytes, MAX_VIDEO_BYTES);
   assert.equal(LIMITS.videos.maxDurationSec, 60);
+  assert.equal(LIMITS.audioBytes, MAX_AUDIO_BYTES);
+  assert.equal(LIMITS.audios.maxBytes, MAX_AUDIO_BYTES);
+  assert.equal(LIMITS.audios.maxDurationSec, MAX_AUDIO_DURATION_SEC);
   assert.equal(LIMITS.referencesPerConversation, 24);
   assert.equal(LIMITS.totalBytes, MAX_TOTAL_BYTES);
   assert.ok(Object.isFrozen(LIMITS));

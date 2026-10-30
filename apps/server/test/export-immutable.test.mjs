@@ -15,6 +15,7 @@ import { createRenderRoutes } from '../src/routes/render.mjs';
 import { finalGate } from '../src/takes/gate.mjs';
 import { applyFinalRender, finalRenderFormat } from '../../renderer/scripts/render-package-lib.mjs';
 import { createDeliverySnapshot } from '../src/productions/delivery-snapshot.mjs';
+import { collectMockContribution } from './helpers/comfy-contribution.mjs';
 
 const repo = new URL('../../..', import.meta.url).pathname;
 const seed = JSON.parse(readFileSync(join(repo, 'examples', 'launch-demo', 'package.json'), 'utf8'));
@@ -34,6 +35,7 @@ function workspace(t) {
 }
 
 function save(work, pkg) {
+  collectMockContribution(pkg, work.packageDir);
   writeFileSync(work.packagePath, `${JSON.stringify(pkg, null, 2)}\n`);
   return work.packagePath;
 }
@@ -253,4 +255,3 @@ test('UX15: an explicit final export is gated even with no take sidecar', async 
   assert.equal(response.body.code, 'RENDER_GATE_BLOCKED');
   assert.equal(renders, 0, 'the gate refuses before the exporter is reached');
 });
-

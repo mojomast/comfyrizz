@@ -214,6 +214,8 @@ export interface Timeline {
 export class TimelineError extends Error {
   readonly code: string;
   readonly sceneId?: string;
+  /** A package/plan problem is client-correctable, so routes answer 422 instead of a naked 500. */
+  readonly status = 422;
   constructor(code: string, message: string, sceneId?: string) {
     super(message);
     this.name = 'TimelineError';
@@ -381,6 +383,55 @@ function growTowardTarget(plans: ScenePlan[], target: number): void {
     for (const plan of growable) {
       if (totalFrames(plans) >= target) break;
       plan.duration = Math.min(plan.max, plan.duration + step);
+    }
+  }
+}
+
+/** Adjust only scene windows; never change fps, transitions, audio or media playback. */
+function retimeExact(plans: ScenePlan[], pkg: ComfyrizzPackage, target: number, fps: number, options: CompileOptions): void {
+  const bounds = plans.map((plan, i) => {
+    const incoming = i ? plans[i - 1].transitionOut : 0;
+    const chunks = options.narration?.[plan.scene.id] ?? [];
+    const roundedSpeech = chunks.length ? chunks.reduce((sum, chunk) => sum + frameSecondsToFrames(chunk.seconds, fps), 0)
+      + frameSecondsToFrames(options.narrationGapSeconds ?? DEFAULT_NARRATION_GAP_SECONDS, fps) * (chunks.length - 1)
+      + frameSecondsToFrames(options.narrationPaddingSeconds ?? DEFAULT_NARRATION_PADDING_SECONDS, fps) : 0;
+    const spoken = Math.max(roundedSpeech, plan.narrationFrames ?? 0, plan.scene.narration_duration_frames ?? 0);
+    const cues = plan.scene.motion?.cue_seconds ?? [];
+    const cueFloor = cues.reduce((max, seconds) => isFiniteNumber(seconds) && seconds >= 0 ? Math.max(max, Math.floor(seconds * fps) + 1) : max, 0);
+    let min = Math.max(plan.min, incoming, plan.transitionOut, spoken ? spoken + plan.transitionOut : 0, cueFloor);
+    let max = Math.max(plan.max, spoken ? spoken + plan.transitionOut : 0);
+    // Timed drawings and edited audio cannot safely be shortened without editing their content.
+    if (plan.scene.drawing || plan.scene.audio_trim) min = Math.max(min, plan.duration);
+    const refs = [plan.scene.background?.asset, ...(plan.scene.foreground ?? []).map(item => item.asset), ...(plan.scene.media ?? []).map(item => item.asset)];
+    // Generated/video coverage and user-locked scenes must not be stretched or trimmed here.
+    const video = refs.some(id => id && pkg.assets?.[id]?.kind === 'video');
+    if (plan.scene.locked || video) {
+      min = Math.max(min, plan.duration);
+      max = Math.min(max, plan.duration);
+    }
+    return { min, max, video };
+  });
+  const overlaps = plans.slice(0, -1).reduce((sum, plan) => sum + plan.transitionOut, 0);
+  const minTotal = bounds.reduce((sum, bound) => sum + bound.min, -overlaps);
+  const maxTotal = bounds.reduce((sum, bound) => sum + bound.max, -overlaps);
+  if (bounds.some(bound => bound.min > bound.max) || target < minTotal || target > maxTotal) {
+    const videoCount = bounds.filter(bound => bound.video).length;
+    const coverage = target > maxTotal && videoCount > 0
+      ? ` Shortfall ${target - maxTotal} project frames at ${fps} fps; ${videoCount} video scene windows are fixed. Explicitly author scene preferredFrames totalling ${target + overlaps} frames (${overlaps} overlap), then plan sufficient source footage at each source's fps for changed windows, or add shots. Do not stretch playback or insert unrequested holds.`
+      : ' Shorten narration or transitions, adjust locked/timed scenes, add scenes, or choose a different duration.';
+    throw new TimelineError('exact-duration-impossible', `Exact target ${target} frames cannot fit the scene, transition, narration, trim and media constraints (available ${minTotal}–${maxTotal} frames).${coverage}`);
+  }
+  plans.forEach((plan, i) => { plan.duration = clamp(plan.duration, bounds[i].min, bounds[i].max); });
+  let delta = target - totalFrames(plans);
+  while (delta !== 0) {
+    const candidates = plans.map((plan, i) => ({ plan, bound: bounds[i] })).filter(({ plan, bound }) => delta > 0 ? plan.duration < bound.max : plan.duration > bound.min);
+    const share = Math.max(1, Math.floor(Math.abs(delta) / candidates.length));
+    for (const { plan, bound } of candidates) {
+      const amount = Math.min(Math.abs(delta), share, delta > 0 ? bound.max - plan.duration : plan.duration - bound.min);
+      const change = Math.sign(delta) * amount;
+      plan.duration += change;
+      delta -= change;
+      if (!delta) break;
     }
   }
 }
@@ -721,15 +772,20 @@ export function compileTimeline(pkg: ComfyrizzPackage, options: CompileOptions =
   }
 
   const plans = planScenes(pkg, options, fps);
-  validateTransitions(plans);
+  if (!pkg.duration?.exact) validateTransitions(plans);
 
   const mode = pkg.duration?.mode === 'target' ? 'target' : 'flexible';
   const requested = mode === 'target' && isFiniteNumber(pkg.duration?.targetFrames) ? Math.max(1, Math.floor(pkg.duration!.targetFrames!)) : null;
+  if (pkg.duration?.exact && requested === null) {
+    throw new TimelineError('bad-target', 'Exact duration requires target mode and targetFrames.');
+  }
   const warnings: string[] = [];
   if (mode === 'target') {
     if (requested === null) warnings.push('Target mode without targetFrames: using the flexible length.');
+    else if (pkg.duration?.exact) retimeExact(plans, pkg, requested, fps, options);
     else growTowardTarget(plans, requested);
   }
+  validateTransitions(plans);
 
   const provisional = plans.some(plan => plan.provisional);
   if (provisional) warnings.push('Narration is not measured yet; timeline is provisional and must not be exported as final.');

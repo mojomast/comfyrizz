@@ -15,6 +15,8 @@ import {
 import { loadSyncnetBanner } from '../syncnet-notice.ts';
 import { bindPlanDecision, planDecisionAnswers, takeApprovalFailure } from '../approve-generate.ts';
 import type { EasyState, EasyStepContext, EasyStepModule, StepFacts } from '../types.ts';
+import { agentConsoleMarkup, mountAgentConsole } from '../agent-console.ts';
+import { openFullPlanEditor } from '../full-plan.ts';
 
 const PREVIEW_TITLE = 'Preview';
 const EMPTY_PREVIEW = 'Preview appears after you generate.';
@@ -60,10 +62,19 @@ const loadedSnapshots = new Set<string>();
 let fallbackSnapshot: unknown = null;
 let registeredPackage: unknown = null;
 let planApprovalError: string | null = null;
+let fullPlanReviewRequested: string | null = null;
+
+export function requestFullPlanReview(productionId: string): void {
+  fullPlanReviewRequested = productionId;
+}
 
 export function setPlanSnapshot(snapshot: unknown, productionId?: string | null): void {
   if (typeof productionId === 'string' && productionId) snapshots.set(productionId, snapshot);
   else fallbackSnapshot = snapshot;
+}
+
+export function invalidatePlanSnapshot(productionId: string | null): void {
+  if (typeof productionId === 'string' && productionId) loadedSnapshots.delete(productionId);
 }
 
 function snapshotFor(productionId: string | null): unknown {
@@ -318,6 +329,7 @@ function loadingHtml(status: 'writing' | 'building' | 'proposing'): string {
   return `<div class="easy-plan easy-plan-loading" data-easy-plan>
 ${renderSkeleton(4, message)}
 <p class="easy-plan-status" data-easy-plan-status role="status">${escapeHtml(message)}</p>
+${agentConsoleMarkup()}
 </div>`;
 }
 
@@ -344,6 +356,7 @@ ${renderErrorState({
       data: { 'data-easy-plan-retry': '' },
     },
   })}
+${agentConsoleMarkup()}
 </div>`;
 }
 
@@ -380,6 +393,8 @@ export function renderPlan(state: EasyState, _facts?: StepFacts, options: PlanRe
 ${notice}
 ${approvalErrorBlock}
 ${offlineBanner(state)}
+${agentConsoleMarkup()}
+<div class="easy-plan-review-bar"><button type="button" class="btn btn-secondary" data-easy-full-plan-review>Review &amp; edit full plan</button><span>Consult every scene, prompt and GPU action before you approve.</span></div>
 <div class="easy-two-col easy-plan-grid">
 ${renderShots(state, card, scenes)}
 ${renderPreview(state)}
@@ -442,6 +457,8 @@ export const step: EasyStepModule = {
 
   bind(el: HTMLElement, ctx: EasyStepContext) {
     let disposed = false;
+    let reviewOpening = false;
+    const stopAgentConsole = mountAgentConsole(el);
 
     const registered = ctx.host.getPackage();
     if (registered !== registeredPackage) {
@@ -499,6 +516,24 @@ export const step: EasyStepModule = {
       void pending.then(done, done);
     }
 
+    function openReview(): void {
+      if (reviewOpening) return;
+      reviewOpening = true;
+      const productionId = ctx.store.get().productionId;
+      void openFullPlanEditor(ctx, {
+        onSnapshot(snapshot) {
+          const currentProductionId = ctx.store.get().productionId ?? productionId;
+          if (currentProductionId) loadedSnapshots.add(currentProductionId);
+          setPlanSnapshot(snapshot, currentProductionId);
+        },
+      }).finally(() => {
+        reviewOpening = false;
+        // The opening bind may have been replaced while the package registered.
+        // Refresh the current Plan surface after either save or cancel.
+        ctx.rerender();
+      });
+    }
+
     function retryPlan(): void {
       ctx.shell.setStatus(COPY.plan.writing);
       const retry = el.querySelector<HTMLButtonElement>('[data-easy-plan-retry]');
@@ -514,6 +549,10 @@ export const step: EasyStepModule = {
     function onClick(event: Event): void {
       const target = event.target;
       if (!(target instanceof Element)) return;
+      if (target.closest('[data-easy-full-plan-review]')) {
+        openReview();
+        return;
+      }
       if (target.closest('[data-easy-approve-retry]')) {
         const button = target.closest<HTMLButtonElement>('[data-easy-approve-retry]');
         if (button) button.disabled = true;
@@ -601,6 +640,10 @@ export const step: EasyStepModule = {
     el.addEventListener('click', onClick);
     el.addEventListener('input', onInput);
     el.addEventListener('change', onChange);
+    if (registered && (fullPlanReviewRequested === 'new' || (state.productionId && fullPlanReviewRequested === state.productionId))) {
+      fullPlanReviewRequested = null;
+      queueMicrotask(openReview);
+    }
     syncPrimary();
     if (planApprovalError) {
       el.querySelector<HTMLButtonElement>('[data-easy-approve-retry]')?.focus();
@@ -614,6 +657,7 @@ export const step: EasyStepModule = {
       el.removeEventListener('click', onClick);
       el.removeEventListener('input', onInput);
       el.removeEventListener('change', onChange);
+      stopAgentConsole();
     };
   },
 

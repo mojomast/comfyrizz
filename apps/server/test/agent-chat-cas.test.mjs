@@ -9,6 +9,7 @@ import { createProjectChat } from '../src/agent-chat.mjs';
 import { PackageStore } from '../src/store.mjs';
 import { createTakeStore } from '../src/takes/store.mjs';
 import { TAKES_SCHEMA } from '../src/takes/model.mjs';
+import { plannedContribution } from './helpers/comfy-contribution.mjs';
 
 const CONVERSATION = 'chat_cas_test_0001';
 const FIXTURE_PATH = fileURLToPath(new URL('../../../packages/schema/fixtures/valid/variants.json', import.meta.url));
@@ -23,7 +24,7 @@ const PLAN = {
   stylePreset: 'cinematic-dark',
   scenes: [{
     id: 's_title', layout: 'title', headline: 'Commit, then read', sub: 'A chat CAS test',
-    narration: 'Commit, then read.', seconds: 4, visual: 'A procedural gradient',
+    narration: 'Commit, then read.', seconds: 4, visual: 'An editorial computing plate', mediaType: 'image',
   }],
 };
 
@@ -42,7 +43,7 @@ function fixturePlan() {
       sub: scene.copy.sub,
       narration: scene.narration,
       seconds: (scene.preferredFrames ?? 120) / fixture.format.fps,
-      visual: 'Launch title card',
+      visual: 'Launch title card', mediaType: 'image',
     }],
   };
 }
@@ -147,6 +148,7 @@ function seedFixtureProject(ctx) {
   // The fixture ends on a transition, which a standalone timeline rejects;
   // chat responses compile the timeline, so exercise the same package without it.
   for (const scene of pkg.scenes) delete scene.transitionOut;
+  plannedContribution(pkg);
   ctx.store.write(pkg);
   // Chat responses inline vector assets, so the fixture's SVG needs to exist.
   mkdirSync(join(ctx.store.dir, 'assets'), { recursive: true });

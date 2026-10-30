@@ -92,6 +92,22 @@ test('the first upload creates the conversation id and sends a raw body with the
   assert.equal(calls[1]?.url, '/api/chat/chat_lazy_upload/references');
 });
 
+test('WAV and MP3 uploads use canonical MIME by extension and retain the rights assertion', async () => {
+  const calls: Call[] = [];
+  const api = createReferenceApi({
+    chatId: () => 'chat_abcdefgh',
+    apiFetch: async (input, init) => {
+      calls.push({ url: String(input), init });
+      return json({ id: `ref_${calls.length}`, kind: 'audio' }, 201);
+    },
+  });
+  const bytes = new Uint8Array([1, 2, 3]);
+  await api.upload(fakeFile('master.WAV', '', bytes));
+  await api.upload(fakeFile('master.mp3', 'application/octet-stream', bytes));
+  assert.deepEqual(calls.map(call => (call.init?.headers as Record<string, string>)['content-type']), ['audio/wav', 'audio/mpeg']);
+  assert.ok(calls.every(call => (call.init?.headers as Record<string, string>)['x-rights-asserted'] === '1'));
+});
+
 test('patch, delete, file and thumb URLs target the encoded reference', async () => {
   const calls: Call[] = [];
   const api = createReferenceApi({

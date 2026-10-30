@@ -1,4 +1,5 @@
 import { createHash } from 'node:crypto';
+import { plannedModelContribution, MODEL_CONTRIBUTION_MESSAGE } from '../../../packages/jobs/src/model-contribution.mjs';
 import { existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { validatePackage } from '../../../packages/schema/src/index.mjs';
@@ -31,6 +32,15 @@ export const SYNCNET_SKIP_CODE = 'SYNCNET_UNAVAILABLE';
 export const SYNCNET_RUNTIME_SKIP_CODE = 'SYNCNET_SKIPPED';
 export const SYNCNET_SKIP_MESSAGE = 'SyncNet is not configured, so presenter lip-sync will not be checked. Talking-head clips can still render, and each clip still needs a Keep or Reject before export.';
 export const SYNCNET_SKIP_ACTION = 'Configure COMFYRIZZ_SYNCNET_PYTHON and COMFYRIZZ_SYNCNET_DIR to enable the lip-sync check.';
+export const MUSIC_SYNC_SKIP_CODE = 'MUSIC_AUDITION_SYNC_UNSUPPORTED';
+export const MUSIC_SYNC_SKIP_MESSAGE = 'Automatic lip-sync diagnostics do not run for music performance background auditions; review synchronization manually.';
+
+export function musicPerformanceScenes(pkg) {
+  return (pkg.scenes ?? []).filter(scene => {
+    const asset = pkg.assets?.[scene.background?.asset];
+    return pkg.audio?.music?.trim && ['fasth3-omni', 'ltx25-a2v'].includes(asset?.gen?.generator) && asset?.gen?.inputs?.audio;
+  });
+}
 
 /** True when the SyncNet interpreter and the pinned model file are both present. */
 export function syncnetConfigured(env = process.env) {
@@ -100,15 +110,23 @@ export function planPipeline(pkg, input = {}, { env = process.env } = {}) {
   if (!validation.valid) throw new Error(`Invalid package: ${validation.errors.map(e => e.message).join('; ')}`);
   compileTimeline(pkg); // Reject invalid transitions before allocating narration compute.
   const options = pipelineOptions(input);
-  const voiced = pkg.voice?.enabled === true && pkg.voice?.engine !== 'none' && pkg.scenes.some(s => s.narration?.trim());
+  const masterSong = Boolean(pkg.audio?.music?.trim);
+  const voiced = !masterSong && pkg.voice?.enabled === true && pkg.voice?.engine !== 'none' && pkg.scenes.some(s => s.narration?.trim());
   const presenters = selectedPresenterScenes(pkg).length > 0;
   const jobs = planJobs(pkg).jobs;
+  const finishedAudio = Boolean(
+    (pkg.audio?.music && typeof pkg.audio.music === 'object' && pkg.audio.music.enabled !== false && pkg.audio.music.asset)
+    || (pkg.audio?.ambience && typeof pkg.audio.ambience === 'object' && pkg.audio.ambience.enabled !== false)
+    || (Array.isArray(pkg.audio?.sfx) && pkg.audio.sfx.length > 0)
+  );
+  const requiresAudio = voiced || finishedAudio || jobs.some(job => job.generator === 'fasth3-omni');
   const remoteVoice = voiced && pkg.voice.engine === 'qwen3-tts' && options.narrationRuntime === 'colab';
   const gpuMedia = jobs.length > 0 || presenters;
   const issues = [];
   const warnings = [];
   const issue = (code, message, action) => issues.push({ code, message, action });
   const warn = (code, message, action) => warnings.push({ code, message, action });
+  if (!plannedModelContribution(pkg).length) issue('COMFY_MODEL_CONTRIBUTION_REQUIRED', MODEL_CONTRIBUTION_MESSAGE, 'Revise the plan to visibly use one relevant supported ComfyUI-generated plate or still.');
   if (remoteVoice && pkg.voice.strict !== true) issue('STRICT_QWEN_REQUIRED', 'Remote Qwen requires strict voice selection.', 'Set voice.strict to true.');
   if (remoteVoice && options.narrationUnits < 0.5) issue('VOICE_BUDGET_REQUIRED', 'A Qwen allocation needs at least 0.5 units of headroom.', 'Increase narrationUnits and the total budget.');
   const mediaUnits = options.budgetUnits - (remoteVoice ? options.narrationUnits : 0);
@@ -122,6 +140,9 @@ export function planPipeline(pkg, input = {}, { env = process.env } = {}) {
   if (presenters && !syncnetConfigured(env)) {
     warn(SYNCNET_SKIP_CODE, SYNCNET_SKIP_MESSAGE, SYNCNET_SKIP_ACTION);
   }
+  if (musicPerformanceScenes(pkg).length) {
+    warn(MUSIC_SYNC_SKIP_CODE, MUSIC_SYNC_SKIP_MESSAGE, 'Review the audition against the master song before use.');
+  }
   const remote = remoteRenderDecision({ renderLocation: options.renderLocation, backendId: options.backendId, gpuMedia });
   if (remote.issue) issue(remote.issue.code, remote.issue.message, remote.issue.action);
   const stages = PIPELINE_STAGES.map(stage => ({ ...stage, status: 'pending', progress: null }));
@@ -132,7 +153,7 @@ export function planPipeline(pkg, input = {}, { env = process.env } = {}) {
   return {
     version: PIPELINE_VERSION, packageId: pkg.id, baseRevision: pkg.revision,
     inputHash: fingerprint(pkg), planHash: fingerprint({ pkg, options }), options,
-    stages, voiced, presenters, remoteVoice, gpuMedia, remoteRender: remote.remoteRender, remoteRenderNote: remote.note,
+    stages, voiced, requiresAudio, presenters, remoteVoice, gpuMedia, remoteRender: remote.remoteRender, remoteRenderNote: remote.note,
     jobs: summarizeJobs(pkg, jobs),
     reusableAssets: Object.entries(pkg.assets ?? {}).filter(([, asset]) => asset.file && ['ready', 'candidate'].includes(asset.status)).map(([assetId, asset]) => ({ assetId, kind: asset.kind, status: asset.status, verification: 'checked_when_staging' })),
     budget: { ceilingUnits: options.budgetUnits, narrationCeilingUnits: remoteVoice ? options.narrationUnits : 0, mediaCeilingUnits: options.backendId === 'colab' && gpuMedia ? Math.max(0, mediaUnits) : 0, estimateUnits: null, estimateNote },

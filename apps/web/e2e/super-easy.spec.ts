@@ -347,17 +347,18 @@ function fullAppBackend() {
       production.render = { status: 'running', fraction: 0.4 };
     }
     const events = [
+      { productionId: FULL_APP_PRODUCTION_ID, type: 'production.created', data: {} },
+      { productionId: FULL_APP_PRODUCTION_ID, type: 'brief.updated', data: {} },
       ...plans,
       ...(iteration === null
         ? []
         : [{
-            id: 'evt_full_app_iteration_1',
-            sequence: 5,
             productionId: FULL_APP_PRODUCTION_ID,
             type: 'iteration.set',
             data: { policy: iteration.policy },
           }]),
-    ].sort((left, right) => left.sequence - right.sequence);
+    ].sort((left, right) => (left.sequence ?? 0) - (right.sequence ?? 0))
+      .map((event, index) => ({ ...event, id: `evt_full_app_${index + 1}`, sequence: index + 1 }));
     return {
       productionId: FULL_APP_PRODUCTION_ID,
       production,
@@ -418,7 +419,8 @@ function fullAppBackend() {
     }
     if (/^\/api\/productions\/[^/]+\/events$/u.test(path) && method === 'GET') {
       calls.push('events');
-      return send({ productionId: FULL_APP_PRODUCTION_ID, lastSequence: snapshot().lastSequence, events: [] });
+      const body = snapshot();
+      return send({ productionId: FULL_APP_PRODUCTION_ID, lastSequence: body.lastSequence, nextAfter: body.lastSequence, events: body.events, gap: false, truncated: false });
     }
     if (/^\/api\/productions\/[^/]+\/commands$/u.test(path) && method === 'POST') {
       const command = JSON.parse(request.postData() ?? '{}');
@@ -460,6 +462,8 @@ test('the full app starts at the bare visit and fills the progress view from the
   expect(pageErrors).toEqual([]);
   await page.locator('#super-easy-prompt').fill(PROMPT);
   await page.getByRole('button', { name: 'Generate', exact: true }).click();
+  await expect(page.locator('[data-super-easy-proposal]')).toBeVisible();
+  await page.getByRole('button', { name: 'Make this film' }).click();
 
   await expect(page.locator('[data-super-easy-progress]')).toBeVisible();
   await expect(page.locator('[data-super-easy-overall-gauge] [role="progressbar"]')).toBeVisible();
@@ -586,4 +590,20 @@ test('the Studio escape for a ready package lands past Idea', async ({ page }) =
   await page.goto(`/${target}`, { waitUntil: 'domcontentloaded' });
   await expect(page.locator('[data-easy-heading]')).toHaveText('Review your video', { timeout: 30_000 });
   assertNoPaidCalls();
+});
+
+test('one-time setup reveals the credit cap when Google Colab is selected', async ({ page }) => {
+  await page.route('**/api/colab/status', route => route.fulfill({
+    status: 200, contentType: 'application/json',
+    body: JSON.stringify({ installed: true, signedIn: true, tokenPresent: true, tokenChecked: true, tokenReady: true }),
+  }));
+  await page.goto('/', { waitUntil: 'domcontentloaded' });
+  await page.getByRole('button', { name: 'Set up AI & Google Colab' }).click();
+  const dialog = page.locator('dialog[open]');
+  await expect(dialog.getByRole('heading', { name: 'Set up your video maker' })).toBeVisible();
+  await expect(dialog.locator('input[name="easy-cap"]')).toHaveCount(0);
+  await dialog.locator('input[name="easy-compute"][value="colab"]').check();
+  await expect(dialog.locator('input[name="easy-cap"]')).toBeVisible();
+  await dialog.locator('input[name="easy-cap"]').fill('10');
+  await expect(dialog.locator('input[name="easy-cap"]')).toHaveValue('10');
 });

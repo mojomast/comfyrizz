@@ -8,6 +8,8 @@ import { isAssetRedistributable } from '../../../../packages/sources/dist/src/in
 import { measuredOptionsFromDir } from '../compile-package.mjs';
 import { workflowSidecars } from '../workflow.mjs';
 import { finalRenderFormat } from '../../../renderer/scripts/render-package-lib.mjs';
+import { narrationAudio } from '../../../renderer/src/audio-model.js';
+import { verifyModelContribution, copyGenerationReceipts, MODEL_CONTRIBUTION_MESSAGE } from '../../../../packages/jobs/src/model-contribution.mjs';
 
 export const DELIVERY_SNAPSHOT_SCHEMA = 'comfyrizz.delivery-snapshot/v1';
 export const DELIVERY_INTENTS = Object.freeze(['draft', 'final']);
@@ -148,6 +150,8 @@ function safeRelative(value, label) {
 
 function declaredInputNames(pkg, packageDir) {
   const names = new Set(OPTIONAL_INPUTS);
+  const narrationFile = pkg.assets?.a_narration?.file;
+  if (typeof narrationFile === 'string' && /^audio\/generated\/[A-Za-z0-9_-]+\/narration\.norm\.wav$/.test(narrationFile)) names.add(`${dirname(narrationFile)}/durations.json`);
   for (const asset of Object.values(pkg.assets ?? {})) {
     if (typeof asset?.file === 'string' && asset.file !== '') names.add(asset.file);
     for (const variant of Object.values(asset?.variants ?? {})) {
@@ -321,7 +325,7 @@ export function createDeliverySnapshot({
   const normalizedIntent = normalizeDeliveryIntent(intent);
   const normalizedEditor = normalizeEditor(editor);
   const captionOverrides = normalizedEditor.captionOverrides;
-  const narration = measured !== undefined ? measured : (packageDir ? measuredOptionsFromDir(packageDir) : {});
+  const narration = measured !== undefined ? measured : (packageDir ? measuredOptionsFromDir(packageDir, pkg) : {});
   const compileOptions = {
     ...(isPlainObject(narration) ? narration : {}),
     ...(captionOverrides.length === 0 ? {} : { captionOverrides }),
@@ -355,6 +359,7 @@ export function createDeliverySnapshot({
     timing,
     speechSha256,
     inputs,
+    modelContribution: verifyModelContribution({ pkg, packageDir, timeline }),
   };
   const fingerprint = snapshotFingerprint(snapshot);
   return { ...snapshot, timeline, fingerprint };
@@ -373,6 +378,7 @@ export function preflightDelivery(snapshot, options = {}) {
   };
 
   const reviews = reviewStates(options.reviews ?? snapshot.reviews ?? null);
+  if (snapshot.modelContribution?.ok !== true) add('COMFY_MODEL_CONTRIBUTION_REQUIRED', MODEL_CONTRIBUTION_MESSAGE);
   for (const review of reviews) {
     if (review.state === 'unknown') {
       add('UNKNOWN_CREATIVE_REVIEW', `review ${review.decisionId} has no human verdict`, { decisionId: review.decisionId });
@@ -392,6 +398,21 @@ export function preflightDelivery(snapshot, options = {}) {
     const item = { code: 'MISSING_SOURCE', message: `${missing.length} declared source file(s) are not present`, paths: missing };
     if (options.requireSources === true && finalRequested) blockers.push(item);
     else warnings.push(item);
+  }
+
+  const pkg = snapshot.package ?? {};
+  const narrated = !pkg.audio?.music?.trim && pkg.voice?.enabled === true && pkg.voice.engine !== 'none'
+    && (pkg.scenes ?? []).some(scene => typeof scene.narration === 'string' && scene.narration.trim());
+  if (narrated) {
+    const resolved = narrationAudio(pkg);
+    const input = resolved && (snapshot.inputs ?? []).find(item => item.path === resolved.file);
+    const scenes = pkg.scenes.filter(scene => typeof scene.narration === 'string' && scene.narration.trim());
+    if (options.mixAudio === false) {
+      add('NARRATION_MUTED', 'Narration is planned but audio mixing is disabled. Enable audio mixing before final delivery.');
+    } else if (!resolved || !input || input.sha256 === null || !(input.bytes > 0)
+      || scenes.some(scene => scene.narration_asset !== resolved.assetId)) {
+      add('NARRATION_PENDING', 'Narration is planned but its audio is not available. Generate narration before final delivery; a draft preview may be silent.');
+    }
   }
 
   const gate = options.gate;
@@ -414,6 +435,7 @@ export function preflightDelivery(snapshot, options = {}) {
     },
     rightsExclusions: rightsExclusions(snapshot.package ?? {}),
     reviews,
+    modelContribution: snapshot.modelContribution,
   };
   const ok = blockers.length === 0;
   return { ok, final: finalRequested && ok, intent, blockers, warnings, facts };
@@ -445,6 +467,7 @@ export function stageDeliverySnapshot({ snapshot, packageDir, stagingDir = null 
     : resolve(stagingDir);
   const stagedPackageDir = join(root, 'package');
   mkdirSync(stagedPackageDir, { recursive: true, mode: 0o700 });
+  copyGenerationReceipts({ pkg: snapshot.package, sourceDir: packageDir, packageDir: stagedPackageDir });
   const packagePath = join(stagedPackageDir, 'package.json');
   writeFileSync(packagePath, `${JSON.stringify(snapshot.package, null, 2)}\n`, { mode: 0o600 });
   const editorPath = join(root, 'editor.json');
