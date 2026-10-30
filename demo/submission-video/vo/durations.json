@@ -1,47 +1,47 @@
 [
  [
   "vo01",
-  6.464,
-  "Comfyrizz turns one sentence into a finished film, running ComfyUI with open-weights models."
+  8.35,
+  "Hey! This is Comfyrizz. You type one sentence, and it makes you a real film, with open models running in ComfyUI."
  ],
  [
   "vo02",
-  12.266666666666667,
-  "This is Super Easy mode. I describe Mira, a young lighthouse keeper in a yellow raincoat, pick twenty-four seconds, and choose the L T X motion route. That's the whole setup."
+  11.31,
+  "Here's Super Easy mode. I'm describing Mira, a young lighthouse keeper in a yellow raincoat. I'll pick twenty-four seconds, choose the L T X motion route... and that's it."
  ],
  [
   "vo03",
-  10.986666666666666,
-  "The agent writes a short creative proposal: a title, a look, four shots, a soundtrack, and a credit cap. Nothing runs on a GPU until I approve it."
+  8.24,
+  "First, the agent pitches the film: a title, the look, four shots, and the music. Nothing touches a GPU until I say yes."
  ],
  [
   "vo04",
-  14.762666666666666,
-  "I click Make this film. Comfyrizz starts ComfyUI on Google Colab. FLUX 3 Image Klein paints the keyframes, L T X brings each shot to life, and the gallery fills in as real outputs arrive."
+  11.55,
+  "So I hit Make this film. ComfyUI spins up on Google Colab. Flux Klein paints the keyframes, L T X animates every shot, and you can watch the real results land."
  ],
  [
   "vo05",
-  7.466666666666667,
-  "About fifteen minutes and about two Google Colab credits later, the film is finished, scored, and ready to download."
+  4.97,
+  "About fifteen minutes later, it's done. Scored, rendered, and ready to download."
  ],
  [
   "vo06",
-  6.890666666666666,
-  "Now the fun part. I just tell it what to change: make it a stormy night, and give Mira a red raincoat."
+  8.28,
+  "Now let's change something, just by chatting. I'd like a bigger ending: send the paper boat way out to sea, and have Mira turn toward us."
  ],
  [
   "vo07",
-  10.304,
-  "The agent turns that into clip corrections and shows me the cost. I approve, and Google Colab regenerates the shot as a new take, without starting over."
+  10.29,
+  "The agent turns that into a fix for shot four, and shows me the cost. I approve, and Google Colab re-shoots just that one shot. The other three stay exactly as they were."
  ],
  [
   "vo08",
-  3.2426666666666666,
-  "Same project, a fresh take, from one sentence."
+  6.17,
+  "Before... and after. The boat sails off toward the horizon, and Mira looks back at us."
  ],
  [
   "vo09",
-  2.24,
-  "Comfyrizz. Imagine it. Make it."
+  3.67,
+  "That's Comfyrizz. Imagine it... make it."
  ]
 ]

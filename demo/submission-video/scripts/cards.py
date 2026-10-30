@@ -44,7 +44,7 @@ if __name__=='__main__':
           ('cap02','Review the plan before any GPU spend','Title · look · 4 shots · soundtrack · credit cap'),
           ('cap03','Live on ComfyUI · Google Colab','FLUX 3 Image Klein keyframes → LTX-2.5 motion'),
           ('cap04','Finished film, ready to download','24 s · 1080p · scored'),
-          ('cap05','Change it by chatting','“Make it a stormy night, red raincoat”'),
-          ('cap06','Only the changed shot re-runs','Same project · new take · re-rendered film'),
-          ('cap07','Before → After','')]
+          ('cap05','Change it by chatting','“Send the boat far out to sea, have Mira turn to us”'),
+          ('cap06','Only shot 4 is re-shot','Same project · new LTX take on Google Colab'),
+          ('cap07','Before → After','Shot 4: the boat sails to the horizon, Mira turns to us')]
     for n,t,s in caps: lower(n+'.png',t,s)

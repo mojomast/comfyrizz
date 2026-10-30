@@ -1,3 +1,31 @@
+# v2 (Oct 30, ~10:10 AM ET): corrected edit story, new voice
+
+**Current cut:** `film/DEMO_DRAFT.mp4`, 1:57.0, built by `scripts/assemble2.py`. The previous cut is kept as `film/DEMO_DRAFT_v1.mp4`. No new Google Colab spend (still 2.67 CU in total).
+
+**What take 2 of shot 4 actually changed** (both takes animate the same Klein keyframe; neither has a red coat or a storm):
+- **Take 1:** Mira sets the glowing boat on the water right below the railing. It stays close to the tower, bobbing beside her, and she keeps looking out to sea.
+- **Take 2:** she reaches out and releases it further away. The boat drifts far out until it's a small point of light near the horizon. By the end, Mira turns her head back toward the camera. The camera and framing are essentially the same, the beam is a little brighter and wider, and the timing is the same 6.4 s at 24 fps.
+
+**Picture edit:** in the chat section (1:10–1:25) and the first part of the regenerate section (1:25–1:31), the "Ask for changes" panel body (x≥1181, y≥104 in the 1600×900 recording) is **redrawn** with Pillow in the app's Inter font and colours (`scripts/chat_overlay.py` → `chat-overlay/*.png`, overlaid by ffmpeg, typing animated in 8 steps). It now reads:
+- **User:** "Give the last shot more life: let Mira send the paper boat far out to sea until it's a tiny light on the horizon, then have her turn toward us."
+- **Agent:** "I've proposed a correction for shot 4 (balcony, paper boat): the boat drifts much farther out until it's a small light on the horizon, and Mira turns toward the camera at the end. It uses a new seed. Ready for your confirmation."
+- **Card:** "Regenerate shot4… / Boat drifts far out to a tiny light; Mira turns toward camera / proposed → plan ready".
+
+The real session asked for a stormy night and a red raincoat. LTX image-to-video kept the original keyframe, so that request isn't what you see, and it is no longer shown. **This chat text is a reconstruction; disclose it if needed.** The underlying clip-correction → approve → Google Colab LTX re-run flow is real.
+
+**Other changes**
+- Captions 5–7 are updated.
+- The regenerate segment ends on take 2 playing.
+- The before/after is a side-by-side of take 1 and take 2, both at 0.8×.
+- The Google Colab "shutdown needs attention" banner footage was dropped.
+
+**Voice:** Kokoro v1.0 (open weights, local CPU), voice **af_heart** at 0.96× speed. Each sentence is synthesised separately, with 0.28 s pauses (0.45 s after an ellipsis). The script is conversational (`scripts/vo2.py`, `NARRATION.md`). F5-TTS, Chatterbox, Orpheus and Dia need torch, which isn't installed on the box, so I didn't use them.
+- **Mix:** narration + the film's own score as a bed (looped, -13 dB, sidechain-ducked under the narration, muted while the film plays at 0:58–1:10), loudness-normalised to **-16.3 LUFS** integrated.
+- The v1 narration (am_michael) is in `vo_v1/`.
+
+**v2 timeline:** title 0:00–0:09 · prompt –0:22 · proposal –0:34 · gallery –0:52 (fast-forward from when the stills land) · result –0:58 · film –1:10 · chat –1:25 · regenerate + take 2 –1:43 · before/after –1:51 · end –1:57.
+
+---
 # Comfyrizz submission demo: draft cut + assets (Oct 30, 2026, ~3:35 AM ET)
 
 **Draft:** `out/DEMO_DRAFT.mp4`: 1:52.9, 1920×1080, 30 fps, H.264 + AAC (Kokoro VO + film soundtrack).
