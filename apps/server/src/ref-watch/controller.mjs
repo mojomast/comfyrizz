@@ -148,6 +148,7 @@ export function createRefWatchController({
   const acceptedStills = [];
   const submittedVideos = new Set();
   const refusedVideos = new Set();
+  const deferredVideos = new Set();
   let regenJobsUsed = 0;
   let started = false;
   let chain = Promise.resolve();
@@ -276,9 +277,9 @@ export function createRefWatchController({
     return index > 0 ? list[index - 1] : null;
   }
 
-  async function chainPlanFor(video) {
+  async function chainPlanFor(video, previousOverride) {
     if (!isLtxI2v(video) || !isObject(video.shot)) return null;
-    const previous = previousLtxVideo(video);
+    const previous = previousOverride === undefined ? previousLtxVideo(video) : previousOverride;
     const chainFromPrevious = chainDefaultFor({
       shot: video.shot,
       previousShot: isObject(previous?.shot) ? previous.shot : null,
@@ -312,6 +313,18 @@ export function createRefWatchController({
     }
   }
 
+  function emitChainPlanned(video, chained, fallback, reason) {
+    emit({
+      type: 'ref_chain_planned',
+      jobId: video.id,
+      chained,
+      fallback: fallback ?? null,
+      reason: typeof reason === 'string' && reason
+        ? reason
+        : (chained ? 'chained from the previous clip' : 'chaining is off for this shot'),
+    });
+  }
+
   async function maybeReleaseVideos() {
     const ready = [];
     for (const video of gatedVideos) {
@@ -325,6 +338,7 @@ export function createRefWatchController({
       }
       if (refusal) {
         refusedVideos.add(video.id);
+        deferredVideos.delete(video.id);
         emit({
           type: 'ref_gate_held',
           jobId: video.id,
@@ -335,11 +349,46 @@ export function createRefWatchController({
         continue;
       }
       const next = structuredClone(live.get(video.id) ?? video);
-      const chainPlan = await chainPlanFor(next);
-      if (chainPlan?.loadImage) {
-        next.loadImage = chainPlan.loadImage;
-        next.imgToVideoInplace = chainPlan.imgToVideoInplace;
+      if (isLtxI2v(video)) {
+        const previous = previousLtxVideo(video);
+        const chained = chainDefaultFor({
+          shot: video.shot,
+          previousShot: isObject(previous?.shot) ? previous.shot : null,
+          override: video.chainFromPreviousOverride,
+        });
+        next.chainFromPrevious = chained;
+        if (chained) {
+          const previousLive = isObject(previous) ? (live.get(previous.id) ?? previous) : null;
+          if (previousLive && previousLive.status !== 'accepted') {
+            deferredVideos.add(video.id);
+            continue;
+          }
+          if (!previousLive) {
+            next.chainFallback = 'keyframe';
+            next.chainFallbackReason = 'chained shot has no previous clip';
+            emitChainPlanned(video, true, 'keyframe', next.chainFallbackReason);
+          } else {
+            const chainPlan = await chainPlanFor(next, previousLive);
+            if (chainPlan?.loadImage) {
+              next.loadImage = chainPlan.loadImage;
+              next.imgToVideoInplace = chainPlan.imgToVideoInplace;
+            }
+            emitChainPlanned(
+              video,
+              true,
+              next.chainFallback ?? null,
+              next.chainFallbackReason ?? (chainPlan?.loadImage ? 'chained from the previous clip' : 'chained frame unavailable'),
+            );
+            deferredVideos.delete(video.id);
+            submittedVideos.add(video.id);
+            await submitJobs({ batch: 'video', jobs: [next] });
+            continue;
+          }
+        } else {
+          emitChainPlanned(video, false, null, 'chaining is off for this shot');
+        }
       }
+      deferredVideos.delete(video.id);
       ready.push(next);
       submittedVideos.add(video.id);
     }
@@ -745,6 +794,15 @@ export function createRefWatchController({
 
   async function handleUnlocked(event) {
     pending.length = 0;
+    if (isObject(event) && event.type === 'video_collected') {
+      const collected = typeof event.jobId === 'string' ? live.get(event.jobId) : null;
+      if (collected) {
+        collected.status = 'accepted';
+        if (typeof event.path === 'string' && event.path) collected.localPath = event.path;
+        await maybeReleaseVideos();
+      }
+      return;
+    }
     await watcher.handle(event);
     const seeds = pending.splice(0);
     for (const seed of seeds) {
@@ -777,6 +835,7 @@ export function createRefWatchController({
     return list.filter((job) => !isGatedVideo(job) || (
       !submittedVideos.has(job.id)
       && !refusedVideos.has(job.id)
+      && !deferredVideos.has(job.id)
       && keyframeDeps(job).every((id) => refGateOpen(states.get(id)?.state))
       && keyframeDeps(job).every((id) => !stalenessRefusal(job, id))
     ));
@@ -786,6 +845,9 @@ export function createRefWatchController({
     const held = [];
     for (const [jobId, record] of states) {
       if (record.state === 'pending' || record.state === 'reviewing' || record.state === 'regenerating') held.push(jobId);
+    }
+    for (const jobId of deferredVideos) {
+      if (!held.includes(jobId)) held.push(jobId);
     }
     if (held.length > 0) {
       return {
