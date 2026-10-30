@@ -50,6 +50,32 @@ test('live gallery collects only landed media and caches short-lived tickets', a
   gallery.stop();
 });
 
+test('a stale take still shows its media and exact saved generation details', async () => {
+  const api = fakeApi('stale');
+  let items: any[] = [];
+  const gallery = createLiveAssetGallery({
+    api,
+    package: () => ({ assets: { a_shot: {
+      kind: 'video', status: 'stale', file: 'assets/a.mp4',
+      gen: { model: 'ltx-2.5-22b-distilled', workflow: 'workflows/ltx25_i2v.api.json',
+        inputs: { prompt: 'slow drift through a soft blue nebula', width: 512, height: 288, frames: 97, fps: 24, seed: 7 } },
+      media: { width: 1024, height: 576, frames: 97, fps: 24 },
+    } } }),
+    onUpdate: next => { items = next; }, pollMs: 60000,
+  });
+  gallery.start('pkg');
+  await gallery.refresh();
+  assert.equal(items[0].state, 'ready');
+  assert.equal(items[0].url, '/api/media/ticket');
+  assert.equal(items[0].details.prompt, 'slow drift through a soft blue nebula');
+  assert.equal(items[0].details.model, 'ltx-2.5-22b-distilled');
+  assert.equal(items[0].details.workflow, 'workflows/ltx25_i2v.api.json');
+  assert.equal(items[0].details.width, 1024);
+  assert.equal(items[0].details.durationSeconds, 97 / 24);
+  assert.equal(items[0].details.seed, 7);
+  gallery.stop();
+});
+
 test('landed visual references pop into the live gallery before final collection', async () => {
   const api = fakeApi('generating');
   api.listClips = async () => ({

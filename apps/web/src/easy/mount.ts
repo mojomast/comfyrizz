@@ -133,6 +133,7 @@ export function mountEasyStudio(root: HTMLElement, baseHost: EasyHost, deps: Eas
   let liveGalleryItems: GalleryItem[] = [];
   const liveGallery = createLiveAssetGallery({
     api: createTakesApi({ apiFetch: host.apiFetch }),
+    package: () => host.getPackage(),
     onUpdate: (items) => {
       liveGalleryItems = items;
       superEasy?.render();
