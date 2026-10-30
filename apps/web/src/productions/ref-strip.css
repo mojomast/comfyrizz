@@ -1,0 +1,245 @@
+/* RW10: Reference Watch strip. Every state is readable as text; colour is a
+   second signal only. Tokens come from apps/web/src/ui/tokens.css. */
+
+.ref-strip {
+  display: flex;
+  flex-direction: column;
+  gap: var(--gap);
+  min-width: 0;
+  padding: var(--panel-padding);
+  color: var(--text-1);
+  background: var(--bg-1);
+  border: var(--elevation-border-1);
+  border-radius: var(--radius-panel);
+  font-family: var(--font-sans);
+  font-size: var(--font-size-13);
+  line-height: var(--line-height-base);
+}
+
+.ref-strip-head {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--gap);
+  align-items: baseline;
+  justify-content: space-between;
+}
+
+.ref-strip h2 {
+  margin: 0;
+  color: var(--text-1);
+  font-size: var(--font-size-15);
+  font-weight: var(--font-weight-600);
+}
+
+.ref-regen-meter {
+  margin: 0;
+  color: var(--text-2);
+  font-variant-numeric: var(--font-numeric-tabular);
+}
+
+.ref-badges {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--gap);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.ref-badge-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-1);
+  align-items: flex-start;
+  min-width: 0;
+}
+
+.ref-badge {
+  display: inline-flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  min-height: var(--control-height);
+  padding: var(--space-1) var(--space-2);
+  color: var(--text-1);
+  background: var(--bg-2);
+  border: var(--elevation-border-1);
+  border-radius: var(--radius-control);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.ref-badge[aria-expanded="true"] {
+  background: var(--accent-bg);
+  border-color: var(--border-strong);
+}
+
+.ref-badge-job {
+  color: var(--text-1);
+  font-weight: var(--font-weight-600);
+}
+
+.ref-badge-state {
+  color: var(--text-2);
+}
+
+.ref-badge[data-ref-state="accepted"] .ref-badge-state,
+.ref-badge[data-ref-state="overridden"] .ref-badge-state {
+  color: var(--ok);
+}
+
+.ref-badge[data-ref-state="held"] {
+  border-color: var(--warn-border);
+}
+
+.ref-badge[data-ref-state="held"] .ref-badge-state {
+  color: var(--warn);
+}
+
+.ref-badge[data-ref-state="reviewing"] .ref-badge-state,
+.ref-badge[data-ref-state="regenerating"] .ref-badge-state {
+  color: var(--info);
+}
+
+.ref-badge[data-ref-state="pending"] .ref-badge-state {
+  color: var(--text-3);
+}
+
+.ref-empty {
+  color: var(--text-2);
+}
+
+.ref-override,
+.ref-override-yes,
+.ref-override-cancel,
+.ref-why-close {
+  min-height: var(--control-height);
+  padding: 0 var(--space-2);
+  color: var(--text-1);
+  background: var(--bg-3);
+  border: var(--elevation-border-1);
+  border-radius: var(--radius-control);
+  font: inherit;
+  cursor: pointer;
+}
+
+.ref-override {
+  background: var(--accent-bg);
+  border-color: var(--accent-border);
+}
+
+.ref-override-yes {
+  color: var(--danger);
+  background: var(--danger-bg);
+  border-color: var(--danger-border);
+}
+
+.ref-override-confirm {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-1);
+  align-items: center;
+  max-width: 28rem;
+  padding: var(--space-2);
+  color: var(--text-1);
+  background: var(--bg-2);
+  border: var(--elevation-border-2);
+  border-radius: var(--radius-control);
+}
+
+.ref-override-confirm p {
+  flex-basis: 100%;
+  margin: 0;
+  color: var(--text-2);
+}
+
+.ref-why {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  padding: var(--space-2);
+  color: var(--text-1);
+  background: var(--bg-2);
+  border: var(--elevation-border-1);
+  border-radius: var(--radius-control);
+}
+
+.ref-why-title,
+.ref-why-heading {
+  margin: 0;
+  color: var(--text-1);
+  font-weight: var(--font-weight-600);
+}
+
+.ref-why-title {
+  font-size: var(--font-size-15);
+}
+
+.ref-why-meta,
+.ref-why-idle,
+.ref-why-none {
+  margin: 0;
+  color: var(--text-2);
+}
+
+.ref-why-checks,
+.ref-why-hints {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  margin: 0;
+  padding-left: var(--space-3);
+  color: var(--text-1);
+}
+
+.ref-why-check {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-1);
+  align-items: baseline;
+}
+
+.ref-why-dimension {
+  color: var(--text-1);
+  font-weight: var(--font-weight-600);
+}
+
+.ref-why-severity,
+.ref-why-category {
+  padding: 0 var(--space-1);
+  color: var(--text-2);
+  border: var(--elevation-border-1);
+  border-radius: var(--radius-control);
+  font-size: var(--font-size-12);
+}
+
+.ref-why-severity {
+  color: var(--danger);
+  background: var(--danger-bg);
+}
+
+.ref-why-evidence {
+  flex-basis: 100%;
+  color: var(--text-2);
+}
+
+.ref-why-close {
+  align-self: flex-start;
+}
+
+.ref-badge:focus-visible,
+.ref-override:focus-visible,
+.ref-override-yes:focus-visible,
+.ref-override-cancel:focus-visible,
+.ref-why-close:focus-visible {
+  outline: var(--focus-ring);
+  outline-offset: var(--focus-offset);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ref-strip,
+  .ref-strip * {
+    transition: none;
+    animation: none;
+  }
+}
