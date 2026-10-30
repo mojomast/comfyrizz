@@ -1420,14 +1420,14 @@ export function createColabBackend({
         // SPW e2e: the live preview tap is best effort (it can fail to download while the batch
         // runs). Every still the batch collected that never produced a preview is handed to the
         // reference watch from the verified collection, so the gate never waits on a lost preview.
-        if (refWatchGate && collect.manifest && collect.localDir) {
+        if (refWatchGate && collect.manifest && collect.local) {
           for (const entry of collect.manifest.jobs ?? []) {
             if (!entry?.job || previewedJobs.has(entry.job)) continue;
             if (entry.status !== "succeeded" && entry.status !== "cached") continue;
             const planned = doc.jobs.find((job) => job.id === entry.job);
             if (!planned || isVideoJob(planned)) continue;
             previewedJobs.add(entry.job);
-            const event = { type: "preview_ready", source: "collected", manifest: { ...collect.manifest, complete: false, jobs: [entry] }, outputDir: collect.localDir };
+            const event = { type: "preview_ready", source: "collected", manifest: { ...collect.manifest, complete: false, jobs: [entry] }, outputDir: collect.local };
             emit(onEvent, event);
             queueReviewEvent(event);
           }
