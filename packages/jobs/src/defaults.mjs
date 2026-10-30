@@ -12,11 +12,16 @@
 // So the planner appends the guards itself instead of trusting every caller to remember them, and
 // records each one in `warnings[]` so the jobs.json says exactly what the model is asked for.
 
-/** The negative every generated still/plate gets unless the asset opts into text. */
-export const TEXT_GUARD = "no text, no letters, no words, no logos, no watermarks";
+/**
+ * The positive end-state guard every generated still/plate gets unless the asset opts into text.
+ *
+ * FLUX 3 Image Klein is distilled (cfg 1) and has no negative lever, so "no text, no letters" tends
+ * to summon text; the guard names the surfaces and imagery we do want instead.
+ */
+export const TEXT_GUARD = "clean unmarked surfaces, plain untextured backgrounds, blank signage, imagery made only of shapes, colour and light";
 
-/** A prompt that already says it wants no text is left alone (no double negative). */
-export const TEXT_GUARD_SATISFIED = /\bno\s+(text|letters?|lettering|words?|logos?|watermarks?)\b/i;
+/** A prompt that already carries this guard, or the older "no text" phrasing, is left alone. */
+export const TEXT_GUARD_SATISFIED = /clean unmarked surfaces, plain untextured backgrounds, blank signage, imagery made only of shapes, colour and light|\bno\s+(text|letters?|lettering|words?|logos?|watermarks?)\b/i;
 
 /** Motion defaults per plate flavour: seamless loops for t2v, a still camera for image-to-video. */
 export const MOTION_GUARD = {
@@ -184,7 +189,12 @@ export function applyPromptDefaults(params, { kind, textAllowed = false, hasSour
   const parts = [prompt];
   if (!textAllowed && !TEXT_GUARD_SATISFIED.test(prompt)) {
     parts.push(TEXT_GUARD);
-    applied.push({ guard: "text", value: TEXT_GUARD, because: "GPU test 2: without it the model writes garbled pseudo-text or a stray legible word" });
+    applied.push({
+      guard: "text",
+      value: TEXT_GUARD,
+      because:
+        "GPU test 2: without it the model writes garbled pseudo-text or a stray legible word; FLUX 3 Image Klein is distilled (cfg 1) with no negative lever, so the guard describes the positive end state instead of negatives",
+    });
   }
 
   if (kind === "plate") {

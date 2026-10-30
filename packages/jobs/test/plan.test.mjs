@@ -455,7 +455,7 @@ test("a still prompt gets the no-text guard, and the job records what was append
   const pkg = fixture("package-pending.json");
   pkg.assets.a_cutout.gen.inputs.prompt = "a small robot holding a film clapper, plain flat background";
   const still = planJobs(pkg).jobs.find((j) => j.id === "a_cutout.still");
-  assert.match(still.params.prompt, /plain flat background, no text, no letters, no words, no logos, no watermarks$/);
+  assert.match(still.params.prompt, /plain flat background, clean unmarked surfaces, plain untextured backgrounds, blank signage, imagery made only of shapes, colour and light$/);
   assert.deepEqual(still.promptGuards.map((g) => g.guard), ["text"]);
   assert.match(still.promptGuards[0].because, /GPU test 2/);
   // no prompt at all stays no prompt: the guard is not a prompt in itself
@@ -519,7 +519,7 @@ test("a plate gets the motion guard for its flavour, and keeps its own camera di
   const own = fixture("package-pending.json");
   own.assets.a_plate1.gen.inputs.prompt = "the camera slowly pans right across the corridor";
   const kept = planJobs(own).jobs.find((j) => j.id === "a_plate1.plate");
-  assert.equal(kept.params.prompt, `the camera slowly pans right across the corridor, ${"no text, no letters, no words, no logos, no watermarks"}`);
+  assert.equal(kept.params.prompt, `the camera slowly pans right across the corridor, ${"clean unmarked surfaces, plain untextured backgrounds, blank signage, imagery made only of shapes, colour and light"}`);
   assert.deepEqual(kept.promptGuards.map((g) => g.guard), ["text"], "a prompt with its own camera direction gets no motion guard");
 });
 
