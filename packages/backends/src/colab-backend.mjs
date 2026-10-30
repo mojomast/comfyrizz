@@ -420,6 +420,8 @@ export function createColabBackend({
   newRetryMs = 20000,
   allocationCleanupChecks = 6,
   collectionRetryMs = 1000,
+  // RW08: optional. Leave this unset and the Google Colab run executes its planned batches unchanged.
+  refWatch = null,
 } = {}) {
   // PO-3 review: priced from the per-accelerator table for *this* gpu, never one global figure.
   ratePerHour = ratePerHour ?? resolveRatePerHour({ gpu });
@@ -1200,6 +1202,10 @@ export function createColabBackend({
      * makes the reserve formula work "before each job" in the SPEC.md §6.6 sense: a package whose
      * second batch would not fit the budget stops after the first, with the earlier outputs already
      * on the host ("a later failure never discards earlier outputs", §6.4).
+     *
+     * A reference watch, when one is attached, holds video batches off the Google Colab VM until
+     * every keyframe they use is accepted. With no reference watch this runs the planned batches
+     * in the same order, with the same upload and the same collection.
      */
     async run(jobsFile, onEvent = () => {}, signal = null) {
       state.collectionSignal = signal;
@@ -1242,37 +1248,74 @@ export function createColabBackend({
       // where the host saw several files and must not let the last one speak for all of them)
       const batchManifests = [];
 
-      for (const name of planned) {
+      // jobs-v1 allows only these batch names. The Google Colab runner submits every job whose
+      // batch matches batch.txt, so a held job is parked on another legal name and left unsubmitted.
+      const legalBatches = new Set(["stills", "plates", "upscales", "audio", "presenters"]);
+      const legalBatch = (value, fallback = "stills") => (
+        legalBatches.has(value) ? value : (legalBatches.has(fallback) ? fallback : "stills")
+      );
+      const isVideoJob = (job) => {
+        if (!job || typeof job !== "object") return false;
+        const kind = String(job.kind || "");
+        const outputKind = String(job.outputKind || "");
+        const output = String(job.output || "");
+        return outputKind === "video"
+          || kind === "plate" || kind === "upscale" || kind === "presenter"
+          || /\.(mp4|webm)$/i.test(output);
+      };
+
+      let refWatchGate = null;
+      const refWatchQueue = [];
+      let reviewChain = Promise.resolve();
+      // True while the zip on the VM is the plan that was uploaded for this run. A regen or a
+      // partial video release replaces it; the next planned batch puts the plan back first.
+      let jobsZipIsPlan = true;
+      if (refWatch) {
+        const watchContext = {
+          jobsDoc: doc,
+          onEvent,
+          receiptsDir: join(scratch, "receipts"),
+          submitJobs: async (payload) => { refWatchQueue.push(payload); },
+        };
+        refWatchGate = typeof refWatch === "function" ? await refWatch(watchContext) : refWatch;
+      }
+
+      async function uploadJobsZip(localJobsFile) {
+        const bundle = createBundle({ jobsFile: localJobsFile, packageDir, scratch, zipCommand });
+        // G6-1: a bundle that is too big fails at the *runtime*, after the session is paid for, with a
+        // 400 that says nothing. Take its size here, where the answer is cheap and the reason is known.
+        assertBundleSize(bundle, { packageDir });
+        const uploadBundle = await step(argvUpload({ session, localPath: bundle, remotePath: `${REMOTE_ROOT}/jobs.zip` }), {
+          label: "upload-bundle",
+          wallMs: 600000,
+        });
+        if (uploadBundle.code !== 0) {
+          // G6-2: the CLI's own last lines say why (a 400, a quota, a path); "exit 1" says nothing.
+          const said = redactForLog(String(uploadBundle.output ?? "")).trim().split("\n").slice(-6).join("\n");
+          throw new ColabCliError(`uploading jobs.zip failed (exit ${uploadBundle.code})${said ? `:\n${said}` : ""}`);
+        }
+        uploaded = true;
+      }
+
+      // One admitted batch. {stop, result} ends the run (refused admission or a lost exec).
+      async function runBatch(name, subset) {
         signal?.throwIfAborted();
-        const subset = name ? jobs.filter((job) => job.batch === name) : jobs;
         const admission = admit(subset, { onEvent });
         if (!admission.allowed) {
           emit(onEvent, { type: "refused", batch: name, reason: admission.reason, message: admission.message });
           return {
-            refused: true,
-            reason: admission.reason,
-            message: admission.message,
-            batchesRun: ran,
-            manifest,
-            collect,
+            stop: true,
+            result: {
+              refused: true,
+              reason: admission.reason,
+              message: admission.message,
+              batchesRun: ran,
+              manifest,
+              collect,
+            },
           };
         }
-        if (!uploaded) {
-          const bundle = createBundle({ jobsFile, packageDir, scratch, zipCommand });
-          // G6-1: a bundle that is too big fails at the *runtime*, after the session is paid for, with a
-          // 400 that says nothing. Take its size here, where the answer is cheap and the reason is known.
-          assertBundleSize(bundle, { packageDir });
-          const uploadBundle = await step(argvUpload({ session, localPath: bundle, remotePath: `${REMOTE_ROOT}/jobs.zip` }), {
-            label: "upload-bundle",
-            wallMs: 600000,
-          });
-          if (uploadBundle.code !== 0) {
-            // G6-2: the CLI's own last lines say why (a 400, a quota, a path); "exit 1" says nothing.
-            const said = redactForLog(String(uploadBundle.output ?? "")).trim().split("\n").slice(-6).join("\n");
-            throw new ColabCliError(`uploading jobs.zip failed (exit ${uploadBundle.code})${said ? `:\n${said}` : ""}`);
-          }
-          uploaded = true;
-        }
+        if (!uploaded) await uploadJobsZip(jobsFile);
         if (name) {
           // the batch selector travels as a file: `colab exec -f` takes a script, and inventing an
           // argv shape for script arguments is not something this backend will do unverified
@@ -1295,7 +1338,13 @@ export function createColabBackend({
             const result = await step(argvDownload({ session, remotePath: remote, localPath: local }), { label: 'preview-download', wallMs: 60000 });
             if (result.code !== 0) throw new Error('Live preview download unavailable; will retry');
           },
-          onReady: payload => emit(onEvent, { type: 'preview_ready', ...payload }),
+          onReady: (payload) => {
+            const event = { type: 'preview_ready', ...payload };
+            emit(onEvent, event);
+            if (refWatchGate && typeof refWatchGate.handle === "function") {
+              reviewChain = reviewChain.then(() => refWatchGate.handle(event)).then(() => {}, () => {});
+            }
+          },
           onError: error => emit(onEvent, { type: 'preview_wait', message: error.message }),
         });
         previews.start();
@@ -1326,7 +1375,10 @@ export function createColabBackend({
 
         if (lostBatch) {
           const reconciled = await backend.reconcile(state.runId, { onEvent });
-          return { lost: true, batchesRun: ran, manifest: reconciled.manifest, reconcile: reconciled };
+          return {
+            stop: true,
+            result: { lost: true, batchesRun: ran, manifest: reconciled.manifest, reconcile: reconciled },
+          };
         }
         // collect after every batch, so a later failure never discards this batch's work
         collect = await collectOut({ onEvent, expectComplete: false, signal });
@@ -1335,6 +1387,101 @@ export function createColabBackend({
         }
         manifest = collect.manifest;
         if (collect.manifest) batchManifests.push(collect.manifest);
+        return null;
+      }
+
+      async function uploadOverlay(batchName, batchJobs) {
+        const parking = batchName === "audio" ? "presenters" : "audio";
+        const allowed = new Map(batchJobs.map((job) => [job.id, { ...job, batch: batchName }]));
+        const overlayJobs = jobs.map((job) => (allowed.has(job.id) ? allowed.get(job.id) : { ...job, batch: parking }));
+        for (const [id, job] of allowed) {
+          if (!jobs.some((item) => item.id === id)) overlayJobs.push(job);
+        }
+        const overlayDoc = {
+          ...doc,
+          jobs: overlayJobs,
+          batches: [{ name: batchName, jobs: batchJobs.map((job) => job.id) }],
+        };
+        const overlayDir = join(scratch, "ref-watch-bundle");
+        mkdirSync(overlayDir, { recursive: true });
+        const overlayFile = join(overlayDir, "jobs.json");
+        writeFileSync(overlayFile, `${JSON.stringify(overlayDoc)}\n`);
+        await uploadJobsZip(overlayFile);
+        jobsZipIsPlan = false;
+      }
+
+      async function restorePlanZip() {
+        if (jobsZipIsPlan) return;
+        await uploadJobsZip(jobsFile);
+        jobsZipIsPlan = true;
+      }
+
+      async function executeSubmission(payload) {
+        const submitted = Array.isArray(payload?.jobs) ? payload.jobs : [];
+        if (!submitted.length) return null;
+        const groups = new Map();
+        for (const job of submitted) {
+          const fallback = payload?.batch === "regen" ? "stills" : legalBatch(payload?.batch, "stills");
+          const name = legalBatch(job.batch, fallback);
+          if (!groups.has(name)) groups.set(name, []);
+          groups.get(name).push({ ...job, batch: name });
+        }
+        let last = null;
+        for (const [name, group] of groups) {
+          const plannedSubset = jobs.filter((job) => job.batch === name);
+          // A regen keeps the job id and changes the seed, so it must not reuse the plan zip.
+          const full = payload?.batch !== "regen"
+            && jobsZipIsPlan
+            && plannedSubset.length === group.length
+            && plannedSubset.every((job) => group.some((item) => item.id === job.id));
+          if (!full) await uploadOverlay(name, group);
+          last = await runBatch(name, group);
+          if (last?.stop) return last;
+        }
+        return last;
+      }
+
+      async function drainRefWatch() {
+        if (!refWatchGate) return null;
+        for (let guard = 0; guard < 64; guard += 1) {
+          await reviewChain;
+          if (refWatchQueue.length === 0) return null;
+          const outcome = await executeSubmission(refWatchQueue.shift());
+          if (outcome?.stop) return outcome;
+        }
+        throw new ColabCliError("reference watch queued more Google Colab batches than this run will execute");
+      }
+
+      for (const name of planned) {
+        signal?.throwIfAborted();
+        const subset = name ? jobs.filter((job) => job.batch === name) : jobs;
+        // Plates, upscales and presenters stay off the Google Colab VM until reference watch
+        // releases them. Stills run first and produce the previews the watch reviews.
+        if (refWatchGate && subset.length > 0 && subset.every(isVideoJob)) continue;
+        if (refWatchGate && name === null && subset.some(isVideoJob)) {
+          const groups = new Map();
+          for (const job of subset) {
+            if (isVideoJob(job)) continue;
+            const batchName = legalBatch(job.batch, "stills");
+            if (!groups.has(batchName)) groups.set(batchName, []);
+            groups.get(batchName).push(job);
+          }
+          for (const [batchName, group] of groups) {
+            await uploadOverlay(batchName, group.map((job) => ({ ...job, batch: batchName })));
+            const outcome = await runBatch(batchName, group);
+            if (outcome?.stop) return outcome.result;
+            const drained = await drainRefWatch();
+            if (drained?.stop) return drained.result;
+          }
+          continue;
+        }
+        if (refWatchGate) await restorePlanZip();
+        const outcome = await runBatch(name, subset);
+        if (outcome?.stop) return outcome.result;
+        if (refWatchGate) {
+          const drained = await drainRefWatch();
+          if (drained?.stop) return drained.result;
+        }
       }
 
       // Every batch, including the last, was already collected above. Merge its
