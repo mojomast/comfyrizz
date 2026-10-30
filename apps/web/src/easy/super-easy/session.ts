@@ -590,15 +590,21 @@ export function createSuperEasySession(options: SuperEasySessionOptions): SuperE
       const body = await options.api.getPackage(state.packageId);
       if (!current()) return;
       const pkg = body?.package ?? body;
-      if (pkg?.id !== state.packageId || !Number.isSafeInteger(run.revision) || pkg.revision !== run.revision) {
+      if (pkg?.id !== state.packageId || !Number.isSafeInteger(run.revision) || !Number.isSafeInteger(pkg.revision)) {
+        throw new Error('The saved video does not match this project.');
+      }
+      if (pkg.revision !== run.revision && !options.api.getSavedRenderVideo) {
         throw new Error('This project has newer edits than its saved video. Open in Studio to review and export them.');
       }
       // The authenticated video endpoint verifies historical package/timeline and
       // exact movie bytes against its trusted receipt. Never rerender on reopen.
-      const blob = await options.api.getRunVideo(runId);
+      const saved = pkg.revision !== run.revision
+        ? await options.api.getSavedRenderVideo!(state.packageId, pkg.revision) : null;
+      const blob = saved?.blob ?? await options.api.getRunVideo(runId);
       if (!current()) return;
       const url = URL.createObjectURL(blob);
-      snapshot = { ...(serverSnapshot as object), finalVideo: { ready: true, status: 'done', runId, url } };
+      snapshot = { ...(serverSnapshot as object), finalVideo: { ready: true, status: 'done', runId, url,
+        ...(saved ? { exportId: saved.exportId, revision: pkg.revision } : {}) } };
       rememberObjectUrl(snapshot);
       preview = false;
       patchStatus('done');

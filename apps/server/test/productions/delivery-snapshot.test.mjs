@@ -4,7 +4,7 @@
 // creative review visible instead of promoting it to a final approval.
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
-import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync, symlinkSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import test from 'node:test';
@@ -52,6 +52,33 @@ function basePackage() {
 function sceneId(pkg) {
   return pkg.scenes[0].id;
 }
+
+test('selected package-owned take bytes are frozen under their original relative render path', t => {
+  const { root, packageDir } = workspace(t);
+  const pkg = basePackage();
+  pkg.id = 'pkg_selected_take';
+  const relative = 'takes/a_selected/tk_123456789abc.mp4';
+  const bytes = Buffer.from('synthetic native-audio take bytes');
+  const own = join(packageDir, pkg.id, 'takes/a_selected');
+  mkdirSync(own, { recursive: true });
+  writeFileSync(join(own, 'tk_123456789abc.mp4'), bytes);
+  pkg.assets.a_selected = { kind: 'video', origin: 'upload', status: 'ready', file: relative, sha256: hash(bytes), bytes: bytes.length };
+  pkg.scenes[0].background = { asset: 'a_selected', muted: false, speed: 1, loop: false };
+  const snapshot = createDeliverySnapshot({ pkg, packageDir });
+  assert.equal(snapshot.inputs.find(input => input.path === relative).sha256, hash(bytes));
+  const staged = stageDeliverySnapshot({ snapshot, packageDir, stagingDir: join(root, 'staged') });
+  assert.deepEqual(readFileSync(join(staged.packageDir, relative)), bytes);
+  assert.equal(JSON.parse(readFileSync(staged.packagePath)).assets.a_selected.file, relative);
+  assert.equal(preflightDelivery(snapshot).blockers.some(item => item.code === 'ACTIVE_MEDIA_MISSING' && item.assetId === 'a_selected'), false);
+  writeFileSync(join(own, 'tk_123456789abc.mp4'), 'overwritten');
+  assert.throws(() => stageDeliverySnapshot({ snapshot, packageDir, stagingDir: join(root, 'changed') }), /source changed/);
+  rmSync(join(own, 'tk_123456789abc.mp4'));
+  const missing = createDeliverySnapshot({ pkg, packageDir });
+  assert.equal(preflightDelivery(missing).blockers.some(item => item.code === 'ACTIVE_MEDIA_MISSING' && item.assetId === 'a_selected'), true);
+  const outside = join(root, 'outside.mp4'); writeFileSync(outside, bytes);
+  symlinkSync(outside, join(own, 'tk_123456789abc.mp4'));
+  assert.throws(() => createDeliverySnapshot({ pkg, packageDir }), /escapes/);
+});
 
 function snapshotFor(pkg, packageDir, overrides = {}) {
   collectMockContribution(pkg, packageDir);

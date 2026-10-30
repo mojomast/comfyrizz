@@ -60,6 +60,7 @@ export interface SuperEasyApi {
   recoverRunOutputs?(id: string, body: { baseRevision: number }): Promise<unknown>;
   cancelRun?(id: string): Promise<unknown>;
   getRunVideo(id: string): Promise<Blob>;
+  getSavedRenderVideo?(packageId: string, revision: number): Promise<{ blob: Blob; exportId: string }>;
   generateLocalNarration?(body: { packageId: string; productionId: string; baseRevision: number; recoveryInputs?: unknown }): Promise<any>;
   colabStatus(): Promise<{ backendId?: string } | null>;
 }

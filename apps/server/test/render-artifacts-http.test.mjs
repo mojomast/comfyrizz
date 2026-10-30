@@ -58,6 +58,8 @@ test('fresh final HTTP render publishes immutable receipt-bound access across re
   let metadata = await (await h.request(url)).json();
   assert.equal(metadata.revision, original.revision); assert.equal(metadata.preflight.final, true);
   assert.equal(metadata.videoSha256, hash(bytes));
+  const latest = `/api/render/artifacts/latest?packageId=${seed.id}`;
+  assert.equal((await h.request(latest)).status, 404, 'newer unexported edits cannot discover the older render');
   assert.equal((await h.request(metadata.videoUrl, undefined, false)).status, 401);
   const receipts = join(h.runtimeDir, '.comfy-provenance/renders');
   assert(readdirSync(receipts).includes(hash(bytes) + '.json'));
@@ -75,6 +77,28 @@ test('fresh final HTTP render publishes immutable receipt-bound access across re
   writeFileSync(join(h.runtimeDir, 'renders', metadata.exportId + '.mp4'), 'tampered');
   assert.equal((await h.request(url)).status, 404);
   assert.equal((await h.request(metadata.videoUrl)).status, 404);
+});
+
+test('current-revision discovery verifies exact bytes across restart and rejects later edits or tampering', async t => {
+  const bytes = Buffer.from('synthetic edited render');
+  const h = await harness(t, async (packagePath, output) => {
+    writeFileSync(output, bytes); return { output, bytes: bytes.length, frames: 42, hash: 'contract' };
+  });
+  const pkg = h.app.store.read(seed.id);
+  const rendered = await h.request('/api/render', { packageId: seed.id, baseRevision: pkg.revision });
+  assert.equal(rendered.status, 200, await rendered.clone().text());
+  const latest = `/api/render/artifacts/latest?packageId=${seed.id}`;
+  assert.equal((await h.request(latest, undefined, false)).status, 401);
+  assert.equal((await h.request('/api/render/artifacts/latest?packageId=pkg_other')).status, 404);
+  await h.restart();
+  const response = await h.request(latest); assert.equal(response.status, 200);
+  const saved = await response.json();
+  assert.equal(saved.revision, pkg.revision); assert.equal(saved.videoSha256, hash(bytes));
+  const path = join(h.runtimeDir, 'renders', saved.exportId + '.mp4');
+  writeFileSync(path, 'tampered'); assert.equal((await h.request(latest)).status, 404);
+  writeFileSync(path, bytes);
+  h.app.store.save(seed.id, { ...pkg, title: 'New unexported edit' }, pkg.revision);
+  assert.equal((await h.request(latest)).status, 404);
 });
 
 test('missing staged generation evidence fails final publication; draft remains available without a receipt', async t => {
