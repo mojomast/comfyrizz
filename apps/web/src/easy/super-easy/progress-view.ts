@@ -12,6 +12,7 @@ import { COPY as EASY_COPY } from '../copy.ts';
 import { renderSuperEasyDoneActions } from './escape.ts';
 import { escapeHtml, renderProgressBar } from '../components.ts';
 import { agentConsoleMarkup } from '../agent-console.ts';
+import { readGalleryAssetDetails, safeGalleryUrl } from './gallery-asset.ts';
 import {
   readStages,
   STAGE_STATUS_TEXT,
@@ -183,22 +184,25 @@ ${error}
 }
 
 function mediaMarkup(item: GalleryItem): string {
-  if (item.state !== 'ready' || item.url === null) {
+  const url = safeGalleryUrl(item.url);
+  if (url === null) {
     return `<span class="super-easy-progress-slot-placeholder" data-slot-state="${item.state}" aria-hidden="true"></span>`;
   }
-  const src = escapeHtml(item.url);
+  // Authenticated endpoints are loaded by the mount into scoped blob URLs.
+  const src = /^(?:blob:|data:)/u.test(url) ? ` src="${escapeHtml(url)}"` : '';
+  const binding = `data-gallery-media="${escapeHtml(item.id)}"`;
   const label = escapeHtml(item.label);
-  if (item.kind === 'voice') {
-    return `<audio class="super-easy-progress-slot-audio" controls preload="none" src="${src}" aria-label="${label}"></audio>`;
+  if (item.details?.mediaType === 'audio' || item.kind === 'voice') {
+    return `<audio class="super-easy-progress-slot-audio" controls preload="none" ${binding}${src} aria-label="${label}"></audio>`;
   }
-  if (item.kind === 'final' || VIDEO_URL.test(item.url)) {
-    return `<video class="super-easy-progress-slot-video" controls preload="none" playsinline src="${src}" aria-label="${label}"></video>`;
+  if (item.details?.mediaType === 'video' || item.kind === 'final' || VIDEO_URL.test(url)) {
+    return `<video class="super-easy-progress-slot-video" ${item.kind === 'final' ? 'controls' : 'muted'} preload="metadata" playsinline ${binding}${src} aria-label="${label}"></video>`;
   }
-  return `<img class="super-easy-progress-slot-image" src="${src}" alt="${label}" loading="lazy" decoding="async" />`;
+  return `<img class="super-easy-progress-slot-image" ${binding}${src} alt="${label}" loading="lazy" decoding="async" />`;
 }
 
 function slotKey(item: GalleryItem): string {
-  return `${item.id}|${item.kind}|${item.state}|${item.url ?? ''}|${item.label}|${item.highlighted ? 1 : 0}|${item.reason ?? ''}`;
+  return `${item.id}|${item.kind}|${item.state}|${safeGalleryUrl(item.url) ?? ''}|${item.label}|${item.highlighted ? 1 : 0}|${item.reason ?? ''}|${JSON.stringify(readGalleryAssetDetails(item.details) ?? {})}`;
 }
 
 function slotMarkup(item: GalleryItem): string {
@@ -210,7 +214,8 @@ function slotMarkup(item: GalleryItem): string {
     : `<p class="super-easy-progress-slot-reason">${escapeHtml(item.reason)}</p>`;
   return `<li class="${classes.join(' ')}" data-super-easy-gallery-item="${escapeHtml(item.id)}" data-gallery-item-key="${escapeHtml(slotKey(item))}" data-gallery-kind="${item.kind}" data-gallery-state="${item.state}"${highlighted}>
 <div class="super-easy-progress-slot-media">${mediaMarkup(item)}</div>
-<p class="super-easy-progress-slot-label">${escapeHtml(item.label)}</p>
+<p class="super-easy-progress-slot-label"><button type="button" class="super-easy-gallery-inspect" data-super-easy-inspect="${escapeHtml(item.id)}" aria-haspopup="dialog" aria-label="Inspect ${escapeHtml(item.label)}">${escapeHtml(item.label)} · Details</button></p>
+${item.details?.role === 'reference' ? '<p class="super-easy-gallery-role">Conditioning reference · not a generated clip</p>' : ''}
 ${reason}
 </li>`;
 }

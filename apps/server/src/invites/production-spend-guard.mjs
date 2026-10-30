@@ -35,7 +35,23 @@ export function createInviteProductionSpendGuard({ adapter, ledger, spendEnabled
       if (input?.backendId !== 'colab') refuse('INVITE_COLAB_ONLY', 'invite productions require Google Colab');
       const reservation = ledger.reserveAction({ inviteId, productionId, actionId, backendId: input.backendId, units: input.budgetUnits });
       if (!reservation.ok) refuse('INVITE_BUDGET_REFUSED', `invite ${reservation.reason}`);
-      return adapter.admit(args);
+      const releaseUnsubmitted = outcome => {
+        if (outcome?.submission !== 'not_submitted' || typeof adapter.runForAction !== 'function'
+          || outcome.run?.runId || outcome.runId || outcome.action?.runId
+          || adapter.runForAction(productionId, actionId)) return;
+        // Settle this action alone at zero. Never release a global invite total
+        // or mark an uncertain run cancelled to recover capacity.
+        const settled = ledger.settleAction({ productionId, actionId, spent: 0, filmCompleted: false });
+        if (!settled.ok) refuse('INVITE_RELEASE_FAILED', 'Could not release the unsubmitted action reservation');
+      };
+      try {
+        const result = await adapter.admit(args);
+        releaseUnsubmitted(result);
+        return result;
+      } catch (error) {
+        releaseUnsubmitted(error);
+        throw error;
+      }
     },
   });
 }

@@ -1,12 +1,15 @@
 // U2 slice 2: the guided sign-in is a relay - live lines, redacted, and no credential anywhere.
 import assert from "node:assert/strict";
-import { mkdtempSync, readFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, mkdirSync, writeFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 import { EventEmitter } from "node:events";
 
-import { startColabAuth } from "../src/colab-auth.mjs";
+import { startColabAuth, colabAuthInProgress, colabAccountBusy } from "../src/colab-auth.mjs";
+import { createServer } from 'node:http';
+import { createApp } from '../src/app.mjs';
+import { createDurableInviteLedger } from '../../../packages/backends/src/durable-invite-ledger.mjs';
 import { EventLog } from "../src/events.mjs";
 
 /** A child that prints the given lines and exits with the given code, like `colab auth` does. */
@@ -166,6 +169,48 @@ test("a sign-in that never finishes times out with something to show (U2)", asyn
   assert.equal(result.ok, false);
   assert.match(result.reason, /did not finish within \d+ second/);
   assert.equal(killed, true, "the CLI is not left waiting for a browser that will never open");
+  assert.equal(colabAuthInProgress(), true, 'a signal does not prove auth stopped changing credentials');
+  child.emit('close', 1);
+  assert.equal(colabAuthInProgress(), false);
+});
+
+test('auth HTTP rejects allocating, running, reconciling and unconfirmed run ownership and durable invite holds', async t => {
+  const runtimeDir = mkdtempSync(join(tmpdir(), 'colab-account-http-'));
+  const ledger = createDurableInviteLedger({ path: join(runtimeDir, 'invites.sqlite') });
+  const token = 'account-gate-test-token';
+  const app = createApp({ token, runtimeDir, inviteLedger: ledger,
+    backendFactory() { throw new Error('Live backend forbidden'); }, render: async () => {}, renderScene: async () => {} });
+  const server = createServer(app.handler);
+  await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
+  t.after(async () => {
+    await app.close(); server.closeAllConnections();
+    await new Promise(resolve => server.close(resolve));
+    ledger.close(); rmSync(runtimeDir, { recursive: true, force: true });
+  });
+  const base = `http://127.0.0.1:${server.address().port}`;
+  const blocked = async () => {
+    const response = await fetch(base + '/api/colab/auth', { method: 'POST', headers: { origin: base, 'x-comfyrizz-token': token } });
+    assert.equal(response.status, 409, await response.clone().text());
+    assert.equal((await response.json()).code, 'COLAB_ACCOUNT_BUSY');
+  };
+  for (const status of ['starting', 'running', 'reconciling', 'stop_unconfirmed']) {
+    app.runs.runs.set('run_111111111111', { backendId: 'colab', status, teardown: { state: status === 'stop_unconfirmed' ? 'stop_unconfirmed' : 'running' } });
+    await blocked();
+  }
+  app.runs.runs.clear();
+  const runDir = join(runtimeDir, 'runs', 'run_222222222222');
+  mkdirSync(runDir, { recursive: true });
+  writeFileSync(join(runDir, 'state.json'), JSON.stringify({ backendId: 'colab', status: 'failed', teardown: { state: 'stop_unconfirmed' } }));
+  await blocked();
+  writeFileSync(join(runDir, 'state.json'), JSON.stringify({ backendId: 'colab', status: 'failed', teardown: { state: 'stopped' } }));
+  const invite = ledger.mint({ cu: 1, ttlDays: 1 }).invite;
+  ledger.bindResource(invite.id, 'production', 'prod_held');
+  ledger.reserveAction({ inviteId: invite.id, productionId: 'prod_held', actionId: 'act_held', backendId: 'colab', units: 1 });
+  await blocked();
+  ledger.settleAction({ productionId: 'prod_held', actionId: 'act_held', spent: 0 });
+  app.runs.runs.set('cpu', { backendId: 'cpu', status: 'running' });
+  assert.equal(colabAccountBusy({ runtimeDir, runs: app.runs, pipelines: app.pipelines, inviteLedger: ledger }), false);
+  assert.equal((await startColabAuth({ isBusy: () => colabAccountBusy({ runtimeDir, runs: app.runs, pipelines: app.pipelines, inviteLedger: ledger }), spawn: () => fakeChild([]) })).ok, true);
 });
 
 test("the module never returns a token field at all (U2)", () => {

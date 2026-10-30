@@ -27,7 +27,8 @@ import {
   type SuperEasyProgressViewOptions,
 } from './progress-view.ts';
 import type { StagesProgress } from './stages.ts';
-import type { GalleryModel } from './gallery-model.ts';
+import { buildGalleryModel, type GalleryModel } from './gallery-model.ts';
+import { createAssetInspector } from './asset-detail.ts';
 import { DEFAULT_SUPER_EASY_SETUP, type SuperEasySetup, type MotionModel } from './setup.ts';
 import { renderSuperEasyProposal, type SuperEasyProposal } from './proposal.ts';
 import { getMode, setMode } from '../../ui/mode.ts';
@@ -202,6 +203,10 @@ export function mountSuperEasy(options: SuperEasyMountOptions): SuperEasyMountHa
   let destroyed = false;
   let fontPending = false;
   let progressKeys: SuperEasyProgressKeys | null = null;
+  let currentGallery = buildGalleryModel(null);
+  const assetInspector = createAssetInspector({ root, gallery: () => currentGallery,
+    scope: () => `${options.state().packageId}|${options.state().productionId}|${currentSearch()}`,
+    fetch: options.previewFetch });
   let stopAgentConsole: (() => void) | null = null;
   let attachmentLoadKey: string | null = null;
   let renderedAttachmentList: HTMLElement | null = null;
@@ -771,6 +776,7 @@ export function mountSuperEasy(options: SuperEasyMountOptions): SuperEasyMountHa
   function paintProgress(): void {
     const snapshot = options.snapshot?.() ?? null;
     const viewOptions = progressOptions(snapshot);
+    currentGallery = viewOptions.gallery ?? buildGalleryModel(snapshot);
     const mounted = root.querySelector('[data-super-easy-chrome]');
     if (!mounted) {
       const parts = superEasyProgressParts(snapshot, viewOptions);
@@ -778,6 +784,7 @@ export function mountSuperEasy(options: SuperEasyMountOptions): SuperEasyMountHa
       stopAgentConsole?.();
       stopAgentConsole = mountAgentConsole(root);
       progressKeys = parts.keys;
+      assetInspector.sync();
       return;
     }
     progressKeys = updateSuperEasyProgress(
@@ -786,6 +793,7 @@ export function mountSuperEasy(options: SuperEasyMountOptions): SuperEasyMountHa
       snapshot,
       viewOptions,
     );
+    assetInspector.sync();
   }
 
   function applyDirtyAttachmentNotes(row: HTMLElement): void {
@@ -933,6 +941,7 @@ export function mountSuperEasy(options: SuperEasyMountOptions): SuperEasyMountHa
     current = next;
     const proposal = options.proposal?.() ?? null;
     if (next !== 'progress' || proposal) {
+      assetInspector.clear();
       stopAgentConsole?.();
       stopAgentConsole = null;
     }
@@ -1015,6 +1024,7 @@ export function mountSuperEasy(options: SuperEasyMountOptions): SuperEasyMountHa
       if (inviteTimer !== null) clearInterval(inviteTimer);
       unsubscribe();
       songPreview?.destroy();
+      assetInspector.destroy();
       root.removeEventListener('click', onClick);
       root.removeEventListener('submit', onSubmit);
       root.removeEventListener('change', onChange);

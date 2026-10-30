@@ -85,7 +85,17 @@ for (const [label, width, height] of [['landscape', 960, 540], ['portrait', 540,
 
       const penultimate = rawFrame(output, 148);
       const final = rawFrame(output, 149);
-      assert.ok(penultimate.equals(final), 'the outro is fully settled on the final visible frame');
+      // H.264 may reconstruct identical input frames with a few different low
+      // bits. Prove the compositor settles with lossless stills, then bound the
+      // encoded difference rather than demanding lossless MP4 pixels.
+      const stills = [148, 149].map(frame => {
+        const path = join(work, `outro-${frame}.png`);
+        renderPackage(packagePath, path, { still: true, frame });
+        return rawFrame(path, 0);
+      });
+      assert.ok(stills[0].equals(stills[1]), 'the outro compositor is fully settled on the final visible frame');
+      const difference = penultimate.reduce((sum, value, index) => sum + Math.abs(value - final[index]), 0) / penultimate.length;
+      assert.ok(difference < 0.01, `settled encoded frames differ only by compression noise: ${difference}`);
       const qa = checkVideo({ mp4: output, timeline, pkg });
       assert.deepEqual(qa.findings, [], JSON.stringify(qa.findings, null, 2));
     } finally {

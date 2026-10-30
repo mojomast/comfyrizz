@@ -4,7 +4,44 @@ import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { Worker } from 'node:worker_threads';
+import { DatabaseSync } from 'node:sqlite';
 import { createDurableInviteLedger } from '../src/durable-invite-ledger.mjs';
+
+test('accounting migration preserves existing charged estimates and outstanding holds', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'invite-accounting-migration-'));
+  const path = join(dir, 'ledger.sqlite');
+  let ledger;
+  try {
+    ledger = createDurableInviteLedger({ path });
+    const { invite } = ledger.mint({ cu: 5, ttlDays: 1 });
+    ledger.bindResource(invite.id, 'production', 'prod_old');
+    for (const actionId of ['act_charged', 'act_held']) ledger.reserveAction({
+      inviteId: invite.id, productionId: 'prod_old', actionId, backendId: 'colab', units: 1,
+    });
+    ledger.settleAction({ productionId: 'prod_old', actionId: 'act_charged', spent: 1, filmCompleted: true });
+    ledger.close(); ledger = null;
+    // Recreate the pre-integration table, retaining its exact rows.
+    const db = new DatabaseSync(path);
+    try {
+      db.exec(`ALTER TABLE invite_action_reservations RENAME TO upgraded;
+        CREATE TABLE invite_action_reservations (production_id TEXT NOT NULL, action_id TEXT NOT NULL,
+          invite_id TEXT NOT NULL, units REAL NOT NULL, state TEXT NOT NULL, spent REAL,
+          PRIMARY KEY (production_id, action_id));
+        INSERT INTO invite_action_reservations SELECT production_id, action_id, invite_id, units, state, spent FROM upgraded;
+        DROP TABLE upgraded;`);
+    } finally { db.close(); }
+    ledger = createDurableInviteLedger({ path });
+    assert.equal(ledger.get(invite.id).spentEstimateCu, 1);
+    assert.equal(ledger.get(invite.id).committedEstimateCu, 1);
+    assert.equal(ledger.get(invite.id).filmsCompleted, 1);
+    assert.equal(ledger.actionReservation('prod_old', 'act_charged').accounting, null);
+    assert.equal(ledger.actionReservation('prod_old', 'act_held').state, 'reserved');
+    ledger.recordActionAccounting({ productionId: 'prod_old', actionId: 'act_held',
+      accounting: { status: 'unresolved', actualSpendCu: null, reason: 'session_usage_unavailable' } });
+    ledger.close(); ledger = createDurableInviteLedger({ path });
+    assert.equal(ledger.actionReservation('prod_old', 'act_held').accounting.status, 'unresolved');
+  } finally { ledger?.close(); rmSync(dir, { recursive: true, force: true }); }
+});
 
 test('invites, reservations, revocation and generations survive restart without storing bearer tokens', () => {
   const dir = mkdtempSync(join(tmpdir(), 'invite-ledger-'));

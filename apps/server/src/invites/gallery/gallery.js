@@ -7,6 +7,27 @@
   if (incoming) { sessionStorage.setItem(key, token); history.replaceState(null, '', location.pathname); }
   let next = null, busy = false;
   const el = (tag, cls, text) => { const n = document.createElement(tag); n.className = cls; if (text !== undefined) n.textContent = text; return n; };
+  function usageLabel(accounting, reserved, estimate) {
+    const amount = value => typeof value === 'number' && Number.isFinite(value) && value >= 0;
+    const cu = value => value.toLocaleString(undefined, { maximumFractionDigits: 3 });
+    if (accounting?.status === 'not_required' && accounting.costSource === 'cpu_no_colab_spend' && accounting.actualSpendCu === 0) {
+      return 'CPU render · 0 CU (no Colab allocation)';
+    }
+    if (accounting?.status === 'settled' && accounting.shutdownVerified === true && amount(accounting.actualSpendCu)
+        && (accounting.costSource === 'verified_session_usage'
+          || accounting.costSource === 'verified_no_allocation' && accounting.actualSpendCu === 0)) {
+      const released = amount(reserved) && reserved >= accounting.actualSpendCu
+        ? ` · ${cu(Math.round((reserved - accounting.actualSpendCu) * 1000) / 1000)} CU unused released` : '';
+      return `Verified actual usage: ${cu(accounting.actualSpendCu)} CU · 0 CU held${released}`;
+    }
+    if (accounting?.status === 'legacy_estimate') {
+      return `Legacy estimate: ${amount(estimate) ? `${cu(estimate)} CU` : 'unavailable'} · actual usage unverified`;
+    }
+    if (!accounting && amount(estimate) && estimate > 0) return `Historical estimate: ${cu(estimate)} CU · actual usage unverified`;
+    if (accounting?.status === 'reserved') return `Usage pending${amount(reserved) ? ` · ${cu(reserved)} CU reserved` : '; CU reserved'}`;
+    return `Usage indeterminate${accounting?.status === 'unresolved' || amount(reserved) && reserved > 0
+      ? `; CU reserved${amount(reserved) ? ` · ${cu(reserved)} CU held` : ''}` : ''}`;
+  }
   async function api(path, method = 'GET') {
     const r = await fetch(path, { method, headers: { 'x-comfyrizz-token': token }, cache: 'no-store', redirect: 'error' });
     if (r.status === 401) { sessionStorage.removeItem(key); token = ''; throw new Error('Your session ended. Open your original invite link again.'); }
@@ -20,6 +41,9 @@
     video.setAttribute('aria-label', row.title);
     const body = el('div', 'body');
     body.append(el('h2', '', row.title), el('p', 'meta', `${new Date(row.createdAt).toLocaleString()}${row.fromThisInvite ? ' · From your invite' : ''}`));
+    // Billing details belong to this invite, not to every gallery viewer.
+    if (row.fromThisInvite === true) body.append(el('p', 'meta', usageLabel(row.accounting,
+      row.accounting?.reservedEstimateCu, row.accounting?.legacyEstimateCu)));
     const play = el('button', '', 'Watch film'); play.type = 'button';
     play.addEventListener('click', async () => {
       play.disabled = true;

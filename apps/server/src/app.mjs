@@ -7,7 +7,7 @@ import { fileURLToPath } from 'node:url';
 import { PackageStore, ConflictError, InvalidPackageError } from './store.mjs';
 import { EventLog } from './events.mjs';
 import { colabStatus } from './colab-status.mjs';
-import { startColabAuth } from './colab-auth.mjs';
+import { startColabAuth, colabAccountBusy, colabAuthInProgress } from './colab-auth.mjs';
 import { createHfTokenSettings } from './hf-token-settings.mjs';
 import { handleHfTokenRoutes } from './hf-token-routes.mjs';
 import { readColabProgress } from '../../../packages/backends/src/colab-progress.mjs';
@@ -649,6 +649,7 @@ export function createApp({
     },
   };
   let recoveries = null;
+  let accountSubmissions = 0;
   const runs = createRunController({
     backendFactory: effectiveBackendFactory,
     events,
@@ -662,7 +663,7 @@ export function createApp({
       return prepared;
     },
     onComplete: completeRun,
-    isBusy: () => Boolean(pipelines?.active() || recoveries?.active()) || hasUnresolvedCorrectionShutdown(productionStore, runtimeDir),
+    isBusy: () => Boolean(pipelines?.active() || pipelines?.accountBusy() || recoveries?.active()) || hasUnresolvedCorrectionShutdown(productionStore, runtimeDir),
     productionStore,
     readPackage: id => store.read(id),
     ledgerFor: ({ productionId }) => {
@@ -672,6 +673,16 @@ export function createApp({
       return createBudgetLedger({ runtimeDir, ledgerId: production.budgetLedgerId });
     },
   });
+  // Cover admission awaits before run.status exposes an allocated run. Every
+  // server path (HTTP, correction adapter, chat) shares this controller wrapper.
+  const startRun = runs.start;
+  runs.start = async input => {
+    const accountUse = input?.backendId !== 'cpu';
+    if (accountUse && colabAuthInProgress()) return { status: 409, error: 'Google Colab sign-in is in progress', code: 'COLAB_AUTH_BUSY' };
+    if (accountUse) accountSubmissions++;
+    try { return await startRun(input); }
+    finally { if (accountUse) accountSubmissions--; }
+  };
   recoveries = createDownloadedOutputRecovery({ runtimeDir, store, productionStore, completeRun,
     isBusy: () => Boolean(runs.status().activeRunId || pipelines?.active()) || hasUnresolvedCorrectionShutdown(productionStore, runtimeDir),
     publish: event => events.publish(event) });
@@ -810,9 +821,15 @@ export function createApp({
   pipelines = createPipelineController({
     runtimeDir, events, stageInputs: stagePipelineInputs,
     ...(pipelineLaunch ? { launch: pipelineLaunch } : {}),
-    operations: process.env.COMFYRIZZ_HOSTED_INVITES === '1' ? null : operations,
+    operations,
     maxConcurrent: process.env.COMFYRIZZ_HOSTED_INVITES === '1' ? Number(process.env.COMFYRIZZ_INVITE_MAX_CONCURRENT ?? 4) : 1,
-    isBusy: () => Boolean(runs.status().activeRunId || recoveries?.active()) || hasUnresolvedCorrectionShutdown(productionStore, runtimeDir),
+    parallelAdmission: ({ pkg, origin }) => {
+      if (process.env.COMFYRIZZ_HOSTED_INVITES !== '1' || !origin) return false;
+      const inviteId = inviteLedger?.resourceOwner('production', origin.productionId);
+      return Boolean(inviteId && inviteLedger.resourceOwner('package', pkg.id) === inviteId
+        && productionStore.read(origin.productionId)?.packageId === pkg.id);
+    },
+    isBusy: () => accountSubmissions > 0 || Boolean(runs.status().activeRunId || recoveries?.active()) || hasUnresolvedCorrectionShutdown(productionStore, runtimeDir),
   });
   if (process.env.COMFYRIZZ_HOSTED_INVITES === '1') {
     for (const run of pipelines.list()) {
@@ -1867,7 +1884,7 @@ export function createApp({
       try {
         const result = await reconcileCorrectionShutdown({ store: productionStore, runtimeDir,
           runId: correctionShutdown[1], backendFactory: effectiveBackendFactory,
-          active: () => Boolean(runs.status().activeRunId || pipelines.active()) });
+          active: () => colabAuthInProgress() || accountSubmissions > 0 || Boolean(runs.status().activeRunId || pipelines.active()) });
         return sendJson(response, 200, result);
       } catch (error) {
         return sendJson(response, error.status ?? 503, { error: error.message ?? 'Shutdown could not be checked.' });
@@ -2083,6 +2100,9 @@ export function createApp({
     // CLI: nothing here reads, parses or stores a credential.
     if (url.pathname === '/api/colab/auth' && request.method === 'POST') {
       const outcome = await startColabAuth({
+        isBusy: () => accountSubmissions > 0 || Boolean(recoveries?.active())
+          || hasUnresolvedCorrectionShutdown(productionStore, runtimeDir)
+          || colabAccountBusy({ runtimeDir, runs, pipelines, inviteLedger }),
         onLine: (line) => {
           // the run panel's own event stream, when it is there: the card renders live lines if it is
           // watching, and the response below carries them all either way
@@ -2093,11 +2113,12 @@ export function createApp({
           }
         },
       });
-      return sendJson(response, outcome.ok ? 200 : 502, {
+      return sendJson(response, outcome.ok ? 200 : outcome.busy ? 409 : 502, {
         ok: outcome.ok,
         lines: outcome.lines,
         reason: outcome.reason,
         install: outcome.install === true,
+        ...(outcome.busy ? { code: outcome.errorCode ?? 'COLAB_AUTH_BUSY' } : {}),
       });
     }
 

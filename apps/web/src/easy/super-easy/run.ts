@@ -67,7 +67,7 @@ export interface SuperEasyApi {
   generateLocalNarration?(body: { packageId: string; productionId: string; baseRevision: number; recoveryInputs?: unknown }): Promise<any>;
   colabStatus(): Promise<{ backendId?: string } | null>;
   inviteSession?(): Promise<{ role?: string; backendId?: string; budgetUnits?: number; spendEnabled?: boolean; invite?: { status?: string } }>;
-  guestResult?(id: string): Promise<{ status: string; url?: string }>;
+  guestResult?(id: string): Promise<{ status: string; url?: string; [key: string]: unknown }>;
 }
 
 export interface SuperEasyHost {
@@ -94,6 +94,7 @@ export interface SuperEasyRunPollingOptions {
   setTimer?: (callback: () => void, delayMs: number) => unknown;
   isCurrent?(): boolean;
   onRecord?(record: Record<string, unknown>): void;
+  onConnection?(connected: boolean): void;
 }
 
 export interface RunSuperEasyInput {
@@ -138,6 +139,8 @@ export interface RunSuperEasyDeps {
   onPhase?(stage: SuperEasyRunStage): void;
   /** Expose the active run for Stop-and-start-over cancellation. */
   onRunStarted?(runId: string): void;
+  onRunRecord?(record: Record<string, unknown>): void;
+  onRunConnection?(connected: boolean): void;
 }
 
 export type SuperEasyRunFailureCode =
@@ -359,7 +362,7 @@ function terminalRunFailure(run: Record<string, unknown>): string | null {
   const teardown = isRecord(run.teardown) ? run.teardown : null;
   const teardownState = typeof teardown?.state === 'string' ? teardown.state.toLowerCase() : '';
   if (teardownState === 'stop_unconfirmed') return runFailureMessage(run);
-  if (['failed', 'failure', 'error', 'cancelled', 'canceled', 'stopped', 'refused', 'stop_unconfirmed'].includes(status)) {
+  if (['failed', 'failure', 'error', 'cancelled', 'canceled', 'stopped', 'interrupted', 'refused', 'stop_unconfirmed'].includes(status)) {
     return runFailureMessage(run);
   }
   return null;
@@ -387,14 +390,27 @@ export async function pollFinalRun(
   const pollMs = options?.pollMs ?? DEFAULT_RUN_POLL_MS;
   for (;;) {
     if (options?.isCurrent?.() === false) throw new Error('Recovery stopped or the project changed.');
-    const run = runRecordOf(await api.getRun(runId));
+    let body: unknown;
+    try {
+      body = await api.getRun(runId);
+    } catch (error) {
+      if (options?.isCurrent?.() === false) throw new Error('The project changed or observation stopped.');
+      options?.onConnection?.(false);
+      if (Date.now() - startedAt >= timeoutMs) throw new Error('The run connection is unavailable. Its current execution and stop state are unknown; check the existing run before starting another.');
+      await pause(options, pollMs);
+      continue;
+    }
+    const run = runRecordOf(body);
     if (options?.isCurrent?.() === false) throw new Error('Recovery stopped or the project changed.');
+    options?.onConnection?.(true);
+    // Publish the terminal record too: its completed outputs and stop evidence
+    // must remain available even when final rendering fails.
+    options?.onRecord?.(run);
     const failed = terminalRunFailure(run);
     if (failed !== null) throw Object.assign(new TerminalRunError(failed), { recoveryEligible: run.status === 'failed' });
-    options?.onRecord?.(run);
     const status = typeof run.status === 'string' ? run.status.toLowerCase() : '';
     if (status === 'done' || status === 'idle' || status === 'completed') return run;
-    if (!['starting', 'running', 'rendering', 'verifying', 'queued', 'dispatching', 'pending'].includes(status)) {
+    if (!['starting', 'running', 'rendering', 'verifying', 'queued', 'dispatching', 'pending', 'paused', 'stopping', 'cancel_requested'].includes(status)) {
       throw new Error(runFailureMessage(run));
     }
     if (Date.now() - startedAt >= timeoutMs) throw new Error('The final video run timed out.');
@@ -807,9 +823,12 @@ export async function runSuperEasy(input: RunSuperEasyInput, deps: RunSuperEasyD
     if (runId === null || runId === '') return failure('RUN_ID_REQUIRED', 'run', RUN_ID_REQUIRED);
     let completed: Record<string, unknown>;
     try {
-      completed = await pollFinalRun(deps.api, runId, input.run);
+      completed = await pollFinalRun(deps.api, runId, { ...input.run,
+        onRecord(record) { deps.onRunRecord?.(record); input.run?.onRecord?.(record); },
+        onConnection(connected) { deps.onRunConnection?.(connected); input.run?.onConnection?.(connected); },
+      });
     } catch (error) {
-      return { ...failure('RUN_FAILED', 'run', messageOf(error, RUN_FAILED)),
+      return { ...failure('RUN_FAILED', 'run', messageOf(error, RUN_FAILED)), retryable: false,
         ...(error instanceof TerminalRunError && error.recoveryEligible ? { failedRunId: runId } : {}) };
     }
     try {

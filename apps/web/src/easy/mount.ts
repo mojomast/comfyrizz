@@ -42,6 +42,7 @@ import { PROCEDURE_COPY } from './procedure/copy.ts';
 import { createSuperEasyContextAttachments } from './super-easy/context-attachments.ts';
 import { mountCorrectionShutdown } from './correction-shutdown.ts';
 import { readPlanCard } from '../productions/cards/plan-card.ts';
+import { syncGenerationStatus } from './super-easy/generation-status-view.ts';
 import { readFilmRepair } from './super-easy/film-review.ts';
 import { openFilmReview } from './super-easy/film-review-view.ts';
 
@@ -103,6 +104,8 @@ export function mountEasyStudio(root: HTMLElement, baseHost: EasyHost, deps: Eas
   let homeTicket = 0;
   let superEasy: ReturnType<typeof mountSuperEasy> | null = null;
   let superEasySnapshot: unknown = null;
+  let generationClock: ReturnType<typeof setInterval> | null = null;
+  const paintGenerationStatus = () => { if (superEasy) syncGenerationStatus(root, superEasySnapshot); };
   let superEasyTicket = 0;
   let superEasySession: SuperEasySession | null = null;
   let proposalReturnWaiting = false;
@@ -126,6 +129,7 @@ export function mountEasyStudio(root: HTMLElement, baseHost: EasyHost, deps: Eas
     onUpdate: (items) => {
       liveGalleryItems = items;
       superEasy?.render();
+      paintGenerationStatus();
     },
   });
   let facts: StepFacts = {
@@ -320,6 +324,8 @@ export function mountEasyStudio(root: HTMLElement, baseHost: EasyHost, deps: Eas
   }
 
   function destroySuperEasy(stopSession = false): void {
+    if (generationClock !== null) { clearInterval(generationClock); generationClock = null; }
+    superEasySession?.detachGeneration?.();
     filmReview?.close();
     superEasyTicket += 1;
     proposalReturnWaiting = false;
@@ -374,11 +380,13 @@ export function mountEasyStudio(root: HTMLElement, baseHost: EasyHost, deps: Eas
       onProgress: (_html, snapshot) => {
         superEasySnapshot = snapshot;
         superEasy?.render();
+        paintGenerationStatus();
         procedure.observe(snapshot);
       },
       onDone: (snapshot) => {
         superEasySnapshot = snapshot;
         superEasy?.render();
+        paintGenerationStatus();
         procedure.observe(snapshot);
       },
       onPreviewReady: (_result, snapshot) => {
@@ -391,6 +399,7 @@ export function mountEasyStudio(root: HTMLElement, baseHost: EasyHost, deps: Eas
         // The progress screen owns the message, Retry and the escapes now.
         // The Studio shell is intentionally destroyed while Super Easy runs.
         superEasy?.render();
+        paintGenerationStatus();
         procedure.fail(failure.message);
       },
     });
@@ -404,7 +413,13 @@ export function mountEasyStudio(root: HTMLElement, baseHost: EasyHost, deps: Eas
   }
 
   async function openSuperEasySetup(preferredCompute?: 'colab'): Promise<boolean> {
-    if (hostedInviteView) return false;
+    if (hostedInviteView) {
+      const { openDialog } = await import('./dialog.ts');
+      await openDialog({ title: 'Hosted generation is unavailable here',
+        bodyHtml: '<p>This shared-film editing session reuses existing media on CPU. It cannot enable Google Colab or change the host’s compute settings. This plan still needs generated media; ask the host to finish those assets, or edit the plan to reuse completed media. No GPU work was started.</p>',
+        actions: [{ label: 'Back to film', value: 'close', kind: 'secondary' }], opener: root });
+      return false;
+    }
     const { openDialog, confirmDialog } = await import('./dialog.ts');
     const { renderCompute, mountCompute, computeBlockReason } = await import('./compute-choice.ts');
     const saved = readSuperEasySetup();
@@ -532,8 +547,10 @@ export function mountEasyStudio(root: HTMLElement, baseHost: EasyHost, deps: Eas
       if (ticket !== superEasyTicket) return;
       superEasySnapshot = snapshot;
       superEasy?.render();
-      if (superEasy) void ensureSuperEasySession().restoreFinalVideo?.(snapshot);
+      if (superEasy && !hostedInviteView) void ensureSuperEasySession().restoreFinalVideo?.(snapshot);
       if (superEasy) void ensureSuperEasySession().restoreComputeProposal?.(snapshot);
+      if (superEasy) ensureSuperEasySession().resumeGeneration?.(snapshot);
+      paintGenerationStatus();
     }).catch(() => {
       /* keep the last snapshot; the gauges stay at their last known state */
     });
@@ -595,7 +612,7 @@ export function mountEasyStudio(root: HTMLElement, baseHost: EasyHost, deps: Eas
     // Rebuild the review only on return. Later edits must still fail the normal
     // approval revision guard, rather than silently updating what was reviewed.
     proposalReturnWaiting = superEasySession?.refreshProposal?.() === 'waiting';
-    if (hostedInviteView && new URLSearchParams(search()).get('edit') === '1' && !superEasySession) {
+    if (hostedInviteView && new URLSearchParams(search()).get('edit') === '1' && !superEasySession && !store.get().proposalCheckpoint) {
       ensureSuperEasySession().reviewExisting();
     }
     superEasy = mountSuperEasy({
@@ -721,6 +738,7 @@ export function mountEasyStudio(root: HTMLElement, baseHost: EasyHost, deps: Eas
         store.startNew();
       },
     });
+    generationClock = setInterval(paintGenerationStatus, 15000);
     if (store.get().productionId) refreshSuperEasySnapshot();
     else if (savedFilmRepair()) void ensureSuperEasySession().syncRepairedFilm?.().catch(() => { superEasy?.render(); });
     else if (store.get().proposalCheckpoint) void ensureSuperEasySession().restoreProposal?.();

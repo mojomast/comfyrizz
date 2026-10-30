@@ -1,4 +1,5 @@
-// A9 (M7): the final export renders at 1920×1080 and prefers an asset's x2 upscaled variant when
+// A9 (M7): final export preserves the source aspect unless dimensions are explicit,
+// and prefers an asset's x2 upscaled variant when
 // the package declares one, otherwise it scales the base media with A8's real-size handling.
 // The variant field is `assets[<id>].variants.upscaled = { file, width, height }`, agreed with
 // H12; the fixture builds it here so the test works before H12 lands its schema field.
@@ -120,24 +121,24 @@ test('preview keeps the working resolution and does not use the variant', { time
   assert.ok(r > 200 && g < 60, `preview should draw the red base file, got rgb(${r},${g})`);
 });
 
-test('final render is 1920×1080 and uses the upscaled variant when present', { timeout: 600_000 }, () => {
+test('final render preserves aspect, accepts explicit 1080p and uses the upscaled variant when present', { timeout: 600_000 }, () => {
   const { dir, pkg, withVariant } = buildFixture();
   const frames = compileTimeline(pkg).durationInFrames;
 
-  // Without a variant: 1920×1080, media scaled by A8 (no stretching), base file used.
+  // The working 960×544 source is not 16:9: its default final is 1920×1088.
   const base = renderPackage(join(dir, 'base.json'), join(dir, 'final-base.mp4'), { final: true });
   assert.equal(base.final.width, 1920);
-  assert.equal(base.final.height, 1080);
+  assert.equal(base.final.height, 1088);
   assert.deepEqual(base.final.upscaled, []);
   const baseProbe = probe(join(dir, 'final-base.mp4'));
   assert.equal(baseProbe.width, 1920);
-  assert.equal(baseProbe.height, 1080);
+  assert.equal(baseProbe.height, 1088);
   assert.equal(baseProbe.frames, frames);
   const [br, bg] = centerPixel(join(dir, 'final-base.mp4'));
   assert.ok(br > 200 && bg < 60, `no variant should scale the red base file, got rgb(${br},${bg})`);
 
-  // With a variant: same 1080p output, but the lime upscaled file is the one on screen.
-  const up = renderPackage(join(dir, 'variant.json'), join(dir, 'final-up.mp4'), { final: true });
+  // Explicit 1080p output uses the lime upscaled file on screen.
+  const up = renderPackage(join(dir, 'variant.json'), join(dir, 'final-up.mp4'), { final: { width: 1920, height: 1080 } });
   assert.equal(up.final.width, 1920);
   assert.equal(up.final.height, 1080);
   assert.deepEqual(up.final.upscaled, [{ id: 'a_bg', file: 'assets/up.png', base: 'assets/base.png', width: 1920, height: 1080 }]);

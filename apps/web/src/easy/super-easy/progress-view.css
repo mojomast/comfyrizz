@@ -1,3 +1,5 @@
+@import './gallery.css';
+
 /* Super Easy replaces the fixed advanced-editor shell, so it must restore page scroll. */
 html:has(#easy-root[data-super-easy-view]),
 body:has(#easy-root[data-super-easy-view]) {

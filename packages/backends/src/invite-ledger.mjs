@@ -371,6 +371,14 @@ export function createInviteLedger({ now = () => Date.now(), publicBaseUrl = DEF
             details: { ...previous.details, ...entry.details }, finishedAt: now(),
           });
         }
+        // Shutdown/usage reconciliation can finish after the generation is
+        // terminal. Refresh only accounting; never resurrect or republish it.
+        if (entry.details?.accounting && (!['settled', 'legacy_estimate'].includes(previous.details?.accounting?.status)
+            || ['settled', 'legacy_estimate'].includes(entry.details.accounting.status))) {
+          previous.details = { ...previous.details, accounting: structuredClone(entry.details.accounting),
+            costSource: entry.details.costSource, actualSpendCu: entry.details.actualSpendCu };
+          previous.spentEstimateCu = roundCu(Number(entry.spentEstimateCu ?? 0)) || 0;
+        }
         return { ok: true, reason: 'already_recorded', generation: { ...previous } };
       }
     }

@@ -394,6 +394,42 @@ function kinds(calls) {
   return calls.map((call) => call.kind);
 }
 
+test('hosted constructor preserves explicit CPU shared-film edits through revise, reload, failed approval and retry', async () => {
+  for (const invite of [
+    { role: 'guest', backendId: 'colab', budgetUnits: 7, spendEnabled: true, invite: { status: 'active' } },
+    { role: 'guest', backendId: 'colab', budgetUnits: 7, spendEnabled: false, invite: { status: 'active' } },
+    { role: 'guest', backendId: 'colab', budgetUnits: 0, spendEnabled: true, invite: { status: 'exhausted' } },
+  ]) {
+    const pkg = { id: 'pkg_shared', revision: 6, title: 'Shared film', format: { fps: 30 }, scenes: [{ id: 's1', preferredFrames: 90 }], assets: {} };
+    const { api, host, store, calls } = harness({ builtPackage: pkg, session: invite,
+      actions: [{ id: 'act_cpu_final', kind: 'final', upperBound: 0, backendId: 'cpu' }] });
+    host.adoptBuiltPackage({ package: pkg });
+    host.aiSelection = async () => { throw Error('Owner provider settings are forbidden'); };
+    host.editorStore.saveState = () => ({ status: 'saved', acknowledgedRevision: host.getPackage().revision, editSequence: 0, acknowledgedSequence: 0 });
+    const create = () => createSuperEasySession({ hostedInvite: true, api, host, store, go() {}, watch: () => () => {} });
+    const session = create(); session.reviewExisting();
+    assert.equal(store.get().compute, 'cpu'); assert.equal(store.get().spendCap, 0);
+    const result = await session.reviseProposal('Update the title while reusing existing media.');
+    assert.equal(result.ok, true, JSON.stringify(result));
+    assert.equal(store.get().compute, 'cpu'); assert.equal(store.get().spendCap, 0);
+    api.getPackage = async () => ({ package: host.getPackage() });
+    api.compilePackage = async () => ({ timeline: { durationInFrames: 90 } });
+    const reopened = create(); await reopened.restoreProposal();
+    assert.equal(reopened.phase(), 'proposal');
+    const propose = api.proposeEasyPlan;
+    let first = true;
+    api.proposeEasyPlan = async (id, body) => { if (first) { first = false; throw Error('Quote connection lost'); } assert.equal(body.compute, 'cpu'); return propose(id, body); };
+    const failed = await reopened.approveProposal(); assert.equal(failed.ok, false);
+    const retried = await reopened.retry(); assert.equal(retried.ok, true, JSON.stringify(retried));
+    assert.equal(store.get().compute, 'cpu'); assert.equal(store.get().spendCap, 0);
+    assert.equal(calls.some(call => ['run', 'colab-status', 'final-plan'].includes(call.kind)), false);
+    assert.equal(calls.filter(call => call.kind === 'dispatch').length, 1);
+    assert.equal(calls.find(call => call.kind === 'dispatch').body.payload.actionId, 'act_cpu_final');
+    assert.equal(calls.some(call => call.kind === 'spend-cap' && call.body.ceiling > 0), false);
+    reopened.stop(); session.stop(); store.flush();
+  }
+});
+
 test('CPU approval generates local narration before opening the review preview', async () => {
   const pkg = { id: 'pkg_1', revision: 2, voice: { enabled: true, engine: 'kokoro' }, scenes: [{ id: 's1', narration: 'A line.' }], assets: {} };
   const { api, host, calls, store } = harness({ builtPackage: pkg });

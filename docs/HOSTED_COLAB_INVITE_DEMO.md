@@ -1,12 +1,55 @@
 # Hosted Google Colab invite demo — state, design, next steps
 
+## Accounting reconciliation integration (2026-10-30)
+
+Hosted pipelines now keep invite CU **reserved and unresolved** after a
+completed/failed run when its usage is only an account-wide balance delta.
+Concurrent account deltas overlap; they are neither apportioned nor charged
+as actual per-film usage. Verified shutdown is necessary but does not itself
+prove the cost. The current CLI usage/status parser supplies no final,
+session-attributable CU receipt, so real allocated hosted runs retain their
+holds pending explicit reconciliation. No actual-usage measurement is invented.
+
+The durable action reservation and generation `details.accounting` expose
+`status`, `actualSpendCu` (null when unknown), `shutdownVerified`, `costSource`,
+and the unresolved reason. The hosted gallery (own-invite films only) and admin
+dashboard show **Usage indeterminate; CU reserved** with the held amount, not
+interpret the legacy numeric `spentEstimateCu: 0` as free work. Verified
+settlements show actual usage, zero held CU and the unused amount released;
+CPU renders and historical estimates have distinct labels. The shared gallery
+does not disclose other invites' billing or private runtime/receipt identities.
+A finished film counts once toward its film quota even while its CU hold is
+unresolved. Restart and repeated observations do not charge or count it again.
+
+An operation proven never to have attempted allocation releases its reservation
+at zero. An attempted allocation followed by a clean session listing is not
+proof that no transient usage occurred. An unconfirmed stop retains the hold.
+CPU edits have zero CU and do not consume another paid-film slot. Existing
+historical full-reservation charges (including the 15.442-CU test estimate
+reported below) remain explicitly **legacy estimates**, not retroactive actual
+usage measurements.
+
+The worker accepts server-owned `spec.accountingMode: 'invite-reserved'`; the
+hosted environment also selects it. Per-run admission, estimated budgets and
+watchdog/wall-clock limits remain enforced. An overlapping account delta no
+longer trips the media worker's or Qwen narration runner's per-run actual-spend
+comparison in this mode. Qwen receives the mode and run identity from the worker;
+its standalone CLI defaults to owner accounting. Qwen still refuses insufficient
+or unreadable pre-allocation credit, requires execution/shutdown budget headroom,
+and refuses success when teardown is unconfirmed.
+Owner sequential pipelines retain their existing account-balance comparison.
+The optional internal final-session receipt contract is documented in
+`packages/backends/src/session-accounting.mjs`; the current Colab backend does
+not produce those receipts. No guest-supplied receipt or new settlement HTTP
+endpoint is accepted.
+
 ## Shared-link gallery update (2026-10-30)
 
 Deployed from `feat/shared-invite-gallery`. The hosted systemd service is active
 and enabled, with guest generation enabled following Kyle's explicit live-test
 approval. The current host concurrency setting is **2** simultaneous films.
 The marketing homepage remains available and the owner dashboard remains
-tailnet-only at `https://mail.tailec998.ts.net:8456/admin/`.
+tailnet-only at `https://<PRIVATE_ADMIN_HOST>:8456/admin/` (host shared separately).
 
 * An invite is reusable by multiple people. Each redemption issues a separate
   guest login and records a durable visit. Everyone using that invite shares

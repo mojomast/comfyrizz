@@ -447,6 +447,8 @@ export function createColabBackend({
     session,
     productionId: productionId || null,
     createdByUs: false,
+    allocationAttempted: false,
+    allocationCleanup: null,
     startedAtMs: null,
     usageBefore: null,
     spentEstimate: 0,
@@ -941,6 +943,7 @@ export function createColabBackend({
           forgetSession();
           state.createdByUs = false;
           const cleanup = { confirmedGone: true, listedEver, note: check.note };
+          state.allocationCleanup = cleanup;
           emit(onEvent, { type: "allocation_cleanup", ...cleanup });
           return cleanup;
         }
@@ -1058,7 +1061,9 @@ export function createColabBackend({
       // PO-4 review: a cancel can land after the assign POST has already provisioned the VM. Write a
       // provisional registry entry *before* `colab new`, so a teardown always owns what the allocation
       // may have created, and on abort or failure ask `colab sessions` and stop anything listed.
+      signal?.throwIfAborted();
       rememberSession({ provisional: true });
+      state.allocationAttempted = true;
       let result = null;
       try {
         for (let attempt = 1; attempt <= newAttempts; attempt += 1) {
@@ -1459,7 +1464,9 @@ export function createColabBackend({
      */
     async teardown(reason) {
       if (!owns() && !state.createdByUs) {
-        return { state: "not_owned", evidence: `no session registry entry for ${session}; nothing was stopped` };
+        return { state: "not_owned", evidence: `no session registry entry for ${session}; nothing was stopped`,
+          allocation: state.allocationAttempted || state.startedAtMs !== null ? 'attempted' : 'not_attempted',
+          shutdownVerified: (!state.allocationAttempted && state.startedAtMs === null) || state.allocationCleanup?.confirmedGone === true };
       }
       const dropped = await execScript(dropTokenScript, { step: "drop-token", timeout: 120, wallMs: 180000 });
       const droppedOutcome = execOutcome(dropped, "drop-token");
@@ -1477,6 +1484,7 @@ export function createColabBackend({
           const watchdog = await disarmWatchdog();
           return {
             state: "stopped",
+            shutdownVerified: true,
             evidence: `colab sessions no longer lists ${session} (reason: ${reason})`,
             attempts: attempt,
             watchdog,

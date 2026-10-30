@@ -101,7 +101,9 @@ test('two users of one link run together; shared gallery, models, private admin 
       worker.exit(0, null);
     }
     assert.equal(ledger.get(link.invite.id).filmsCompleted, 2);
-    assert.equal(ledger.get(link.invite.id).committedEstimateCu, 0);
+    assert.ok(ledger.get(link.invite.id).committedEstimateCu > 0, 'fake workers provide no attributable usage receipt');
+    assert.equal(ledger.get(link.invite.id).spentEstimateCu, 0);
+    assert.ok(ledger.listGenerations(link.invite.id).every(row => row.details.accounting.status === 'unresolved'));
     // An exhausted shared link still opens the gallery.
     assert.equal((await get(link.path)).status, 200);
     for (const guest of [...guests, viewer]) {
@@ -149,7 +151,7 @@ test('two users of one link run together; shared gallery, models, private admin 
       body: JSON.stringify({ brief: 'Edit a film', proposalRevision: { packageId: pkg.id, baseRevision: pkg.revision, note: 'Change logline' } }) });
     assert.equal(foreignEdit.status, 403);
     const cpuStore = createEasyStore({ storage: { getItem: () => null, setItem() {} }, key: 'cpu-edit' });
-    const session = createSuperEasySession({ api: cpuApi, store: cpuStore, go() {}, watch: () => () => {},
+    const session = createSuperEasySession({ hostedInvite: true, api: cpuApi, store: cpuStore, go() {}, watch: () => () => {},
       host: { getPackage: () => pkg, adoptBuiltPackage: body => { pkg = body.package; },
         aiSelection: async () => { throw new Error('Owner provider settings are forbidden'); }, editorStore: {}, refreshClips() {} } });
     session.reviewExisting();
@@ -178,7 +180,7 @@ test('two users of one link run together; shared gallery, models, private admin 
     worker.message({ kind: 'result', result: { models: [], files: [{ name: 'video.mp4' }] } }); worker.exit(0, null);
     assert.equal(ledger.get(link.invite.id).filmsCompleted, beforeCpu.filmsCompleted);
     assert.equal(ledger.get(link.invite.id).spentEstimateCu, beforeCpu.spentEstimateCu);
-    assert.equal(ledger.get(link.invite.id).committedEstimateCu, 0);
+    assert.equal(ledger.get(link.invite.id).committedEstimateCu, beforeCpu.committedEstimateCu);
     assert.match(ledger.listGenerations(link.invite.id).find(row => row.runId === worker.spec.runId).prompt, /Agent edit: Change the first headline/);
     const cpuVideo = await (await guestFetch(`/api/invites/productions/${cpuResult.productionId}/result`)).json();
     assert.equal(cpuVideo.status, 'completed');

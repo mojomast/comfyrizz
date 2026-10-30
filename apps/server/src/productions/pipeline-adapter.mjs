@@ -257,7 +257,9 @@ export function createPipelineAdapter(options = {}) {
   }
 
   function matchesOrigin(run, productionId, actionId) {
-    return run?.origin?.productionId === productionId && run?.origin?.actionId === actionId;
+    const packageId = store.read(productionId)?.packageId ?? readAction(productionId, actionId)?.pipelinePackageId;
+    return run?.origin?.productionId === productionId && run?.origin?.actionId === actionId
+      && (!packageId || run.packageId === packageId);
   }
 
   /**
@@ -547,6 +549,10 @@ export function createPipelineAdapter(options = {}) {
     }
 
     let run = runForAction(productionId, actionId, action);
+    if (run && run.packageId !== pkg?.id) {
+      return markSubmissionUnknown(productionId, action, 'SUBMISSION_UNKNOWN',
+        'The attributed run does not match the requested package.', 'package_mismatch');
+    }
     if (run) {
       const status = mapPipelineStatus(run, { intent: production.intent });
       if (TERMINAL_PIPELINE_STATUSES.has(status)) {
@@ -606,7 +612,7 @@ export function createPipelineAdapter(options = {}) {
       productionId,
       action,
       'dispatching',
-      { attemptId, ...(claim === null ? {} : { claimId: claim }) },
+      { attemptId, pipelinePackageId: pkg?.id, ...(claim === null ? {} : { claimId: claim }) },
       'dispatch_intent',
     );
     let current = dispatching.action;
@@ -710,6 +716,14 @@ export function createPipelineAdapter(options = {}) {
     }
 
     let started;
+    function refusedStart(message, code = 'PIPELINE_REFUSED') {
+      const fresh = readAction(productionId, actionId) ?? current;
+      const applied = applyActionState(productionId, fresh, 'blocked',
+        { lastError: { code, message }, runId: null }, 'dispatch_refused');
+      return { admitted: false, started: false, duplicate: false, changed: applied.changed,
+        status: 'blocked', reason: code, actionState: applied.action.state, action: applied.action,
+        run: null, submission: 'not_submitted' };
+    }
     try {
       started = await controller.start(pkg, input, sourceDir, {
         origin: { productionId, actionId },
@@ -736,6 +750,7 @@ export function createPipelineAdapter(options = {}) {
           run: clone(found),
         };
       }
+      if (error?.submission === 'not_submitted') return refusedStart(error.message);
       // The submission may have reached the worker. Without an attributed run
       // a retry could double-charge, so it is reconciled, never resubmitted.
       return markSubmissionUnknown(
@@ -747,36 +762,27 @@ export function createPipelineAdapter(options = {}) {
       );
     }
 
-    const startedRun = started?.run ?? started;
-    if (!startedRun?.runId) {
-      const status = Number(started?.status);
-      const definiteRefusal = Number.isSafeInteger(status) && status >= 400 && status < 500;
-      if (definiteRefusal) {
-        const code = typeof started?.error === 'string' ? started.error : 'PIPELINE_REFUSED';
-        const applied = applyActionState(
-          productionId,
-          current,
-          'blocked',
-          { lastError: { code, message: 'the pipeline refused admission before creating a run' } },
-          'dispatch_refused',
-        );
-        return {
-          admitted: false,
-          started: false,
-          duplicate: false,
-          changed: applied.changed,
-          status: 'blocked',
-          reason: code,
-          actionState: applied.action.state,
-          action: applied.action,
-          run: null,
-        };
+    // HTTP-style refusals are never run records, even when an older controller
+    // attached the holder's runId. Only explicit non-submission proof releases
+    // an invite reservation; ambiguous outcomes retain it for reconciliation.
+    const responseStatus = started?.status;
+    const httpStatus = typeof responseStatus === 'number' || typeof responseStatus === 'string' && /^\d+$/.test(responseStatus);
+    if (httpStatus && (!Number.isInteger(Number(responseStatus)) || Number(responseStatus) < 200 || Number(responseStatus) >= 300)) {
+      if (started.submission === 'not_submitted' && !runForAction(productionId, actionId, current)) {
+        return refusedStart(started.error ?? 'Pipeline admission refused', started.code ?? 'PIPELINE_REFUSED');
       }
+      return markSubmissionUnknown(productionId, current, 'SUBMISSION_UNKNOWN', 'Pipeline admission did not confirm submission.', 'start_refused_unconfirmed');
+    }
+    // Direct records remain supported for legacy test/host controllers, but
+    // they must carry the same origin and exact requested package identity.
+    const startedRun = started?.run ?? started;
+    if (!isIdentifier(startedRun?.runId) || !matchesOrigin(startedRun, productionId, actionId)
+      || startedRun.packageId !== pkg?.id) {
       return markSubmissionUnknown(
         productionId,
         current,
         'SUBMISSION_UNKNOWN',
-        'the pipeline did not return a run id',
+        'the pipeline did not return a run bound to this action and package',
         'start_unconfirmed',
       );
     }

@@ -29,10 +29,10 @@ export function hasAudioStream(path) {
 }
 
 /** The integrated loudness ffmpeg measures for a file, or null when it cannot. */
-export function measureLoudness(path) {
+export function measureLoudness(path, { target = MIX_LOUDNESS_TARGET } = {}) {
   const run = spawnSync(
     'ffmpeg',
-    ['-hide_banner', '-nostats', '-i', path, '-af', 'loudnorm=print_format=json', '-f', 'null', '-'],
+    ['-hide_banner', '-nostats', '-i', path, '-af', `loudnorm=I=${target.integratedLufs}:TP=${target.truePeakDbtp}:LRA=${target.rangeLu}:print_format=json`, '-f', 'null', '-'],
     { encoding: 'utf8' },
   );
   const match = run.stderr.match(/\{[\s\S]*\}/);
@@ -83,7 +83,8 @@ export function normalizeMixLoudness(path, { target = MIX_LOUDNESS_TARGET, onLog
     return { applied: false, reason: 'preserve music master' };
   }
   if (!hasAudioStream(path)) return { applied: false, reason: 'no audio stream' };
-  const measured = measureLoudness(path);
+  // target_offset belongs to this exact target, not FFmpeg's default -24 LUFS.
+  const measured = measureLoudness(path, { target });
   // A silent mix has nothing to normalise; leave it as it is.
   if (!measured) return { applied: false, reason: 'silent audio' };
   const shared = `I=${target.integratedLufs}:TP=${target.truePeakDbtp}:LRA=${target.rangeLu}`;
@@ -94,9 +95,12 @@ export function normalizeMixLoudness(path, { target = MIX_LOUDNESS_TARGET, onLog
     ['-y', '-hide_banner', '-nostats', '-i', path, '-map', '0', '-c:v', 'copy', '-af', filter, '-c:a', 'aac', '-b:a', '192k', '-ar', '48000', '-movflags', '+faststart', tmp],
     { encoding: 'utf8' },
   );
-  let run = runLoudnorm(linear);
-  // loudnorm refuses linear mode when the gain would clip past the ceiling; fall
-  // back to one static gain (still not dynamic) rather than re-introducing the pump.
+  // FFmpeg silently switches to dynamic mode (with a successful exit status)
+  // when LRA exceeds the target or linear gain would exceed the peak ceiling.
+  // Preserve authored ducking with static gain + limiting in those cases.
+  const canNormalizeLinearly = measured.rangeLu <= target.rangeLu
+    && measured.truePeakDbtp + target.integratedLufs - measured.integratedLufs <= target.truePeakDbtp;
+  let run = runLoudnorm(canNormalizeLinearly ? linear : staticGainFilter(measured, target));
   if (run.status !== 0) {
     onLog('warning: linear loudnorm refused; applying a static gain instead');
     run = runLoudnorm(staticGainFilter(measured, target));
@@ -121,6 +125,6 @@ export function normalizeMixLoudness(path, { target = MIX_LOUDNESS_TARGET, onLog
     }
   }
   renameSync(tmp, path);
-  onLog(`normalised mix loudness to ${target.integratedLufs} LUFS (two-pass linear, 48 kHz)`);
+  onLog(`normalised mix loudness to ${target.integratedLufs} LUFS (measured gain, 48 kHz)`);
   return { applied: true, target, measured: measuredOut, input: measured };
 }

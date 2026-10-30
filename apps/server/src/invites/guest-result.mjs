@@ -1,6 +1,7 @@
 import { realpathSync, statSync } from 'node:fs';
 import { resolve, sep } from 'node:path';
 import { safeMediaPath } from '../media-range.mjs';
+import { guestGenerationStatus } from './generation-status.mjs';
 
 // Only the pipeline recorded as originating from this invite's production can
 // produce a guest result. The opaque media ticket is checked again on every
@@ -13,8 +14,10 @@ export function guestProductionResult({ inviteId, productionId, ledger, pipeline
   const run = pipelines.list().filter(item => item.origin?.productionId === productionId && (!runId || item.runId === runId))
     .sort((a, b) => String(b.startedAt ?? '').localeCompare(String(a.startedAt ?? '')))[0];
   if (!run) return { status: 'pending' };
+  const reservation = run.origin?.actionId ? ledger.actionReservation?.(productionId, run.origin.actionId) : null;
+  const activity = guestGenerationStatus(run, reservation);
   if (run.status !== 'completed') {
-    return { status: ['failed', 'cancelled', 'interrupted'].includes(run.status) ? 'failed' : 'running' };
+    return activity;
   }
   if (!run.result?.files?.some(item => item.name === 'video.mp4')) return { status: 'failed' };
   const directory = pipelines.directory(run.runId);
@@ -38,5 +41,5 @@ export function guestProductionResult({ inviteId, productionId, ledger, pipeline
   };
   if (!authorize()) return { status: 'failed' };
   const ticket = tickets.mint(target, { authorize });
-  return { status: 'completed', url: ticket.url, expiresAt: ticket.expiresAt };
+  return { ...activity, status: 'completed', url: ticket.url, expiresAt: ticket.expiresAt };
 }

@@ -25,6 +25,7 @@ import { completedFinalRun } from './restore-final.ts';
 import { readPlanCard } from '../../productions/cards/plan-card.ts';
 import type { SuperEasySetup } from './setup.ts';
 import { validFilmTarget, type FilmTarget, type RepairRecord } from './film-review.ts';
+import { generationFailed, generationRunId, withGenerationStatus } from './generation-status.ts';
 
 const RUN_ALREADY_STARTED = 'The Super Easy run is already going.';
 
@@ -69,6 +70,8 @@ export interface SuperEasySession {
   reviseNarration(): Promise<SuperEasyRunResult | null>;
   restoreNarrationFailure(input: RunSuperEasyInput, restoredFailure: SuperEasyRunFailure): void;
   restoreFinalVideo?(snapshot: unknown): Promise<void>;
+  resumeGeneration?(snapshot: unknown): void;
+  detachGeneration?(): void;
   restoreProposal?(): Promise<void>;
   restoreComputeProposal?(snapshot: unknown): Promise<void>;
   configureCompute?(setup: SuperEasySetup): boolean;
@@ -113,6 +116,7 @@ export function createSuperEasySession(options: SuperEasySessionOptions): SuperE
   let epoch = 0;
   let recoveryContext: string | null = null;
   let recoveryOffer: { runId: string; packageId: string; baseRevision: number } | null = null;
+  let observing = false;
 
   function contextKey(): string {
     const state = options.store.get();
@@ -157,7 +161,7 @@ export function createSuperEasySession(options: SuperEasySessionOptions): SuperE
         ...lastInput?.run,
         isCurrent: current,
         onRecord(record) {
-          snapshot = { downloadedOutputsRecovery: record.status === 'rendering' ? 'rendering' : 'verifying' };
+          snapshot = withGenerationStatus({ ...(snapshot as object), downloadedOutputsRecovery: record.status === 'rendering' ? 'rendering' : 'verifying' }, record, 'owner-run');
           publish();
         },
       });
@@ -180,7 +184,6 @@ export function createSuperEasySession(options: SuperEasySessionOptions): SuperE
       const message = error instanceof Error ? error.message : 'Recovery failed.';
       failure = { ok: false, code: 'RECOVERY_FAILED', stage: 'run', retryable: false,
         message: `${message} Check ${recoveryId ? `recovery ${recoveryId}` : 'the existing run'} in Studio before trying recovery again. No new generation was requested.` };
-      snapshot = null;
       patchStatus('error');
       publish();
       options.onError?.(failure);
@@ -211,7 +214,7 @@ export function createSuperEasySession(options: SuperEasySessionOptions): SuperE
       ...(has('chatId') ? { conversationId: current.chatId } : {}),
       ...(has('attachmentSignature') ? { attachmentSignature: current.attachmentSignature } : {}),
       ...(has('attachmentRevision') ? { attachmentRevision: current.attachmentRevision } : {}),
-      ...(options.hostedInvite ? { hostedInvite: true, compute: 'colab' } : {}),
+      ...(options.hostedInvite ? { hostedInvite: true } : {}),
     };
   }
 
@@ -377,10 +380,11 @@ export function createSuperEasySession(options: SuperEasySessionOptions): SuperE
   }
 
   function onState(state: ProductionWatchState): void {
-    if (stopped || status === 'done') return;
-    snapshot = state;
+    if (stopped || status === 'done' || status === 'stopped' || status === 'error' && !observing) return;
+    snapshot = { ...(snapshot as object), ...state };
+    if (state.error || state.stale || state.gap) connection(false);
     // Only a playable URL counts as the finished video; a delivery id does not.
-    if (hasFinalArtifact(buildGalleryModel(state))) {
+    if (!observing && !options.hostedInvite && !lastInput?.hostedInvite && hasFinalArtifact(buildGalleryModel(state))) {
       rememberObjectUrl(state);
       preview = false;
       patchStatus('done');
@@ -390,31 +394,97 @@ export function createSuperEasySession(options: SuperEasySessionOptions): SuperE
       return;
     }
     publish();
-    if (lastInput?.hostedInvite && typeof options.api.guestResult === 'function' && !resultRequest) {
+    if ((options.hostedInvite || lastInput?.hostedInvite) && typeof options.api.guestResult === 'function' && !resultRequest) {
       const productionId = options.store.get().productionId;
       if (productionId) {
+        const packageId = options.store.get().packageId;
         const currentGeneration = generation;
         resultRequest = true;
         void options.api.guestResult(productionId).then(result => {
-          if (stopped || currentGeneration !== generation || status !== 'running') return;
-          if (result.status === 'failed') {
-            failure = { ok: false, code: 'HOSTED_RUN_FAILED', stage: 'run', message: 'The video could not be completed. Try again.' };
-            patchStatus('error');
-            cancelWatch();
-            publish();
-            options.onError?.(failure);
-          } else if (result.status === 'completed' && typeof result.url === 'string'
+          if (stopped || currentGeneration !== generation || status !== 'running'
+            || options.store.get().productionId !== productionId || options.store.get().packageId !== packageId) return;
+          observeRecord(result, 'hosted-result');
+          if (!failure && result.status === 'completed' && typeof result.url === 'string'
               && /^\/api\/media\/[a-f0-9]{32}$/.test(result.url)) {
             snapshot = { ...(snapshot && typeof snapshot === 'object' ? snapshot : {}), final: { status: 'ready', url: result.url } };
+            observing = false;
             patchStatus('done');
             cancelWatch();
             publish();
             options.onDone?.(snapshot);
+          } else if (!failure && result.status === 'completed') {
+            failure = { ok: false, code: 'FINAL_VIDEO_FAILED', stage: 'run', retryable: false,
+              message: 'Generation completed, but the server did not provide an accessible final video. Check the existing production before starting another run.' };
+            observing = false; patchStatus('error'); cancelWatch(); publish(); options.onError?.(failure);
           }
-        }).catch(() => { /* The next production poll retries the result lookup. */ })
+        }).catch(() => { if (!stopped && currentGeneration === generation) connection(false); })
           .finally(() => { if (currentGeneration === generation) resultRequest = false; });
       }
+    } else if (observing && !options.hostedInvite && !lastInput?.hostedInvite && !resultRequest) {
+      const current = options.store.get();
+      const runId = current.productionId && current.packageId ? generationRunId(state, current.productionId, current.packageId) : null;
+      if (runId) {
+        const token = generation;
+        resultRequest = true;
+        void options.api.getRun(runId).then((body: any) => {
+          if (!observing || stopped || token !== generation || options.store.get().packageId !== current.packageId
+            || options.store.get().productionId !== current.productionId) return;
+          const record = body?.run ?? body;
+          if (record?.runId !== runId || record.packageId !== current.packageId || record.productionId !== current.productionId) {
+            connection(false); return;
+          }
+          observeRecord(record, 'owner-run');
+          if (['done', 'completed'].includes(record.status) && !failure) {
+            // Wait for the journal's completed action before restoring bytes.
+            if (completedFinalRun(state, current) === runId) {
+              observing = false; cancelWatch(); status = 'idle'; phase = 'idle';
+              void restoreFinalVideo(state);
+            }
+          }
+        }).catch(() => { if (observing && token === generation) connection(false); })
+          .finally(() => { if (token === generation) resultRequest = false; });
+      }
     }
+  }
+
+  function connection(connected: boolean): void {
+    if (stopped) return;
+    if (!(snapshot as any)?.generationStatus && !connected) {
+      snapshot = withGenerationStatus(snapshot, { status: 'unknown' }, options.hostedInvite || lastInput?.hostedInvite ? 'hosted-result' : 'owner-run');
+    }
+    const current = (snapshot as any)?.generationStatus;
+    if (current) snapshot = { ...(snapshot as object), generationStatus: { ...current, connection: connected ? 'connected' : 'unknown' } };
+    publish();
+  }
+
+  function observeRecord(record: any, source: 'owner-run' | 'hosted-result'): void {
+    snapshot = withGenerationStatus(snapshot, record, source);
+    const activity = (snapshot as any).generationStatus;
+    if (generationFailed(activity.status) || activity.stop === 'stop_unconfirmed') {
+      failure = { ok: false, code: source === 'hosted-result' ? 'HOSTED_RUN_FAILED' : 'RUN_FAILED', stage: 'run', retryable: false,
+        message: activity.error ?? `Generation ${activity.status}. Check the existing run before starting another.` };
+      patchStatus(activity.status === 'cancelled' || activity.status === 'canceled' ? 'stopped' : 'error');
+      observing = false; cancelWatch(); publish(); options.onError?.(failure);
+    } else publish();
+  }
+
+  function resumeGeneration(serverSnapshot: unknown): void {
+    const state = options.store.get();
+    if (stopped || observing || phase !== 'idle' || status !== 'idle' || !state.productionId || !state.packageId) return;
+    const hosted = options.hostedInvite === true;
+    const production = (serverSnapshot as any)?.production;
+    if (production?.id !== state.productionId || production?.packageId !== state.packageId) return;
+    if (!hosted && !generationRunId(serverSnapshot, state.productionId, state.packageId)) return;
+    observing = true; phase = 'run'; patchStatus('running');
+    onState(serverSnapshot as ProductionWatchState);
+    watchStop = watch({ productionId: state.productionId,
+      ...((options.fetchImpl ?? options.watchFetch) ? { fetchImpl: options.fetchImpl ?? options.watchFetch } : {}), onState });
+  }
+
+  function detachGeneration(): void {
+    if (!observing) return;
+    observing = false; generation++; resultRequest = false; cancelWatch();
+    status = 'idle'; phase = 'idle';
   }
 
   async function generate(input: RunSuperEasyInput): Promise<SuperEasyRunResult> {
@@ -437,7 +507,7 @@ export function createSuperEasySession(options: SuperEasySessionOptions): SuperE
       ...(input.attachmentRevision === undefined ? {} : { attachmentRevision: input.attachmentRevision }),
       ...(input.setupConfirmed === undefined ? {} : { setupConfirmed: input.setupConfirmed }),
       ...(input.cpu === undefined ? {} : { cpu: input.cpu }),
-      ...(input.hostedInvite === true ? { hostedInvite: true } : {}),
+      ...(options.hostedInvite || input.hostedInvite === true ? { hostedInvite: true } : {}),
       ...(input.run === undefined ? {} : { run: input.run }),
       ...(input.proposalOnly === undefined ? {} : { proposalOnly: input.proposalOnly }),
       ...(input.basePrompt === undefined ? {} : { basePrompt: input.basePrompt }),
@@ -454,6 +524,7 @@ export function createSuperEasySession(options: SuperEasySessionOptions): SuperE
     recoveryOffer = null;
     recoveryContext = null;
     activeRunId = null;
+    observing = false;
     stopped = false;
     proposal = null;
     reviewedPackage = null;
@@ -468,6 +539,12 @@ export function createSuperEasySession(options: SuperEasySessionOptions): SuperE
 
     const result = await run(nextInput, {
       ...options,
+      onRunRecord(record) {
+        if (stopped || ticket !== epoch) return;
+        snapshot = withGenerationStatus(snapshot, record, 'owner-run');
+        publish(); options.onRunRecord?.(record);
+      },
+      onRunConnection(connected) { if (ticket === epoch) connection(connected); options.onRunConnection?.(connected); },
       onRunStarted(runId) {
         activeRunId = runId;
         recoveryContext = options.host.getPackage?.() && options.store.get().idea ? contextKey() : null;
@@ -534,7 +611,7 @@ export function createSuperEasySession(options: SuperEasySessionOptions): SuperE
       return result;
     }
 
-    snapshot = result.snapshot;
+    snapshot = { ...(snapshot as object), ...(result.snapshot as object) };
     // A Colab run already fetched its authenticated MP4. It is the final
     // result, not a preview, so do not start a second production watch.
     if (hasFinalArtifact(buildGalleryModel(snapshot))) {
@@ -568,14 +645,15 @@ export function createSuperEasySession(options: SuperEasySessionOptions): SuperE
     if (!pkg || status !== 'idle') return;
     const current = options.store.get();
     const prompt = pkg.title || 'Edit this film while reusing its completed media.';
-    options.store.patch({ packageId: pkg.id, compute: 'cpu', spendCap: 0, offline: false,
+    options.store.patch({ packageId: pkg.id, compute: 'cpu', spendCap: 0, offline: false, level: 'draft', levelTouched: true,
       idea: { ...current.idea, text: prompt }, plan: { ...current.plan, status: 'building', wordsChanged: false } });
     options.store.patch({ builtPackageInputsHash: planInputsHash(options.store.get()) });
-    lastInput = { prompt, basePrompt: prompt, compute: 'cpu', hostedInvite: true, proposalOnly: true,
+    lastInput = { prompt, basePrompt: prompt, compute: 'cpu', hostedInvite: options.hostedInvite === true, proposalOnly: true,
       motionModel: current.motionModel ?? 'auto' };
     proposal = proposalForPackage(pkg, prompt, [], false);
     reviewedPackage = structuredClone(pkg);
     phase = 'proposal';
+    saveProposalCheckpoint();
     patchStatus('running');
     publish();
   }
@@ -804,13 +882,16 @@ export function createSuperEasySession(options: SuperEasySessionOptions): SuperE
     const current = () => !stopped && epoch === ticket && contextKey() === context
       && options.store.get().productionId === state.productionId;
     phase = 'run';
-    snapshot = serverSnapshot;
+    snapshot = { ...(snapshot as object), ...(serverSnapshot as object) };
     patchStatus('running');
     publish();
     try {
       const response = await options.api.getRun(runId) as any;
       if (!current()) return;
       const run = response?.run ?? response;
+      if (run?.runId === runId && run.productionId === state.productionId && run.packageId === state.packageId) {
+        snapshot = withGenerationStatus(snapshot, run, 'owner-run');
+      }
       if (run?.runId !== runId || run.productionId !== state.productionId || run.packageId !== state.packageId
         || !['done', 'completed'].includes(run.status) || run.teardown?.state === 'stop_unconfirmed') {
         throw new Error('The saved video does not match this completed production.');
@@ -831,7 +912,7 @@ export function createSuperEasySession(options: SuperEasySessionOptions): SuperE
       const blob = saved?.blob ?? await options.api.getRunVideo(runId);
       if (!current()) return;
       const url = URL.createObjectURL(blob);
-      snapshot = { ...(serverSnapshot as object), finalVideo: { ready: true, status: 'done', runId, url,
+      snapshot = { ...(snapshot as object), ...(serverSnapshot as object), finalVideo: { ready: true, status: 'done', runId, url,
         target: { packageId: state.packageId, expectedRevision: saved ? pkg.revision : run.revision, renderId: saved?.exportId ?? runId },
         ...(saved ? { exportId: saved.exportId, revision: pkg.revision } : {}) } };
       rememberObjectUrl(snapshot);
@@ -870,6 +951,8 @@ export function createSuperEasySession(options: SuperEasySessionOptions): SuperE
   }
 
   return {
+    resumeGeneration,
+    detachGeneration,
     finalTarget,
     previousVideo: () => previousObjectUrl,
     syncRepairedFilm,
