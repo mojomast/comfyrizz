@@ -21,6 +21,7 @@ import type { EasyState } from '../types.ts';
 import { proposalForPackage, type SuperEasyProposal } from './proposal.ts';
 import { isServerSaved, type SaveStateSource } from '../../editor/save-state.ts';
 import { planInputsHash } from '../store.ts';
+import { completedFinalRun } from './restore-final.ts';
 
 const RUN_ALREADY_STARTED = 'The Super Easy run is already going.';
 
@@ -57,6 +58,7 @@ export interface SuperEasySession {
   reviseProposal(note: string): Promise<SuperEasyRunResult | null>;
   reviseNarration(): Promise<SuperEasyRunResult | null>;
   restoreNarrationFailure(input: RunSuperEasyInput, restoredFailure: SuperEasyRunFailure): void;
+  restoreFinalVideo?(snapshot: unknown): Promise<void>;
   stop(): void;
   status(): EasyState['generate']['status'];
   snapshot(): unknown;
@@ -520,6 +522,53 @@ export function createSuperEasySession(options: SuperEasySessionOptions): SuperE
     publish();
   }
 
+  async function restoreFinalVideo(serverSnapshot: unknown): Promise<void> {
+    if (status !== 'idle' || phase !== 'idle' || stopped || !options.api.getPackage) return;
+    const state = options.store.get();
+    const runId = completedFinalRun(serverSnapshot, state);
+    if (!runId || !state.packageId) return;
+    const context = contextKey();
+    const ticket = ++epoch;
+    const current = () => !stopped && epoch === ticket && contextKey() === context
+      && options.store.get().productionId === state.productionId;
+    phase = 'run';
+    snapshot = serverSnapshot;
+    patchStatus('running');
+    publish();
+    try {
+      const response = await options.api.getRun(runId) as any;
+      if (!current()) return;
+      const run = response?.run ?? response;
+      if (run?.runId !== runId || run.productionId !== state.productionId || run.packageId !== state.packageId
+        || !['done', 'completed'].includes(run.status) || run.teardown?.state === 'stop_unconfirmed') {
+        throw new Error('The saved video does not match this completed production.');
+      }
+      const body = await options.api.getPackage(state.packageId);
+      if (!current()) return;
+      const pkg = body?.package ?? body;
+      if (pkg?.id !== state.packageId || !Number.isSafeInteger(run.revision) || pkg.revision !== run.revision) {
+        throw new Error('This project has newer edits than its saved video. Open in Studio to review and export them.');
+      }
+      // The authenticated video endpoint verifies historical package/timeline and
+      // exact movie bytes against its trusted receipt. Never rerender on reopen.
+      const blob = await options.api.getRunVideo(runId);
+      if (!current()) return;
+      const url = URL.createObjectURL(blob);
+      snapshot = { ...(serverSnapshot as object), finalVideo: { ready: true, status: 'done', runId, url } };
+      rememberObjectUrl(snapshot);
+      preview = false;
+      patchStatus('done');
+      publish();
+      options.onDone?.(snapshot);
+    } catch (error) {
+      if (!current()) return;
+      failure = { ok: false, code: 'SAVED_VIDEO_UNAVAILABLE', stage: 'run', message: error instanceof Error ? error.message : 'The saved video is unavailable.', retryable: false };
+      patchStatus('error');
+      publish();
+      options.onError?.(failure);
+    }
+  }
+
   function stop(): void {
     if (status === 'done') {
       cancelWatch();
@@ -549,6 +598,7 @@ export function createSuperEasySession(options: SuperEasySessionOptions): SuperE
     reviseProposal,
     reviseNarration,
     restoreNarrationFailure,
+    restoreFinalVideo,
     stop,
     status: () => status,
     snapshot: () => snapshot,

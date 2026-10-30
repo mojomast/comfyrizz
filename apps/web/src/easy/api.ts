@@ -241,6 +241,9 @@ export function createEasyApi(fetchImpl: FetchImpl) {
     getRun(id: any) {
       return request('GET', `/api/run/${encodeURIComponent(id)}`);
     },
+    getPackage(id: string) {
+      return request('GET', `/api/package/${encodeURIComponent(id)}`);
+    },
     getRunRecovery(id: string) {
       return request('GET', `/api/run/${encodeURIComponent(id)}/recovery`);
     },

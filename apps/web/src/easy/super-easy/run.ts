@@ -54,6 +54,7 @@ export interface SuperEasyApi {
   dispatchAction(id: string, body: unknown): Promise<unknown>;
   startRun(body: unknown): Promise<unknown>;
   getRun(id: string): Promise<unknown>;
+  getPackage?(id: string): Promise<any>;
   getRunRecovery?(id: string): Promise<unknown>;
   recoverRunOutputs?(id: string, body: { baseRevision: number }): Promise<unknown>;
   cancelRun?(id: string): Promise<unknown>;
@@ -146,6 +147,7 @@ export type SuperEasyRunFailureCode =
   | 'RUN_FAILED'
   | 'RECOVERY_FAILED'
   | 'FINAL_VIDEO_FAILED'
+  | 'SAVED_VIDEO_UNAVAILABLE'
   | 'LOCAL_RENDER_FAILED';
 
 export interface SuperEasyRunFailure {

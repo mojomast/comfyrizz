@@ -495,6 +495,7 @@ export function mountEasyStudio(root: HTMLElement, baseHost: EasyHost, deps: Eas
       if (ticket !== superEasyTicket) return;
       superEasySnapshot = snapshot;
       superEasy?.render();
+      if (superEasy) void ensureSuperEasySession().restoreFinalVideo?.(snapshot);
     }).catch(() => {
       /* keep the last snapshot; the gauges stay at their last known state */
     });
