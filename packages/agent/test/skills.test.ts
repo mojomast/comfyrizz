@@ -12,7 +12,7 @@ const words = (text: string) => text.trim().split(/\s+/).length;
 const VERSIONS: Record<string, string> = {
   'video-brief': '1.1.0',
   'explainer-script': '1.2.0',
-  'storyboard-direction': '1.4.1',
+  'storyboard-direction': '1.4.2',
   'project-revision': '1.3.0',
 };
 
@@ -34,7 +34,7 @@ test('skills: deterministic selection includes drafting guidance and at most thr
       }
     }
   }
-  assert.equal(SKILL_CATALOG_VERSION, '1.5.1');
+  assert.equal(SKILL_CATALOG_VERSION, '1.5.2');
 });
 
 test('skills: compiled loader includes canonical bodies and excludes metadata and research links', () => {
@@ -63,7 +63,7 @@ test('skills: every bundle is compact, self-contained, and refers only to suppor
   for (const id of BUNDLED_SKILL_IDS) {
     const source = readSource(id);
     const count = words(source);
-    assert.ok(count >= 200 && count <= (id === 'storyboard-direction' ? 1250 : 850), `${id}: ${count} words including metadata and sources`);
+    assert.ok(count >= 200 && count <= (id === 'storyboard-direction' ? 1400 : 850), `${id}: ${count} words including metadata and sources`);
     assert.match(source, /^## Sources$/m);
     const links = [...source.matchAll(/\[[^\]]+\]\(([^)]+)\)/g)].map(match => match[1]);
     assert.ok(links.length > 0, `${id}: documented sources`);

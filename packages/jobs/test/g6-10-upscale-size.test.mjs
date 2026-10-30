@@ -30,16 +30,17 @@ test("an upscaled plate is asked for a size bigger than the plate (G6-10)", () =
   assert.deepEqual({ width: upscale.params.width, height: upscale.params.height }, upscale.dims, "the params and the planned dims agree");
 });
 
-test("an upscale that overshoots the format is cropped to it, and is still bigger than the plate (G6-10)", () => {
+test("an upscale keeps its generated raster on-lattice before delivery framing", () => {
   const pkg = JSON.parse(readFileSync(FIXTURE, "utf8"));
   pkg.assets.a_plate1.gen.inputs.upscale = true;
   const jobs = planJobs(pkg).jobs;
   const plate = jobs.find((job) => job.id === "a_plate1.plate");
   const upscale = jobs.find((job) => job.id === "a_plate1.upscale");
 
-  // the x2 target exceeds a 1920x1080 format, so the variant is cropped to the format - not floored to
-  // the 64 lattice the *generation* graphs need, because a crop is not a generation
-  assert.deepEqual(upscale.dims, { width: 1920, height: 1080 }, JSON.stringify(upscale.dims));
+  // The graph has no crop node: passing 1080 would floor its half-resolution latent.
+  assert.deepEqual(upscale.dims, { width: 1920, height: 1152 }, JSON.stringify(upscale.dims));
+  assert.deepEqual(upscale.stage1Dims, { width: 960, height: 576 });
+  assert.deepEqual(upscale.crop, { top: 36, bottom: 36, left: 0, right: 0 });
   assert.ok(upscale.dims.width > plate.params.width);
   assert.equal(upscale.params.width, upscale.dims.width, "the graph is asked for what the variant will be");
 });

@@ -4,7 +4,7 @@
 // the same package always produces the same jobs.json hash. It batches every FLUX still
 // in the package into one ordered batch *before* any plate (SPEC.md 6.4: one job at a
 // time, stills before plates, one GPU session), resolves LTX dimensions to multiples of
-// 32 and frame counts to 8n+1, and gives each job a cache key over
+// 64 (32 at stage 1) and frame counts to 8n+1, and gives each job a cache key over
 // (workflow sha, resolved inputs, model revision, seed, dims, frames). A still that
 // names a cast member also folds the reference file's sha256 into that key.
 import { createHash } from "node:crypto";
@@ -13,9 +13,11 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { pathProblem } from "../../schema/src/semantic.mjs";
 import { applyMotionRoleDefaults, applyPresenterDefaults, applyPromptDefaults } from "./defaults.mjs";
-import { dimsForMegapixels, resolveDimensions, resolveFrames, resolveFramesFromSeconds } from "./dims.mjs";
+import { dimsForMegapixels, isDimensionValid, isFrameCountValid, resolveDimensions, resolveFrames, resolveFramesFromSeconds } from "./dims.mjs";
 import { buildFastH3Prompt, fastH3SlotSeconds } from "./fasth3-direction.mjs";
 import { planningAssetIds, sceneAssetIds } from "./reachable.mjs";
+import { KLEIN_REF_CAP, REF_EDIT_WORKFLOW, REF2_EDIT_WORKFLOW, kleinReferenceProblem } from "./klein-references.mjs";
+export { KLEIN_REF_CAP, REF_EDIT_WORKFLOW, REF2_EDIT_WORKFLOW } from "./klein-references.mjs";
 
 export const JOBS_VERSION = 1;
 export const BATCH_ORDER = ["stills", "plates", "upscales", "audio", "presenters"];
@@ -133,16 +135,6 @@ function hasMotionReferenceSlot(profile) {
   const slots = profile && typeof profile === "object" ? profile.slots : null;
   return Boolean(slots && (slots.motion_reference === true || slots.video === true));
 }
-
-/**
- * Klein reference edits take up to 10 reference images. The single-image graph wires image0
- * (`reference` / `image` on node 10). Exactly two refs select the real two-image graph; larger
- * legacy lists upload `_reference_2` … `_reference_10` for provenance while the cache key and
- * runner still see every file. Public reference_N names are normalized before upload planning.
- */
-export const KLEIN_REF_CAP = 10;
-export const REF_EDIT_WORKFLOW = "workflows/flux3_klein_ref_edit.api.json";
-export const REF2_EDIT_WORKFLOW = "workflows/flux3_klein_ref2_edit.api.json";
 
 const REPO_ROOT = join(dirname(fileURLToPath(import.meta.url)), "..", "..", "..");
 const workflowShaCaches = new Map();
@@ -634,7 +626,8 @@ function membersForStill(pkg, assetId) {
 
 function listedRefs(params) {
   const out = [];
-  if (typeof params.reference === "string" && params.reference) out.push(params.reference);
+  const first = params.reference ?? params.image;
+  if (typeof first === "string" && first) out.push(first);
   for (let n = 2; n <= KLEIN_REF_CAP; n += 1) {
     const value = params[`reference_${n}`] ?? params[`_reference_${n}`];
     if (typeof value === "string" && value) out.push(value);
@@ -643,6 +636,7 @@ function listedRefs(params) {
 }
 
 function writeRefSlots(params, refs) {
+  delete params.image;
   delete params.reference;
   for (let n = 2; n <= KLEIN_REF_CAP; n += 1) {
     delete params[`reference_${n}`];
@@ -657,7 +651,7 @@ function writeRefSlots(params, refs) {
 /** Normalize every Klein ref-edit job before sizing, dependency and upload planning. */
 function normalizeRefEditParams(params) {
   const refs = listedRefs(params);
-  if (refs.length) writeRefSlots(params, refs);
+  if (refs.length && (params.reference !== undefined || refs.length > 1)) writeRefSlots(params, refs);
   if (!(Number(params.megapixels) > 0)) {
     const width = Number(params.width);
     const height = Number(params.height);
@@ -670,7 +664,7 @@ function normalizeRefEditParams(params) {
 }
 
 /**
- * Append each named cast member's ref_asset to a Klein still's reference list (cap 10,
+ * Append each named cast member's ref_asset to a Klein still's reference list (cap 2,
  * existing refs first, cast members in `cast[]` order). Returns null when this still
  * does not name a cast member, so packages without cast keep the same params and cache keys.
  */
@@ -701,7 +695,10 @@ function applyCastReferences({ pkg, assetId, params, workflow, workflowSha256, e
       attached.push(ref);
       continue;
     }
-    if (next.length >= KLEIN_REF_CAP) break;
+    if (next.length >= KLEIN_REF_CAP) {
+      errors.push(`assets.${assetId}: PLAN_KLEIN_REFERENCE_UNSUPPORTED: cast ${ref.id} would exceed two connected references; choose the intended references explicitly instead of dropping a source`);
+      return null;
+    }
     next.push(ref.id);
     attached.push(ref);
   }
@@ -821,6 +818,10 @@ export function planJobs(pkg, opts = {}) {
       errors.push(`${assetId}: structured direction is supported only by FastH3 Omni`);
     }
     const inputs = gen.inputs && typeof gen.inputs === "object" ? gen.inputs : {};
+    if (gen.generator === 'flux3-klein') {
+      const problem = kleinReferenceProblem(inputs);
+      if (problem) { errors.push(`assets.${assetId}: ${problem}`); continue; }
+    }
     const sceneIndex = sceneIndexOf(pkg, assetId);
     const scene = sceneIndex >= 0 ? pkg.scenes[sceneIndex].id : null;
 
@@ -878,7 +879,7 @@ export function planJobs(pkg, opts = {}) {
       const narrationFrames = narration?.media?.frames ?? (sceneIndex >= 0 ? pkg.scenes[sceneIndex].narration_duration_frames : null);
       const presenter = applyPresenterDefaults(params, { narrationFrames: narrationFrames ?? null, asset: assetId });
       promptGuards.push(...presenter.applied);
-      warnings.push(...presenter.warnings);
+      warnings.push(...presenter.warnings.map((message) => ({ asset: assetId, code: "PLAN_PRESENTER_ADJUSTED", message })));
     }
     let workflow = gen.workflow;
     let workflowSha256 = gen.workflow_sha256 ?? null;
@@ -1148,15 +1149,14 @@ export function planJobs(pkg, opts = {}) {
           source: `assets/${assetId}${OUTPUT_EXT.plate}`,
         };
         const scale = upscaleScale(inputs);
-        const target = {
-          width: dims.width * scale,
-          height: dims.height * scale,
-        };
+        const resolvedTarget = resolveDimensions(dims.width * scale, dims.height * scale, DIM_MULTIPLE_BY_KIND.upscale);
+        const target = { width: resolvedTarget.width, height: resolvedTarget.height };
         const cropX = Number(format.width) && target.width > Number(format.width) ? target.width - Number(format.width) : 0;
         const cropY = Number(format.height) && target.height > Number(format.height) ? target.height - Number(format.height) : 0;
-        up.dims = { width: target.width - cropX, height: target.height - cropY };
-        // the graph renders what the plan asks for (the plate stage's internal halving is the params map's
-        // business, not the plan's), so the upscale has to *ask* for the bigger size
+        // This is the generated raster, before delivery framing. Feeding a 1920x1080 crop
+        // into the two-stage graph asks for a 960x540 base, which LTX floors off-lattice.
+        // Keep the x2 target and its aspect; composition fits/crops it to the package format.
+        up.dims = { ...target };
         upscaleParams.width = up.dims.width;
         upscaleParams.height = up.dims.height;
         up.upscaleTarget = target;
@@ -1199,6 +1199,18 @@ export function planJobs(pkg, opts = {}) {
         });
         add(up);
       }
+    } else if (kind === "presenter") {
+      // Audio-conditioned LTX uses the same spatial/temporal lattice. Round up so
+      // normalization never cuts the end of the conditioning narration.
+      const requestedFrames = Number(params.frames ?? 97);
+      const frames = resolveFrames(requestedFrames);
+      params.frames = frames < requestedFrames ? frames + 8 : frames;
+      job.dims = { width: params.width, height: params.height };
+      job.stage1Dims = { width: params.width / 2, height: params.height / 2 };
+      job.frames = params.frames;
+      job.framesAdjusted = params.frames !== requestedFrames;
+      job.fps = Number(params.fps ?? 24);
+      params.fps = job.fps;
     } else if (kind === "audio") {
       job.text = typeof gen.caption === "string" ? gen.caption : "";
       if (!job.text) errors.push(`assets.${assetId} (kokoro) needs gen.caption for the text to speak`);
@@ -1215,6 +1227,10 @@ export function planJobs(pkg, opts = {}) {
     // which local file to upload, and where it comes from. The graph itself is never handed an
     // asset id - that is the GPU test 2 failure this exists to prevent.
     withFileInputs(job, params, assetId, { pkg, kinds, errors });
+    if (gen.generator === 'flux3-klein') {
+      const problem = kleinReferenceProblem(params, { workflow: job.workflow, fileInputs: job.fileInputs });
+      if (problem) errors.push(`assets.${assetId}: ${problem}`);
+    }
     if (motionReference) {
       job.fileInputs = [...(job.fileInputs || []), motionReference.fileInput];
       job.motionReference = motionReferenceProvenance(motionReference);
@@ -1291,6 +1307,10 @@ export function checkJobsDoc(doc) {
     if (typeof job.id !== "string" || !job.id) problems.push("job.id must be a non-empty string");
     if (ids.has(job.id)) problems.push(`duplicate job id ${job.id}`);
     ids.add(job.id);
+    if (job.generator === 'flux3-klein') {
+      const problem = kleinReferenceProblem(job.params, job);
+      if (problem) problems.push(`${job.id}: ${problem}`);
+    }
     if (!BATCH_ORDER.includes(job.batch)) problems.push(`${job.id}: batch ${JSON.stringify(job.batch)} is not one of ${BATCH_ORDER.join(", ")}`);
     const pathIssue = pathProblem(job.output);
     if (pathIssue) problems.push(`${job.id}: output path ${pathIssue}`);
@@ -1316,6 +1336,12 @@ export function checkJobsDoc(doc) {
         problems.push(
           `${job.id}: stage1Dims ${job.stage1Dims.width}x${job.stage1Dims.height} is not half of dims ${job.dims.width}x${job.dims.height}`,
         );
+      }
+      if (!isDimensionValid(job.stage1Dims.width) || !isDimensionValid(job.stage1Dims.height)) {
+        problems.push(`${job.id}: stage1Dims must be positive multiples of 32 (two-stage output dimensions must be multiples of 64)`);
+      }
+      if (!isFrameCountValid(job.frames)) {
+        problems.push(`${job.id}: LTX frame count must be 8n+1`);
       }
     }
     for (const dep of job.deps || []) {

@@ -5,7 +5,7 @@ import { reachableAssetIds, sceneAssetIds } from '../src/reachable.mjs';
 
 const pendingImage = (id, inputs = {}) => [id, {
   kind: 'image', origin: 'generated', status: 'pending',
-  gen: { generator: 'flux3-klein', workflow: 'workflows/flux3_klein_t2i.api.json', workflow_sha256: 'a'.repeat(64), inputs: { width: 832, height: 480, ...inputs } },
+  gen: { generator: 'flux3-klein', workflow: inputs.reference ? 'workflows/flux3_klein_ref_edit.api.json' : 'workflows/flux3_klein_t2i.api.json', workflow_sha256: 'a'.repeat(64), inputs: { width: 832, height: 480, ...inputs } },
 }];
 
 function fixture() {

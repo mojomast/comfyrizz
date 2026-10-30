@@ -1,6 +1,6 @@
 import { readFileSync } from 'node:fs';
 
-export const SKILL_CATALOG_VERSION = '1.5.1';
+export const SKILL_CATALOG_VERSION = '1.5.2';
 
 export const BUNDLED_SKILL_IDS = [
   'video-brief',

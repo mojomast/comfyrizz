@@ -63,8 +63,8 @@
  "8": {
   "class_type": "EmptyLTXVLatentVideo",
   "inputs": {
-   "width": 480,
-   "height": 272,
+   "width": 512,
+   "height": 288,
    "length": 97,
    "batch_size": 1
   }

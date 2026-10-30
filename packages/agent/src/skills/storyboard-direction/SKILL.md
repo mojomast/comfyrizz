@@ -1,7 +1,7 @@
 ---
 name: storyboard-direction
 metadata:
-  version: "1.4.1"
+  version: "1.4.2"
 description: Make each scene communicate through a concrete, consistent visual mechanism.
 ---
 # Storyboard direction
@@ -122,6 +122,18 @@ rather than claiming visual, audio or timing checks passed.
 
 ### Native reference-conditioned video
 
+Keep storyboard summaries compact; the builder expands model captions. For Klein,
+specify framing, placement, materials and light grounded in the brief. Describe a
+composed result or bounded edit's end state and preserved identity; never invent
+unseen reference details or change exact copy. Asset IDs prove provenance, not
+connected conditioning. Klein tokens follow zero-based connected order, not H3
+Picture numbering.
+
+For LTX, plan one camera move or static camera, one action and end state, coherent
+light and concrete sound in one continuous take. This local picture-only route
+needs separate finishing sound; preserve exact dialogue on its approved route.
+Describe plans, not generation tool calls.
+
 For reference-conditioned video, references do not lock frames. Describe identity,
 composition, props and one observable action per short shot. Review character count,
 contact, framing, sound, motion and cuts when evidence is available; decoding or ASR
@@ -136,3 +148,5 @@ Original guidance informed by multimedia learning, consistent visual meaning and
 - [LTX prompting guide, accessed 2026-10-20](https://docs.ltx.io/open-source-model/usage-guides/prompting-guide)
 - [MiniMax full-reference prompt guide, accessed 2026-10-21](https://huggingface.co/MiniMaxAI/MiniMax-H3/blob/main/docs/VIDEO_PROMPT_WRITING_GUIDE_ref_en.md)
 - [FastH3 Omni release recipe, accessed 2026-10-21](https://huggingface.co/FastVideo/FastH3-Omni-Comfy)
+- [BFL Klein upsampler instructions, accessed 2026-10-30](https://huggingface.co/black-forest-labs/flux-3-image-klein-pup/blob/main/system_prompts.json)
+- [ComfyUI Klein guide, accessed 2026-10-30](https://docs.comfy.org/tutorials/flux/flux-3-klein)
