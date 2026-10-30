@@ -229,10 +229,13 @@ export function normalizeEasyState(raw: unknown): EasyState {
       && raw.proposalCheckpoint.packageId === packageId
       && Number.isSafeInteger(raw.proposalCheckpoint.revision) && (raw.proposalCheckpoint.revision as number) >= 0
       && typeof raw.proposalCheckpoint.inputsHash === 'string'
+      && ['auto', 'h3', 'ltx', 'klein'].includes(raw.proposalCheckpoint.motionModel as string)
+      && (raw.proposalCheckpoint.chatId === null || typeof raw.proposalCheckpoint.chatId === 'string')
       && typeof raw.proposalCheckpoint.basePrompt === 'string'
       && Array.isArray(raw.proposalCheckpoint.revisionNotes) && raw.proposalCheckpoint.revisionNotes.every(note => typeof note === 'string')
       ? { packageId: packageId as string, revision: raw.proposalCheckpoint.revision as number,
           inputsHash: raw.proposalCheckpoint.inputsHash, basePrompt: raw.proposalCheckpoint.basePrompt,
+          motionModel: raw.proposalCheckpoint.motionModel as NonNullable<EasyState['motionModel']>, chatId: raw.proposalCheckpoint.chatId as string | null,
           revisionNotes: raw.proposalCheckpoint.revisionNotes as string[], deepSeekNoThinking: raw.proposalCheckpoint.deepSeekNoThinking === true } : null,
     plan: normalizePlan(raw.plan),
     generate: normalizeGenerate(raw.generate),

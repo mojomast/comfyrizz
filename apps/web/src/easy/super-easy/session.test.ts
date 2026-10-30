@@ -39,13 +39,15 @@ test('cold proposal reload restores reviewed revision and original revision note
 });
 
 test('cold proposal checkpoints reject newer edits, changed inputs and existing production authority', async () => {
-  for (const change of ['revision', 'inputs', 'production', 'late']) {
+  for (const change of ['revision', 'inputs', 'production', 'model', 'conversation', 'late']) {
     const first = returnedProposalHarness();
     await first.session.generate(first.input);
     first.store.patch({ builtPackageInputsHash: planInputsHash(first.store.get()) });
     const store = first.store;
     if (change === 'inputs') store.patch({ idea: { ...store.get().idea, text: 'another idea' } });
     if (change === 'production') store.patch({ productionId: PRODUCTION_ID });
+    if (change === 'model') store.patch({ motionModel: 'h3' });
+    if (change === 'conversation') store.patch({ chatId: 'chat_other' });
     let release;
     const session = createSuperEasySession({ store, go() {}, host: {},
       api: { compilePackage: async () => { throw Error('Invalid checkpoint must not compile'); }, getPackage: async () => {

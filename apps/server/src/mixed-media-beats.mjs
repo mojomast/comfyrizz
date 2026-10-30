@@ -78,9 +78,10 @@ export function mixedMediaBeatProblems(pkg, contract) {
     const seconds = Number(pkg.assets?.[speech?.gen?.inputs?.audio]?.media?.durationSeconds);
     const start = Math.ceil((seconds + 0.5) * Number(pkg.format?.fps));
     const overlay = scene.lower_third;
+    const earlyCopy = scene.media_only !== true && Object.values(scene.copy ?? {}).some(value => Array.isArray(value) ? value.length > 0 : typeof value === 'string' && value.trim());
     if (Number.isFinite(start) && overlay?.text === afterSpeech[1].trim()
       && overlay.start_frame >= start && overlay.start_frame + 40 < scene.preferredFrames
-      && overlay.position === 'bottom') return [];
+      && overlay.position === 'bottom' && !earlyCopy && !overlay.kicker) return [];
     return [`${scene.id}: the brief requires ${JSON.stringify(afterSpeech[1].trim())} only after the spoken admission. Use lower_third with that exact text, start_frame at least ${start} (measured speech plus a half-second pause at package fps), position:"bottom", and leave at least 40 readable frames before the shot ends. Remove duplicate layout copy; preserve native video and conditioning.`];
   });
 }

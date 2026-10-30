@@ -532,6 +532,7 @@ export function createSuperEasySession(options: SuperEasySessionOptions): SuperE
     if (!proposal?.packageId || !Number.isSafeInteger(proposal.reviewedPackageRevision)) return;
     options.store.patch({ proposalCheckpoint: { packageId: proposal.packageId, revision: proposal.reviewedPackageRevision!,
       inputsHash: planInputsHash(state), basePrompt: proposal.basePrompt, revisionNotes: [...proposal.revisionNotes],
+      motionModel: state.motionModel ?? 'auto', chatId: state.chatId,
       deepSeekNoThinking: lastInput?.deepSeekNoThinking === true } });
   }
 
@@ -539,18 +540,21 @@ export function createSuperEasySession(options: SuperEasySessionOptions): SuperE
     const state = options.store.get(), saved = state.proposalCheckpoint;
     if (status !== 'idle' || phase !== 'idle' || stopped || !saved || !options.api.getPackage || !options.api.compilePackage
       || state.productionId || state.packageId !== saved.packageId
+      || (state.motionModel ?? 'auto') !== saved.motionModel || state.chatId !== saved.chatId
       || state.builtPackageInputsHash !== saved.inputsHash || planInputsHash(state) !== saved.inputsHash) return;
     const ticket = ++epoch;
     const body = await options.api.getPackage(saved.packageId).catch(() => null);
     const pkg = body?.package ?? body;
     const current = options.store.get();
     if (stopped || ticket !== epoch || current.productionId || current.packageId !== saved.packageId
+      || (current.motionModel ?? 'auto') !== saved.motionModel || current.chatId !== saved.chatId
       || planInputsHash(current) !== saved.inputsHash || pkg?.id !== saved.packageId || pkg.revision !== saved.revision) return;
     // GET package is not an agent/build response: the host also requires its
     // compiled timeline. Compile the saved bytes without planning or rendering.
     const compiled = await options.api.compilePackage({ package: pkg, revision: pkg.revision,
       ...(body.editor ? { editor: body.editor } : {}) }).catch(() => null);
     if (!compiled?.timeline || stopped || ticket !== epoch || options.store.get().productionId
+      || (options.store.get().motionModel ?? 'auto') !== saved.motionModel || options.store.get().chatId !== saved.chatId
       || options.store.get().packageId !== saved.packageId || planInputsHash(options.store.get()) !== saved.inputsHash) return;
     options.host.adoptBuiltPackage({ ...body, package: pkg, revision: pkg.revision, timeline: compiled.timeline });
     reviewedPackage = structuredClone(pkg);

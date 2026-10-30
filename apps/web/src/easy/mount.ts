@@ -350,6 +350,15 @@ export function mountEasyStudio(root: HTMLElement, baseHost: EasyHost, deps: Eas
         generation: () => store.generation(),
       },
       go: () => {},
+      onProposal: (proposal) => {
+        // A cold restore adopts its saved package after initial resume facts.
+        // Refresh existence here so Review & edit full plan reaches Plan.
+        if (proposal.packageId && proposal.packageId === store.get().packageId
+          && host.getPackage()?.id === proposal.packageId) {
+          facts = { hasPackage: true, planApproved: false, actionsActive: false, allShotsKept: false, exportCurrent: false };
+        }
+        superEasy?.render();
+      },
       onProgress: (_html, snapshot) => {
         superEasySnapshot = snapshot;
         superEasy?.render();

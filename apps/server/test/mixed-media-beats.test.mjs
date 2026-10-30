@@ -48,6 +48,7 @@ async function spoon() {
   });
   pkg.duration = { mode: 'target', targetFrames: 900, exact: true };
   pkg.scenes[3].lower_third = { text: 'CASE CLOSED.', start_frame: 75, position: 'bottom' };
+  pkg.scenes[3].media_only = true;
   return pkg;
 }
 
@@ -60,6 +61,9 @@ test('after-admission overlay must follow measured speech and leave a readable h
     Object.assign(bad.scenes[3].lower_third, patch);
     assert.ok(mixedMediaBeatProblems(bad, contract).some(message => /after the spoken admission/.test(message)));
   }
+  pkg.scenes[3].media_only = false;
+  pkg.scenes[3].copy = { headline: 'CASE CLOSED.' };
+  assert.ok(mixedMediaBeatProblems(pkg, contract).some(message => /after the spoken admission/.test(message)), 'a delayed duplicate does not excuse early layout copy');
 });
 
 test('arithmetic suggestion is read-only, exact, source-bounded and preserves delayed copy', async () => {

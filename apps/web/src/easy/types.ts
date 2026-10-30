@@ -44,7 +44,7 @@ export interface EasyState {
   /** Exact inputs used for the last successfully adopted package; legacy states leave this null. */
   builtPackageInputsHash: string | null;
   /** Review checkpoint only; restoring it never restores approval or spend authority. */
-  proposalCheckpoint?: { packageId: string; revision: number; inputsHash: string; basePrompt: string; revisionNotes: string[]; deepSeekNoThinking: boolean } | null;
+  proposalCheckpoint?: { packageId: string; revision: number; inputsHash: string; motionModel: MotionModel; chatId: string | null; basePrompt: string; revisionNotes: string[]; deepSeekNoThinking: boolean } | null;
   plan: { status: 'none' | 'writing' | 'building' | 'proposing' | 'ready' | 'stale' | 'error'; error: string | null; errorAt: 'agent' | 'production' | 'proposal' | null; wordsChanged: boolean };
   generate: { status: 'idle' | 'running' | 'stopping' | 'done' | 'stopped' | 'error' };
   review: { shotId: string | null };
