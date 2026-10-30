@@ -37,6 +37,7 @@ test('an interrupted pipeline charges its full reservation without claiming a su
     assert.equal(reconcileInvitePipeline({ ledger, run }), true);
     assert.equal(ledger.get(invite.id).remainingCu, 0);
     assert.equal(ledger.get(invite.id).filmsCompleted, 0);
-    assert.equal(ledger.listGenerations(invite.id).length, 0);
+    assert.equal(ledger.listGenerations(invite.id)[0].status, 'interrupted');
+    assert.equal(ledger.listGenerations(invite.id)[0].showcase, false);
   } finally { ledger.close(); rmSync(dir, { recursive: true, force: true }); }
 });

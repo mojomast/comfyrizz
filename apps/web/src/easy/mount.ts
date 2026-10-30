@@ -75,7 +75,8 @@ export interface EasyStudioDeps {
 export function mountEasyStudio(root: HTMLElement, baseHost: EasyHost, deps: EasyStudioDeps = {}): () => void {
   const doc = root.ownerDocument;
   const view = doc.defaultView;
-  const stopCorrectionShutdown = mountCorrectionShutdown(root, baseHost.apiFetch);
+  const hostedInviteView = new URLSearchParams(view?.location?.search ?? '').get('demo') === '1';
+  const stopCorrectionShutdown = hostedInviteView ? () => {} : mountCorrectionShutdown(root, baseHost.apiFetch);
   let settings: ReturnType<typeof mountEasyAgentSettings> | null = null;
   const host: EasyHost = {
     ...baseHost,
@@ -195,7 +196,7 @@ export function mountEasyStudio(root: HTMLElement, baseHost: EasyHost, deps: Eas
     onStatus: () => superEasy?.syncAttachments(),
   });
 
-  settings = mountEasyAgentSettings({ apiFetch: (input, init) => host.apiFetch(input, init) });
+  if (!hostedInviteView) settings = mountEasyAgentSettings({ apiFetch: (input, init) => host.apiFetch(input, init) });
   ask = createAskDrawer({
     root,
     state: () => store.get(),
@@ -403,6 +404,7 @@ export function mountEasyStudio(root: HTMLElement, baseHost: EasyHost, deps: Eas
   }
 
   async function openSuperEasySetup(preferredCompute?: 'colab'): Promise<boolean> {
+    if (hostedInviteView) return false;
     const { openDialog, confirmDialog } = await import('./dialog.ts');
     const { renderCompute, mountCompute, computeBlockReason } = await import('./compute-choice.ts');
     const saved = readSuperEasySetup();
@@ -484,7 +486,7 @@ export function mountEasyStudio(root: HTMLElement, baseHost: EasyHost, deps: Eas
 
   async function onSuperEasyGenerate(input: SuperEasyGenerateInput): Promise<void> {
     const setup = readSuperEasySetup();
-    store.patch({ compute: input.compute, spendCap: setup.spendCap });
+    if (!hostedInviteView) store.patch({ compute: input.compute, spendCap: setup.spendCap });
     const session = ensureSuperEasySession();
     const status = session.status();
     if (status === 'running' || status === 'stopping') return;
@@ -593,6 +595,9 @@ export function mountEasyStudio(root: HTMLElement, baseHost: EasyHost, deps: Eas
     // Rebuild the review only on return. Later edits must still fail the normal
     // approval revision guard, rather than silently updating what was reviewed.
     proposalReturnWaiting = superEasySession?.refreshProposal?.() === 'waiting';
+    if (hostedInviteView && new URLSearchParams(search()).get('edit') === '1' && !superEasySession) {
+      ensureSuperEasySession().reviewExisting();
+    }
     superEasy = mountSuperEasy({
       root,
       state: () => store.get(),
@@ -612,7 +617,9 @@ export function mountEasyStudio(root: HTMLElement, baseHost: EasyHost, deps: Eas
         requestFullPlanReview(current.productionId ?? 'new');
         openStudioFromSuperEasy('plan', packageId);
       },
-      setup: () => readSuperEasySetup(),
+      setup: () => hostedInviteView
+        ? { ...readSuperEasySetup(), compute: 'colab', confirmed: true, spendCap: store.get().spendCap ?? 0 }
+        : readSuperEasySetup(),
       onMotionModelChange: (motionModel) => {
         saveSuperEasySetup({ ...readSuperEasySetup(), motionModel });
         superEasy?.render({ forceHome: true });
@@ -655,6 +662,17 @@ export function mountEasyStudio(root: HTMLElement, baseHost: EasyHost, deps: Eas
       },
       onSetup: () => { void openSuperEasySetup(); },
       onChangeAnything: (change = '') => {
+        if (hostedInviteView) {
+          void (async () => {
+            const productionId = store.get().productionId;
+            const opened = await host.apiFetch(`/api/invites/productions/${encodeURIComponent(productionId ?? '')}/edit`, { method: 'POST' });
+            if (!opened.ok) throw new Error('Film could not be opened for editing.');
+            const data = await opened.json();
+            if (change.trim()) view?.sessionStorage.setItem(`guest-edit-note-${data.packageId}`, change.trim());
+            if (view) view.location.href = data.openPath;
+          })().catch(() => { shell?.setStatus('Open the film gallery and choose Edit with agent.'); });
+          return;
+        }
         openStudioFromSuperEasy('review');
         void ask?.openAsk(change);
       },
@@ -706,6 +724,14 @@ export function mountEasyStudio(root: HTMLElement, baseHost: EasyHost, deps: Eas
     if (store.get().productionId) refreshSuperEasySnapshot();
     else if (savedFilmRepair()) void ensureSuperEasySession().syncRepairedFilm?.().catch(() => { superEasy?.render(); });
     else if (store.get().proposalCheckpoint) void ensureSuperEasySession().restoreProposal?.();
+    if (hostedInviteView && requestedPackage) {
+      const key = `guest-edit-note-${requestedPackage}`;
+      const note = view?.sessionStorage.getItem(key);
+      if (note) {
+        view?.sessionStorage.removeItem(key);
+        void superEasySession?.reviseProposal(note);
+      }
+    }
   }
 
   /** More control lands on the existing studio; Review is the preview handoff. */

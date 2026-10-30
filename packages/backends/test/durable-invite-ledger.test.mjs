@@ -12,20 +12,28 @@ test('invites, reservations, revocation and generations survive restart without 
   try {
     let ledger = createDurableInviteLedger({ path });
     const minted = ledger.mint({ cu: 2, ttlDays: 1 });
+    ledger.recordVisit(minted.invite.id);
+    ledger.bindResource(minted.invite.id, 'package', 'pkg_prompt');
+    ledger.setResourceDetails('package', 'pkg_prompt', { prompt: 'Saved prompt', planner: { name: 'test-model' } });
     assert.equal(ledger.commit(minted.invite.id, 1.5).ok, true);
     ledger.close();
     assert.equal(readFileSync(path).includes(Buffer.from(minted.token)), false);
     ledger = createDurableInviteLedger({ path });
+    assert.equal(ledger.ownerSummary().totals.visits, 1);
+    assert.deepEqual(ledger.resourceDetails('package', 'pkg_prompt'), { prompt: 'Saved prompt', planner: { name: 'test-model' } });
     assert.equal(ledger.redeem(minted.token).invite.remainingCu, 0.5);
     assert.equal(ledger.commit(minted.invite.id, 1).ok, false);
     ledger.settle(minted.invite.id, { spent: 1.5, filmCompleted: true });
-    ledger.recordGeneration(minted.invite.id, { packageId: 'pkg1', prompt: 'test' });
+    ledger.recordGeneration(minted.invite.id, { runId: 'run_provenance', packageId: 'pkg1', prompt: 'test' });
+    ledger.recordGenerationModels('run_provenance', [{ name: 'Verified model', role: 'image', evidence: 'verified_workflow' }]);
     ledger.revoke(minted.invite.id);
     ledger.close();
     ledger = createDurableInviteLedger({ path });
     assert.equal(ledger.redeem(minted.token).reason, 'revoked');
     assert.equal(ledger.ownerSummary().totals.spentEstimateCu, 1.5);
     assert.equal(ledger.ownerSummary().generations[0].packageId, 'pkg1');
+    assert.equal(ledger.ownerSummary().generations[0].status, 'ready');
+    assert.equal(ledger.ownerSummary().generations[0].details.models[0].name, 'Verified model');
     ledger.close();
   } finally { rmSync(dir, { recursive: true, force: true }); }
 });
@@ -45,13 +53,13 @@ test('independent ledger instances see reservations before accepting more spend'
   } finally { rmSync(dir, { recursive: true, force: true }); }
 });
 
-test('concurrent independent workers cannot reserve the same remaining invite budget', async () => {
+for (const limit of ['budget', 'film']) test(`concurrent independent workers cannot exceed the shared invite ${limit} limit`, async () => {
   const dir = mkdtempSync(join(tmpdir(), 'invite-ledger-concurrent-'));
   const path = join(dir, 'ledger.sqlite');
   const ledger = createDurableInviteLedger({ path });
   const workers = [];
   try {
-    const invite = ledger.mint({ cu: 1, ttlDays: 1 }).invite;
+    const invite = ledger.mint({ cu: limit === 'budget' ? 1 : 10, maxFilms: limit === 'film' ? 1 : 0, ttlDays: 1 }).invite;
     ledger.bindResource(invite.id, 'production', 'prod_shared');
     const barrier = new SharedArrayBuffer(4);
     const flag = new Int32Array(barrier);
@@ -81,9 +89,9 @@ test('concurrent independent workers cannot reserve the same remaining invite bu
     Atomics.notify(flag, 0);
     const outcomes = await Promise.all(results);
     assert.equal(outcomes.filter(result => result.ok).length, 1);
-    assert.equal(outcomes.filter(result => !result.ok && result.reason === 'insufficient').length, 3);
+    assert.equal(outcomes.filter(result => !result.ok && result.reason === (limit === 'budget' ? 'insufficient' : 'film_limit')).length, 3);
     assert.equal(ledger.get(invite.id).committedEstimateCu, 0.6);
-    assert.equal(ledger.get(invite.id).remainingCu, 0.4);
+    assert.equal(ledger.get(invite.id).remainingCu, limit === 'budget' ? 0.4 : 9.4);
   } finally {
     await Promise.all(workers.map(worker => worker.terminate()));
     ledger.close();

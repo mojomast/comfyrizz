@@ -84,6 +84,7 @@ const $ = <T extends HTMLElement>(id: string): T => document.getElementById(id) 
 // The C2 server prints http://127.0.0.1:4319/#token=...; the fragment never
 // leaves the browser. Strip it from the visible URL and keep it for API calls.
 const token = installSessionToken();
+const hostedInviteView = new URLSearchParams(globalThis.location?.search ?? '').get('demo') === '1';
 initShellLayout();
 
 /* Lifted from Orbit's Grok Bots shell (MIT): escape, then a tiny markdown subset. */
@@ -100,14 +101,14 @@ function md(value: string): string {
 // U2: the Google Colab settings card. It asks the server, never the CLI, and the server never reads a
 // credential on its behalf.
 const colabHost = document.getElementById('colab-card-host');
-if (colabHost) mountSettingsCard(colabHost, apiFetch);
+if (colabHost && !hostedInviteView) mountSettingsCard(colabHost, apiFetch);
 // Live gauges of Google Colab runs: the notebook's bars, polled from /api/colab/progress.
 const colabProgressHost = document.getElementById('colab-progress-host');
-if (colabProgressHost) mountRemoteGpuProgress(colabProgressHost, apiFetch);
+if (colabProgressHost && !hostedInviteView) mountRemoteGpuProgress(colabProgressHost, apiFetch);
 // The status bar keeps the Google Colab chip. The runs drawer button is not a second control.
 settleStatusChip();
 const colabHistoryHost = document.getElementById('colab-history-host');
-if (colabHistoryHost) mountRemoteGpuHistory(colabHistoryHost, colabHistoryJson);
+if (colabHistoryHost && !hostedInviteView) mountRemoteGpuHistory(colabHistoryHost, colabHistoryJson);
 
 function settleStatusChip(): void {
   const progressHost = document.getElementById('colab-progress-host');
@@ -996,6 +997,7 @@ function mountProductionInspector(root: HTMLElement): void {
 
 /** Refresh the shared clips map from the take routes (called on load and clip.* SSE). */
 async function refreshClips(): Promise<void> {
+  if (hostedInviteView) return;
   if (!token) return;
   const packageId = String(pkg.id ?? '');
   if (!packageId) return;
@@ -2774,7 +2776,9 @@ function init(opened: OpenedProject): void {
   void iterationLevelMount.refresh();
   mountSettingsDialog(document.body);
 
-  agentSettings = mountAgentSettings(apiFetch, logActivity);
+  agentSettings = hostedInviteView
+    ? { ready: Promise.resolve(), selection: async () => ({ provider: 'none', model: '' }) }
+    : mountAgentSettings(apiFetch, logActivity);
   state.activity = [{ at: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }), text: opened.activity }];
   renderActivity();
 
@@ -3065,7 +3069,7 @@ function init(opened: OpenedProject): void {
     logActivity(`Composer mode: ${briefMode}`);
   });
 
-  if (token) {
+  if (token && !hostedInviteView) {
     const stream = new EventSource(`/api/events?token=${encodeURIComponent(token)}`);
     stream.addEventListener('package.updated', event => {
       const data = JSON.parse((event as MessageEvent).data) as { revision: number };

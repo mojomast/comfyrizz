@@ -42,6 +42,7 @@
     const badge = element('span', `badge ${['active', 'revoked', 'expired'].includes(invite.status) ? invite.status : ''}`, invite.status || 'unknown');
     header.append(title, badge);
     const metrics = element('div', 'metrics');
+    metrics.append(metric('Visits', number(invite.visits)), metric('Last visit', invite.lastVisitAt ? date(invite.lastVisitAt) : 'Never'));
     metrics.append(metric('Budget', `${number(invite.spendCeilingCu)} CU`), metric('Used', `${number(invite.spentEstimateCu)} CU`), metric('Reserved', `${number(invite.committedEstimateCu)} CU`), metric('Remaining', `${number(invite.remainingCu)} CU`), metric('Films', `${number(invite.filmsCompleted)} / ${Number(invite.maxFilms) === 0 ? '∞' : number(invite.maxFilms)}`), metric('Expires', date(invite.expiresAt)));
     const actions = element('div', 'invite-actions');
     const generations = Array.isArray(invite.generations) ? invite.generations : [];
@@ -56,6 +57,27 @@
       row.append(element('strong', '', generation.title || 'Untitled generation'));
       row.append(element('p', '', `${generation.status || 'unknown'} · ${number(generation.spentEstimateCu)} CU estimated · ${date(generation.createdAt)}`));
       if (generation.prompt) row.append(element('p', '', generation.prompt));
+      const models = generation.details?.models ?? [];
+      row.append(element('p', '', `Models used: ${models.map(m => `${m.name} (${m.role})${m.checkpoint ? ` · ${m.checkpoint}` : ''}`).join(', ') || 'Not recorded'}`));
+      if (!models.length && generation.details?.plannedModels?.length) row.append(element('p', 'muted',
+        `Planned models: ${generation.details.plannedModels.map(m => `${m.name} (${m.role})`).join(', ')}`));
+      if (generation.details?.planner) row.append(element('p', 'muted', `Planning model: ${generation.details.planner.name}`));
+      if (generation.status === 'ready') {
+        const play = element('button', 'link', 'Watch video'); play.type = 'button';
+        const video = element('video', 'generation-video'); video.controls = true; video.preload = 'none'; video.playsInline = true; video.hidden = true;
+        video.setAttribute('aria-label', generation.title || 'Generated video');
+        play.addEventListener('click', async () => {
+          const current = session; play.disabled = true;
+          try {
+            const result = await request(`/api/invites/generations/${encodeURIComponent(generation.id)}/video`);
+            if (current !== session) return;
+            if (result.status !== 'completed' || !/^\/api\/media\/[a-f0-9]{32}$/.test(result.url)) throw new Error('Video is unavailable.');
+            video.src = result.url; video.hidden = false; await video.play(); play.textContent = 'Refresh video';
+          } catch (error) { if (current === session) notice(error.message, true); }
+          finally { play.disabled = false; }
+        });
+        row.append(play, video);
+      }
       details.append(row);
     }
     toggle.addEventListener('click', () => {
@@ -90,8 +112,10 @@
     $('total-budget').textContent = number(totals.ceilingCu);
     $('total-spent').textContent = number(totals.spentEstimateCu);
     $('total-reserved').textContent = number(totals.committedEstimateCu);
+    $('activity-stats').textContent = `${number(totals.visits)} visits · ${number(totals.generationCount)} generations · ${number(totals.runningCount)} running · ${number(totals.readyCount)} ready · ${number(totals.failedCount)} failed/cancelled`;
     $('invite-count').textContent = number(invites.length);
     $('empty').hidden = invites.length > 0;
+    stopVideos();
     $('invites').replaceChildren(...[...invites].sort((a, b) => Number(b.createdAt) - Number(a.createdAt)).map(renderInvite));
   }
   async function refresh() {
@@ -109,12 +133,16 @@
     $('token').value = '';
     $('minted-url').value = '';
     $('minted').hidden = true;
+    stopVideos();
     $('invites').replaceChildren();
     $('dashboard').hidden = true;
     $('sign-out').hidden = true;
     $('login').hidden = false;
     $('login-error').hidden = true;
     notice('');
+  }
+  function stopVideos() {
+    for (const video of document.querySelectorAll('video')) { video.pause(); video.removeAttribute('src'); video.load(); }
   }
   $('login-form').addEventListener('submit', async event => {
     event.preventDefault();

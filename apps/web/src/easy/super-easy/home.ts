@@ -108,7 +108,8 @@ export function renderSuperEasyVideoTypes(selected: VideoType | null | undefined
 export function renderSuperEasyHome(options: SuperEasyHomeOptions = {}): string {
   const prompt = typeof options.prompt === 'string' ? options.prompt : '';
   const moreControlHref = escapeToStudio(options.search ?? '', options.packageId ?? null);
-  const colab = options.setup?.compute === 'colab' && options.setup.confirmed;
+  const hosted = new URLSearchParams(options.search ?? '').get('demo') === '1';
+  const colab = hosted || (options.setup?.compute === 'colab' && options.setup.confirmed);
   const selectedType = videoTypeMetadata(options.videoType);
   const hint = selectedType
     ? selectedType.inputHint
@@ -152,13 +153,13 @@ ${options.capture ? renderProcedureToggle({ armed: options.capture.armed, id: 's
 <button type="button" class="btn btn-secondary super-easy-home-example" data-super-easy-example>${escapeHtml(COPY.home.tryExample)}</button>
 </div>
 </form>
-<div class="super-easy-home-setup"><span>${escapeHtml(setupText)}</span><button type="button" class="btn btn-secondary btn-sm" data-super-easy-setup>${colab ? 'Change setup' : 'Set up AI & Google Colab'}</button></div>
+${hosted ? '<div class="super-easy-home-setup"><span>DeepSeek V4.1 Flash · Google Colab · configured for you</span></div><p data-guest-credits role="status">Checking available invite credits…</p><p>Google Colab spending is approved up to your invite’s available credits. Credits are shared by everyone using this link. CPU work and agent edits remain available after those credits run out.</p>' : `<div class="super-easy-home-setup"><span>${escapeHtml(setupText)}</span><button type="button" class="btn btn-secondary btn-sm" data-super-easy-setup>${colab ? 'Change setup' : 'Set up AI & Google Colab'}</button></div>`}
 <div class="super-easy-home-ideas">
 <p class="super-easy-home-ideas-label" id="super-easy-ideas-label">${escapeHtml(COPY.home.ideasLabel)}</p>
 <ul class="super-easy-home-idea-list" aria-labelledby="super-easy-ideas-label">
 ${ideaChips()}
 </ul>
 </div>
-<p class="super-easy-home-more"><a class="super-easy-home-more-link" href="${escapeHtml(moreControlHref)}" data-super-easy-more-control>${escapeHtml(COPY.home.moreControl)}</a></p>
+${hosted ? '' : `<p class="super-easy-home-more"><a class="super-easy-home-more-link" href="${escapeHtml(moreControlHref)}" data-super-easy-more-control>${escapeHtml(COPY.home.moreControl)}</a></p>`}
 </section>`;
 }

@@ -34,6 +34,9 @@ TOOL.parameters.properties.csvWallCreates = { type: 'array', items: { type: 'obj
 
 /** Apply only whitelisted fields to a clone; no model-supplied package is trusted. */
 export function applyProposalRevision(pkg, args, request = '', csvAttachments = []) {
+  if (args && typeof args === 'object' && !Array.isArray(args) && !Array.isArray(args.edits)) {
+    throw invalid('Include the required "edits" array. For a logline-only change, return {"edits":[],"logline":"the requested text"}. Omit untouched optional fields.');
+  }
   if (!args || typeof args !== 'object' || Array.isArray(args) || Object.keys(args).some(key => !['edits', 'sceneOrder', 'logline', 'datasetNotes', 'datasetLabels', 'csvDatasets', 'csvWalls', 'csvWallCreates'].includes(key)) || !Array.isArray(args.edits) || args.edits.length > pkg.scenes.length) throw invalid('Return focused text edits only.');
   const next = structuredClone(pkg);
   // Recognize explicit dataset recomputation requests even when the model omits

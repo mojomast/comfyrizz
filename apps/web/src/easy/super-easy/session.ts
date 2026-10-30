@@ -61,6 +61,7 @@ export interface SuperEasySession {
   retry(): Promise<SuperEasyRunResult | null>;
   recoverDownloadedOutputs?(): Promise<void>;
   proposal(): SuperEasyProposal | null;
+  reviewExisting(): void;
   /** Re-review an acknowledged editor save on return, never as part of approval. */
   refreshProposal(): 'refreshed' | 'waiting' | 'unchanged';
   approveProposal(): Promise<SuperEasyRunResult | null>;
@@ -562,6 +563,23 @@ export function createSuperEasySession(options: SuperEasySessionOptions): SuperE
     return result;
   }
 
+  function reviewExisting(): void {
+    const pkg = options.host.getPackage?.();
+    if (!pkg || status !== 'idle') return;
+    const current = options.store.get();
+    const prompt = pkg.title || 'Edit this film while reusing its completed media.';
+    options.store.patch({ packageId: pkg.id, compute: 'cpu', spendCap: 0, offline: false,
+      idea: { ...current.idea, text: prompt }, plan: { ...current.plan, status: 'building', wordsChanged: false } });
+    options.store.patch({ builtPackageInputsHash: planInputsHash(options.store.get()) });
+    lastInput = { prompt, basePrompt: prompt, compute: 'cpu', hostedInvite: true, proposalOnly: true,
+      motionModel: current.motionModel ?? 'auto' };
+    proposal = proposalForPackage(pkg, prompt, [], false);
+    reviewedPackage = structuredClone(pkg);
+    phase = 'proposal';
+    patchStatus('running');
+    publish();
+  }
+
   function refreshProposal(): 'refreshed' | 'waiting' | 'unchanged' {
     if (stopped || phase !== 'proposal' || !proposal || !lastInput) return 'unchanged';
     const pkg = options.host.getPackage?.();
@@ -862,6 +880,7 @@ export function createSuperEasySession(options: SuperEasySessionOptions): SuperE
     refreshProposal,
     approveProposal,
     reviseProposal,
+    reviewExisting,
     reviseNarration,
     restoreNarrationFailure,
     restoreFinalVideo,

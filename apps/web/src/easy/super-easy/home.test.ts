@@ -57,6 +57,18 @@ test('Super Easy shows one primary Generate button and no level picker', () => {
   assert.equal(count(html, /data-super-easy-context-url/g), 1, 'one explicit URL input');
 });
 
+test('hosted automatic setup retains the collapsed landing controls without duplicate model selectors', () => {
+  const html = renderSuperEasyHome({ search: '?demo=1' });
+  assert.match(html, /DeepSeek V4\.1 Flash · Google Colab · configured for you/);
+  assert.match(html, /data-guest-credits/);
+  assert.match(html, /CPU work and agent edits remain available after those credits run out/);
+  assert.doesNotMatch(html, /data-super-easy-setup/);
+  assert.equal(count(html, /data-super-easy-motion-model/g), 1);
+  const disclosure = tagWith(html, 'data-super-easy-type-disclosure');
+  assert.doesNotMatch(disclosure, /\bopen\b/);
+  assert.equal(count(html, /data-super-easy-generate/g), 1);
+});
+
 test('120 seconds remains an exact custom duration rather than a new preset', () => {
   const html = renderSuperEasyHome({ lengthS: 120 });
   assert.match(html, /id="super-easy-custom-length"[^>]*value="120"[^>]*placeholder="1–120"/u);

@@ -66,7 +66,7 @@ export interface SuperEasyApi {
   getRenderedArtifactVideo?(packageId: string, revision: number, exportId: string): Promise<{ blob: Blob; exportId: string }>;
   generateLocalNarration?(body: { packageId: string; productionId: string; baseRevision: number; recoveryInputs?: unknown }): Promise<any>;
   colabStatus(): Promise<{ backendId?: string } | null>;
-  inviteSession?(): Promise<{ role?: string; backendId?: string; budgetUnits?: number }>;
+  inviteSession?(): Promise<{ role?: string; backendId?: string; budgetUnits?: number; spendEnabled?: boolean; invite?: { status?: string } }>;
   guestResult?(id: string): Promise<{ status: string; url?: string }>;
 }
 
@@ -520,18 +520,20 @@ export async function runSuperEasy(input: RunSuperEasyInput, deps: RunSuperEasyD
   const hosted = input.hostedInvite === true;
   const getProduction = (id: string): Promise<unknown> => hosted && deps.api.getProductionWithEvents
     ? deps.api.getProductionWithEvents(id) : deps.api.getProduction(id);
-  const compute = hosted ? 'colab' : (input.compute ?? 'cpu');
+  let compute = hosted ? 'colab' : (input.compute ?? 'cpu');
   let budgetUnits: number | undefined;
   if (hosted) {
     try {
       const session = await deps.api.inviteSession?.();
       if (session?.role !== 'guest' || session.backendId !== 'colab'
-          || typeof session.budgetUnits !== 'number' || !Number.isFinite(session.budgetUnits) || session.budgetUnits <= 0) {
-        return failure('INVITE_UNAVAILABLE', 'compute', 'This invite is unavailable or has no compute remaining.');
+          || ['expired', 'revoked'].includes(session.invite?.status ?? '')
+          || typeof session.budgetUnits !== 'number' || !Number.isFinite(session.budgetUnits) || session.budgetUnits < 0) {
+        return failure('INVITE_UNAVAILABLE', 'compute', 'This invite is unavailable.');
       }
-      budgetUnits = session.budgetUnits;
+      compute = input.compute === 'cpu' || session.spendEnabled === false || session.invite?.status === 'exhausted' || session.budgetUnits === 0 ? 'cpu' : 'colab';
+      budgetUnits = compute === 'cpu' ? 0 : session.budgetUnits;
     } catch {
-      return failure('INVITE_UNAVAILABLE', 'compute', 'This invite is unavailable or has no compute remaining.');
+      return failure('INVITE_UNAVAILABLE', 'compute', 'This invite is unavailable.');
     }
   }
 
@@ -566,8 +568,8 @@ export async function runSuperEasy(input: RunSuperEasyInput, deps: RunSuperEasyD
   }
 
   const write = (proposalOnly = false): Promise<void> => writePlan(deps.store.get(), {
-    api: deps.api as never,
-    host: deps.host,
+    api: (hosted ? { ...deps.api, getAgentProgress: undefined, cancelAgent: undefined } : deps.api) as never,
+    host: hosted ? { ...deps.host, aiSelection: async () => ({ provider: 'none' }) } : deps.host,
     store: deps.store,
   }, { stopAfterPackage: proposalOnly, deepSeekNoThinking: input.deepSeekNoThinking,
     ...(narrationOnly ? { narrationRevision: { packageId: priorPackage.id, baseRevision: priorPackage.revision, note: lastNote, ...(input.recoveryProductionId ? { recoveryProductionId: input.recoveryProductionId } : {}) } } : {}),
@@ -682,7 +684,9 @@ export async function runSuperEasy(input: RunSuperEasyInput, deps: RunSuperEasyD
   if (compute === 'colab') {
     const easyCard = readPlanCard(snapshot);
     hasPaidWork = easyCard.actions.some(isPaidAction);
-    if (easyCard.actions.length > 0) {
+    // Hosted plans are authored and priced by the server as a single complete
+    // film action. Guests cannot replace them with client-authored plans.
+    if (!hosted && easyCard.actions.length > 0) {
       let envelope: Record<string, unknown>;
       try {
         envelope = finalPlanEnvelope(easyCard, snapshot);

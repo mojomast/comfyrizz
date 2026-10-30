@@ -215,11 +215,11 @@ async function approveBody(
   if (built.ok === false && built.code === 'STALE_VIEW') return markStale(deps, state);
 
   const colab = state.compute === 'colab';
-  if (colab && built.ok === false) return built.error;
+  if ((colab || deps.productionDispatchOnly) && built.ok === false) return built.error;
 
   let revision = card.revision;
 
-  if (colab && includeSpendCap && !alreadyApproved) {
+  if ((colab || deps.productionDispatchOnly) && includeSpendCap && !alreadyApproved) {
     const commandId = stableId('cmd_spend', [...identity, card.revision]);
     const spend = await deps.api.setSpendCap(id, {
       ceiling: state.spendCap,
@@ -246,11 +246,11 @@ async function approveBody(
     revision = revisionOf(approved, revision);
   }
 
-  if (colab && built.ok === true && options.dispatchActions !== false) {
+  if ((colab || deps.productionDispatchOnly) && built.ok === true && options.dispatchActions !== false) {
     const backendId = deps.productionDispatchOnly ? 'colab' : runBackendId(await deps.api.colabStatus());
     const actions = card.actions.filter((action) => typeof action?.id === 'string'
       && action.id !== '' && (options.runMode !== 'final' || isPaidAction(action)));
-    if (deps.productionDispatchOnly && actions.length === 0) return 'This plan has no Google Colab work to run.';
+    if (deps.productionDispatchOnly && actions.length === 0) return 'This plan has no work to run.';
     const dispatched: Array<{ actionId: string; assetIds: string[]; serverExecuted: boolean; response: unknown; revision: number }> = [];
     for (const action of actions) {
       const commandId = stableId('cmd_dispatch', [...identity, action.id, revision]);
