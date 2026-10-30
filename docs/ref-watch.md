@@ -238,3 +238,7 @@ Calibration does not write a blacklist file. Its output is the evidence you use 
 Treat a `trusted: false` dimension for a given judge model as a biased question/model pair and blacklist it for that model: do not use that dimension's answer from that model, and do not treat a `pass` on it as a gate-opener until a later calibration with more labelled stills clears it. Common reasons are too few labelled stills, accuracy below the threshold, and a false-pass rate above 10%.
 
 Blacklist at the level of the pair, not the whole model. One model can be reliable on `identity` and unreliable on `anatomy`; the calibration matrix exists to show exactly that split. Re-run calibration after a prompt, skill, or model change, because a previously trusted pair is only trusted for the version that was measured.
+
+### Current blacklist
+
+The W4 calibration (2026-10-30) ran deepseek-v4.1-flash through the shipped `reviewStill` path on 28 labelled FLUX 3 Klein stills (11 known-good, 17 known-bad). `prompt` came out `trusted: false`: it holds too many good stills, flagging small wording differences such as "medium shot" vs a chest-up crop. It is blacklisted for that model in `REF_UNTRUSTED_DIMENSIONS` (`apps/server/src/ref-watch/decide.mjs`). A failed `prompt` check is still reported in the verdict and in the why drawer, but it never holds or regenerates a still. Every other hard failure still holds the still. Clear the entry only after a re-calibration with more labelled stills shows `prompt` as trusted.

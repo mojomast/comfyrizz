@@ -8,10 +8,17 @@ import {
 const STEER_PLACEHOLDER = '<steer>';
 const REPLACE_REF_PLACEHOLDER = '<replace-ref>';
 
+/**
+ * Dimensions blacklisted for the current judge model (deepseek-v4.1-flash) by the W4 calibration
+ * (docs/ref-watch.md "Current blacklist"). A failed check on one of these is reported but never
+ * holds or regenerates a still.
+ */
+export const REF_UNTRUSTED_DIMENSIONS = Object.freeze(['prompt']);
+
 const isFailed = (check) => check && check.pass === false;
 
-function hardFailures(checks) {
-  return checks.filter((check) => isFailed(check) && check.severity === 'hard');
+function hardFailures(checks, untrusted = REF_UNTRUSTED_DIMENSIONS) {
+  return checks.filter((check) => isFailed(check) && check.severity === 'hard' && !untrusted.includes(check.dimension));
 }
 
 function softFailures(checks) {
@@ -26,7 +33,7 @@ function capExhaustedReason({ attempt, policy, regenJobsUsed, stillCount }) {
   return 'production regen cap exhausted';
 }
 
-export function decide({ verdict, attempt, regenJobsUsed, stillCount, identityFailures, policy = REF_POLICY_DEFAULTS }) {
+export function decide({ verdict, attempt, regenJobsUsed, stillCount, identityFailures, policy = REF_POLICY_DEFAULTS, untrustedDimensions = REF_UNTRUSTED_DIMENSIONS }) {
   const checks = Array.isArray(verdict?.checks) ? verdict.checks : [];
   const base = {
     schema: REF_DECISION_SCHEMA,
@@ -45,14 +52,15 @@ export function decide({ verdict, attempt, regenJobsUsed, stillCount, identityFa
       reason: softFailures(checks).length ? 'overall pass; soft checks failed' : 'all checks passed',
     };
   }
-  if (verdict?.overall === 'fail' && hardFailures(checks).length === 0) {
-    return { ...base, action: 'accept', reason: 'only soft checks failed' };
+  if (verdict?.overall === 'fail' && hardFailures(checks, untrustedDimensions).length === 0) {
+    const untrustedOnly = checks.some((check) => isFailed(check) && check.severity === 'hard');
+    return { ...base, action: 'accept', reason: untrustedOnly ? 'only untrusted or soft checks failed' : 'only soft checks failed' };
   }
   if (verdict?.overall !== 'fail') {
     return { ...base, action: 'escalate', reason: `unknown verdict overall: ${String(verdict?.overall)}` };
   }
 
-  const failures = hardFailures(checks);
+  const failures = hardFailures(checks, untrustedDimensions);
   const perStillOpen = Number.isSafeInteger(attempt) && attempt < policy.maxRegensPerStill;
   const productionOpen = Number.isSafeInteger(regenJobsUsed) && regenJobsUsed < refRegenJobCap(stillCount, policy);
   if (!perStillOpen || !productionOpen) {

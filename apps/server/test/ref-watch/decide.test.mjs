@@ -7,7 +7,7 @@ import {
   validateRefDecision,
   validateRefVerdict,
 } from '../../../../packages/schema/src/ref-review.mjs';
-import { decide } from '../../src/ref-watch/decide.mjs';
+import { decide, REF_UNTRUSTED_DIMENSIONS } from '../../src/ref-watch/decide.mjs';
 
 const SHA = 'a'.repeat(64);
 
@@ -117,4 +117,17 @@ test('a verdict that fails validation escalates (pass that contradicts a hard fa
   const d = decide({ verdict, attempt: 0, regenJobsUsed: 0, stillCount: 8, identityFailures: 0 });
   assert.equal(d.action, 'escalate');
   assert.equal(validateRefDecision(d).ok, true);
+});
+
+test('the blacklisted prompt dimension never holds a still (W4 calibration)', () => {
+  assert.deepEqual([...REF_UNTRUSTED_DIMENSIONS], ['prompt']);
+  const onlyPrompt = decide({ verdict: verdict('fail', [passed('identity'), failed('prompt')]), attempt: 0, regenJobsUsed: 0, stillCount: 4, identityFailures: 0 });
+  assert.equal(onlyPrompt.action, 'accept');
+  assert.equal(onlyPrompt.reason, 'only untrusted or soft checks failed');
+  assert.equal(validateRefDecision(onlyPrompt).ok, true);
+  const withAnatomy = decide({ verdict: verdict('fail', [failed('prompt'), failed('anatomy')]), attempt: 0, regenJobsUsed: 0, stillCount: 4, identityFailures: 0 });
+  assert.equal(withAnatomy.action, 'reprompt');
+  assert.equal(withAnatomy.reason, 'hard checks failed: anatomy');
+  const trustedAll = decide({ verdict: verdict('fail', [failed('prompt')]), attempt: 0, regenJobsUsed: 0, stillCount: 4, identityFailures: 0, untrustedDimensions: [] });
+  assert.equal(trustedAll.action, 'reprompt');
 });

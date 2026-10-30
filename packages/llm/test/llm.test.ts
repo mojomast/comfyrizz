@@ -1,5 +1,8 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
+import { mkdtempSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { PRESETS, resolveProvider } from '../src/presets.js';
 import { createOpenAICompatibleModel, listModels } from '../src/openai-compatible.js';
 import { probeToolUse } from '../src/probe.js';
@@ -284,4 +287,40 @@ test('wire messages distinguish absent reasoning from an explicitly empty field'
     { role: 'assistant', content: 'old reply' },
     { role: 'assistant', content: '', reasoning_content: '' },
   ] })) { /* consume */ }
+});
+
+test('user images are sent as base64 image_url parts with the session header kept', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'llm-img-'));
+  const path = join(dir, 'still.png');
+  const bytes = Buffer.from([0x89, 0x50, 0x4e, 0x47, 1, 2, 3]);
+  writeFileSync(path, bytes);
+  let seen: RequestInit | undefined;
+  const fetchImpl = (async (_url: string | URL | Request, init?: RequestInit) => {
+    seen = init;
+    return sse([{ choices: [{ delta: { content: 'ok' }, finish_reason: 'stop' }] }]);
+  }) as typeof fetch;
+  const model = createOpenAICompatibleModel(config(fetchImpl, { sessionHeader: 'x-opencode-session' }));
+  const messages: ChatMessage[] = [{ role: 'user', content: 'review', images: [{ path, mediaType: 'image/png' }] }];
+  for await (const _chunk of model.stream({ system: 'sys', messages, tools: [], signal: new AbortController().signal, sessionId: 'ref-review' })) { /* drain */ }
+  const headers = seen?.headers as Record<string, string>;
+  assert.equal(headers['x-opencode-session'], 'ref-review');
+  const body = JSON.parse(String(seen?.body));
+  assert.deepEqual(body.messages[1], {
+    role: 'user',
+    content: [
+      { type: 'text', text: 'review' },
+      { type: 'image_url', image_url: { url: `data:image/png;base64,${bytes.toString('base64')}` } },
+    ],
+  });
+});
+
+test('user messages without images stay plain strings', async () => {
+  let seen: RequestInit | undefined;
+  const fetchImpl = (async (_url: string | URL | Request, init?: RequestInit) => {
+    seen = init;
+    return sse([{ choices: [{ delta: { content: 'ok' }, finish_reason: 'stop' }] }]);
+  }) as typeof fetch;
+  const model = createOpenAICompatibleModel(config(fetchImpl));
+  for await (const _chunk of model.stream({ system: 'sys', messages: [{ role: 'user', content: 'hi' }], tools: [], signal: new AbortController().signal, sessionId: 's' })) { /* drain */ }
+  assert.deepEqual(JSON.parse(String(seen?.body)).messages[1], { role: 'user', content: 'hi' });
 });
