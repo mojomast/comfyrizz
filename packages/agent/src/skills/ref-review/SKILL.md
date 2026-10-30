@@ -1,7 +1,7 @@
 ---
 name: ref-review
 metadata:
-  version: "1.0.0"
+  version: "1.1.0"
 description: Review one generated reference still before the LTX video stage and return a single RefVerdict JSON with identity, anatomy, framing, prompt and text-artifact evidence.
 ---
 # Reference watch review
@@ -14,7 +14,7 @@ Inspect the image at full size. Answer each question open-ended from visible evi
 
 - **identity** — Does the visible character match the identity lock: face, hair, build, age, distinguishing marks, and the stated wardrobe state?
 - **anatomy** — Are hands, fingers, limbs, and eyes correctly formed, complete, naturally attached, and the right count?
-- **framing** — Does the composition match the planned frame and the shot prompt: subject placement, crop, lens feel, headroom, and set dressing?
+- **framing** — Does the composition match the planned frame and the shot prompt: subject placement, crop, lens feel, headroom, and set dressing? Shot sizes are bands with tolerance, not exact crops: a close-up shows the head and maybe the shoulders; a medium shot is anything from chest-up to waist-up or hip-up; a medium close-up sits between them; a wide or full shot shows the whole body with surroundings; an extreme wide shows the subject small in a large scene. Neighbouring sizes count as a match. Fail framing only when the shot size is clearly different (for example a close-up or macro when a wide or full-body shot was asked for, or a full-body wide when a close-up was asked for), when the planned subject is missing or cut off, or when the composition clearly contradicts the plan. Mark small crop, headroom or lens-feel differences as pass, or as a soft note at most.
 - **prompt** — Which prompt details are missing, wrong, extra, or misread? Put each deduction in one WeGen category: `entity`, `appearance`, `activity`, `counting`, or `composition`.
 - **text_artifact** — Is there unintended text, lettering, logo, watermark, or garbled writing anywhere in the still?
 

@@ -53,7 +53,7 @@ function buildPrompt(request: ReviewRequest): string {
     'Answer each question from what is visibly present in the image:',
     '- identity: Does each character match their identity lock and stated wardrobe?',
     '- anatomy: Are hands, fingers, limbs, and eyes correctly formed and naturally attached?',
-    '- framing: Does the composition match the plan and the shot prompt?',
+    '- framing: Does the composition match the plan and the shot prompt? Shot sizes are bands with tolerance, not exact crops: a close-up shows the head and maybe the shoulders; a medium shot is anything from chest-up to waist-up or hip-up; a medium close-up sits between them; a wide or full shot shows the whole body with surroundings; an extreme wide shows the subject small in a large scene. Neighbouring sizes count as a match. Fail framing only when the shot size is clearly different (for example a close-up or macro when a wide or full-body shot was asked for, or a full-body wide when a close-up was asked for), when the planned subject is missing or cut off, or when the composition clearly contradicts the plan. Mark small crop, headroom or lens-feel differences as pass, or as a soft note at most.',
     '- prompt: For each deduction, name the category entity|appearance|activity|counting|composition and quote the prompt detail that is missing or wrong.',
     '- text_artifact: Is unintended text, lettering, logo, watermark, or garbled writing visible?',
     '',
