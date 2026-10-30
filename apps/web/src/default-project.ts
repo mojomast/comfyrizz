@@ -33,6 +33,8 @@ export interface OpenedProject {
   activity: string;
   /** Present only for the seeded default, so sidecars resolve to its chat. */
   chatId?: string;
+  /** Owner-bound production, so a reopened project resumes its plan/gallery. */
+  productionId?: string;
   editor?: unknown;
   budgetUnits?: number;
 }
@@ -106,7 +108,7 @@ export async function openInitialProject(options: OpenInitialProjectOptions): Pr
     if (!response.ok) {
       throw new Error(`package ${target.packageId} returned HTTP ${response.status}`);
     }
-    const body = await response.json() as { package?: unknown; editor?: unknown; runDefaults?: { budgetUnits?: unknown } };
+    const body = await response.json() as { package?: unknown; editor?: unknown; productionId?: unknown; runDefaults?: { budgetUnits?: unknown } };
     if (!isRecord(body.package)) {
       throw new Error(`package ${target.packageId} response has no package`);
     }
@@ -120,6 +122,8 @@ export async function openInitialProject(options: OpenInitialProjectOptions): Pr
       ...(target.source === 'seeded' ? { chatId: SEEDED_CHAT_ID } : {}),
       ...(target.source === 'requested' && /^chat_[A-Za-z0-9_-]{8,80}$/.test(new URLSearchParams(options.search).get('chat') ?? '')
         ? { chatId: new URLSearchParams(options.search).get('chat')! } : {}),
+      ...(typeof body.productionId === 'string' && /^prod_[A-Za-z0-9]+$/.test(body.productionId)
+        ? { productionId: body.productionId } : {}),
       ...(editor ? { editor } : {}),
       ...(typeof body.runDefaults?.budgetUnits === 'number' && Number.isFinite(body.runDefaults.budgetUnits) && body.runDefaults.budgetUnits >= 0
         ? { budgetUnits: body.runDefaults.budgetUnits } : {}),

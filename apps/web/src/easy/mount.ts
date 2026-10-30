@@ -90,8 +90,15 @@ export function mountEasyStudio(root: HTMLElement, baseHost: EasyHost, deps: Eas
   const requestedPackage = packageIdFrom(search());
   const store = createEasyStore({ key: storageKey(requestedPackage) });
   const loaded = host.getPackage();
-  if (requestedPackage && loaded && loaded.id === requestedPackage && store.get().packageId !== requestedPackage) {
-    store.patch({ packageId: requestedPackage });
+  if (requestedPackage && loaded && loaded.id === requestedPackage) {
+    const current = store.get();
+    const patch: Partial<EasyState> = {};
+    if (current.packageId !== requestedPackage) patch.packageId = requestedPackage;
+    // A fresh browser has no Easy state for a saved project. The server-bound
+    // production lets Super Easy resume its plan, media gallery and status
+    // instead of showing an empty "new video" prompt.
+    if (!current.productionId && host.initialProductionId) patch.productionId = host.initialProductionId;
+    if (Object.keys(patch).length) store.patch(patch);
   }
 
   const api = createEasyApi(host.apiFetch);
@@ -971,7 +978,15 @@ export function mountEasyStudio(root: HTMLElement, baseHost: EasyHost, deps: Eas
     contextAttachments.reset();
     store.startNew();
     refreshVideoName();
-    go('idea');
+    // A home screen has no shell yet, and showStep() intentionally no-ops
+    // without one: clicking New video there used to do nothing. Clear the old
+    // project from the address and mount the new film's first step.
+    const params = new URLSearchParams(search().replace(/^\?/, ''));
+    for (const key of ['package', 'chat', 'production', 'edit', 'view', 'step']) params.delete(key);
+    params.set('step', 'idea');
+    view?.history?.replaceState?.({}, '', `?${params.toString()}`);
+    if (!shellReady) ensureShell();
+    else showStep('idea');
   }
 
   function bindNewVideo(): void {

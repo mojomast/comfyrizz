@@ -2999,6 +2999,7 @@ function init(opened: OpenedProject): void {
       clips: () => clipStore.all(), subscribeClips: (listener: () => void) => clipStore.subscribe(() => listener()), takesApi,
       clipGate: () => studioClipGate(clipStore.all(), pkg.assets as never), applySceneChip: applySceneChipFlow, aiSelection: () => agentSettings.selection(),
       openAgentSettings: () => document.getElementById('agent-settings-open')?.dispatchEvent(new MouseEvent('click', { bubbles: true })),
+      initialProductionId: opened.productionId ?? null,
       openEditor: (packageId?: string | null) => requestMode('advanced', packageId), playerElement: () => $('player'),
       exportArtifactStorage: exportArtifactStorage(),
       resolveExportArtifact: async (record: { exportId: string; packageId: string; revision: number | null }) => {
