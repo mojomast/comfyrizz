@@ -426,7 +426,7 @@ export function mountEasyStudio(root: HTMLElement, baseHost: EasyHost, deps: Eas
       onStatus: next => { status = next; paint(); },
       idPrefix: hostId,
     }) : () => {};
-    void (async () => {
+    const statusFlight = (async () => {
       try {
         const response = await host.apiFetch('/api/colab/status');
         status = response.ok ? await response.json() : null;
@@ -438,6 +438,9 @@ export function mountEasyStudio(root: HTMLElement, baseHost: EasyHost, deps: Eas
     unmount();
     if (choice !== 'save') return false;
     if (draft.compute === 'colab') {
+      // Save can be clicked before the CLI/account check finishes. Await that
+      // existing request instead of treating an in-flight check as disconnected.
+      await statusFlight;
       try {
         const selection = await settings?.selection();
         if (!selection || selection.provider === 'none') throw new Error('Connect an AI agent first.');

@@ -14,6 +14,8 @@ test('a CPU-blocked saved plan survives reload and Colab setup without another p
   const events = [{ id: 'evt_cpu_plan', sequence: 1, type: 'plan.proposed', productionId,
     data: { id: 'plan_cpu', productionId, revision: 2, planHash: 'c'.repeat(64), actions: [], requiredDecisions: [], reservationCeiling: 0, collectAndStopReserve: 0 } }];
   const mutations: string[] = [];
+  let releaseStatus!: () => void;
+  const statusReady = new Promise<void>(resolve => { releaseStatus = resolve; });
   await page.route('**/api/**', async route => {
     const request = route.request(), path = new URL(request.url()).pathname;
     const send = (body: unknown, status = 200) => route.fulfill({ status, contentType: 'application/json', body: JSON.stringify(body) });
@@ -23,7 +25,10 @@ test('a CPU-blocked saved plan survives reload and Colab setup without another p
     if (path === `/api/package/${pkg.id}`) return send({ package: pkg, revision: 59 });
     if (path === `/api/productions/${productionId}`) return send({ production: { id: productionId, packageId: pkg.id, revision: 2, lastSequence: 1, intent: 'active', actionIds: [] }, revision: 2, lastSequence: 1 });
     if (path === `/api/productions/${productionId}/events`) return send({ events, lastSequence: 1, nextAfter: 1, gap: false, truncated: false });
-    if (path === '/api/colab/status') return send({ signedIn: true, installed: true, tokenChecked: true, tokenReady: true, units: 200, ratePerHour: 0 });
+    if (path === '/api/colab/status') {
+      await statusReady;
+      return send({ signedIn: true, installed: true, tokenChecked: true, tokenReady: true, units: 200, ratePerHour: 0 });
+    }
     if (path === '/api/agent/settings') return send({ active: { provider: 'custom', model: 'test-model' }, profiles: [{ id: 'custom', label: 'Test provider', preset: 'custom', model: 'test-model', configured: true, hasApiKey: true }], presets: [] });
     return send({});
   });
@@ -49,6 +54,7 @@ test('a CPU-blocked saved plan survives reload and Colab setup without another p
   await expect(setup).toBeVisible();
   await expect(setup.locator('input[value="colab"]')).toBeChecked();
   await setup.getByRole('button', { name: 'Save setup', exact: true }).click();
+  releaseStatus(); // Saving while the account check is pending must wait for it.
   const confirmation = page.getByRole('dialog', { name: 'Use Google Colab automatically?' });
   await expect(confirmation).toBeVisible();
   await expect(confirmation).toContainText('9 Google Colab credits');
