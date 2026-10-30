@@ -1,0 +1,48 @@
+{
+  "1": {
+    "class_type": "FL_ChatterboxMultilingualTTS",
+    "inputs": {
+      "text": "",
+      "language": "English (en)",
+      "exaggeration": 0.5,
+      "cfg_weight": 0.5,
+      "temperature": 0.8,
+      "repetition_penalty": 2,
+      "min_p": 0.05,
+      "top_p": 1,
+      "seed": 0,
+      "use_cpu": false,
+      "keep_model_loaded": false
+    },
+    "_meta": {
+      "title": "Speech"
+    }
+  },
+  "3": {
+    "class_type": "SaveAudio",
+    "inputs": {
+      "audio": [
+        "5",
+        0
+      ],
+      "filename_prefix": "audio/chatterbox_multilingual"
+    },
+    "_meta": {
+      "title": "Audio"
+    }
+  },
+  "5": {
+    "class_type": "TrimAudioDuration",
+    "inputs": {
+      "audio": [
+        "1",
+        0
+      ],
+      "start_index": 0,
+      "duration": 40
+    },
+    "_meta": {
+      "title": "Speech at the script's length"
+    }
+  }
+}
