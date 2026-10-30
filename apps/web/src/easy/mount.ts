@@ -23,6 +23,7 @@ import { setPreferStudio } from './super-easy/prefs.ts';
 import { escapeToHome, escapeToSuperEasy } from './super-easy/escape.ts';
 import { createSuperEasySession, type SuperEasySession } from './super-easy/session.ts';
 import type { SuperEasyHost } from './super-easy/run.ts';
+import { hasPendingGeneratedShots } from './super-easy/run.ts';
 import { localStageReadings, mergeLocalStages } from './super-easy/local-stages.ts';
 import { readStages, type StagesProgress } from './super-easy/stages.ts';
 import { buildGalleryModel, type GalleryItem } from './super-easy/gallery-model.ts';
@@ -392,11 +393,11 @@ export function mountEasyStudio(root: HTMLElement, baseHost: EasyHost, deps: Eas
     await procedure.start({ title });
   }
 
-  async function openSuperEasySetup(): Promise<void> {
+  async function openSuperEasySetup(preferredCompute?: 'colab'): Promise<boolean> {
     const { openDialog, confirmDialog } = await import('./dialog.ts');
     const { renderCompute, mountCompute, computeBlockReason } = await import('./compute-choice.ts');
     const saved = readSuperEasySetup();
-    let draft: SuperEasySetup = { ...saved, confirmed: false };
+    let draft: SuperEasySetup = { ...saved, ...(preferredCompute ? { compute: preferredCompute } : {}), confirmed: false };
     let status: any = null;
     const hostId = `super-easy-setup-${Date.now()}`;
     const opener = root.querySelector<HTMLElement>('[data-super-easy-setup]');
@@ -435,32 +436,38 @@ export function mountEasyStudio(root: HTMLElement, baseHost: EasyHost, deps: Eas
     opener?.ownerDocument.querySelector('[data-super-easy-ai-setup]')?.addEventListener('click', () => { void settings?.open(); }, { once: true });
     const choice = await pending;
     unmount();
-    if (choice !== 'save') return;
+    if (choice !== 'save') return false;
     if (draft.compute === 'colab') {
       try {
         const selection = await settings?.selection();
         if (!selection || selection.provider === 'none') throw new Error('Connect an AI agent first.');
       } catch {
         await settings?.open();
-        return;
+        return false;
       }
       const reason = computeBlockReason(draft, status);
       if (reason) {
         const retry = await confirmDialog({ title: 'Finish the connection checks', text: reason, confirmLabel: 'Back to setup', cancelLabel: 'Close', opener });
-        if (retry) await openSuperEasySetup();
-        return;
+        if (retry) return openSuperEasySetup(preferredCompute);
+        return false;
       }
       const approved = await confirmDialog({
         title: 'Use Google Colab automatically?',
         text: `Each new video can use up to ${draft.spendCap} Google Colab credits. You will not be asked again for each run. You can change this limit in setup.`,
         confirmLabel: 'Save and use Google Colab', cancelLabel: 'Cancel', opener,
       });
-      if (!approved) return;
+      if (!approved) return false;
     }
     const setup = { ...draft, spendCap: Number.isFinite(draft.spendCap) ? draft.spendCap : saved.spendCap, confirmed: true };
+    const keepPlan = superEasySession?.proposal() || ['GENERATED_MEDIA_REQUIRES_COLAB', 'GOOGLE_COLAB_CONFIRM_REQUIRED'].includes(superEasySession?.failure()?.code ?? '');
+    if (keepPlan && !superEasySession?.configureCompute?.(setup)) {
+      await openDialog({ title: 'Review the saved plan first', bodyHtml: '<p>The project or its inputs changed. Your plan is preserved. Return to review and save it before switching compute.</p>', actions: [{ label: 'Back to review', value: 'close', kind: 'secondary' }], opener });
+      return false;
+    }
     saveSuperEasySetup(setup);
-    store.patch({ compute: setup.compute, spendCap: setup.spendCap });
+    if (!keepPlan) store.patch({ compute: setup.compute, spendCap: setup.spendCap });
     superEasy?.render({ forceHome: true });
+    return true;
   }
 
   async function onSuperEasyGenerate(input: SuperEasyGenerateInput): Promise<void> {
@@ -506,6 +513,7 @@ export function mountEasyStudio(root: HTMLElement, baseHost: EasyHost, deps: Eas
       superEasySnapshot = snapshot;
       superEasy?.render();
       if (superEasy) void ensureSuperEasySession().restoreFinalVideo?.(snapshot);
+      if (superEasy) void ensureSuperEasySession().restoreComputeProposal?.(snapshot);
     }).catch(() => {
       /* keep the last snapshot; the gauges stay at their last known state */
     });
@@ -525,6 +533,9 @@ export function mountEasyStudio(root: HTMLElement, baseHost: EasyHost, deps: Eas
 
   async function approveSuperEasyProposal(): Promise<void> {
     if (proposalSaveNoticeOpen) return;
+    if (store.get().compute === 'cpu' && hasPendingGeneratedShots(host.getPackage())) {
+      if (!await openSuperEasySetup('colab')) return;
+    }
     const session = superEasySession;
     const ticket = superEasyTicket;
     const result = await session?.approveProposal();
@@ -635,7 +646,12 @@ export function mountEasyStudio(root: HTMLElement, baseHost: EasyHost, deps: Eas
       previewReady: () => superEasySession?.previewReady() === true,
       failure: () => superEasySession?.failure() ?? null,
       onRetry: () => {
-        void superEasySession?.retry();
+        void (async () => {
+          if (['GENERATED_MEDIA_REQUIRES_COLAB', 'GOOGLE_COLAB_CONFIRM_REQUIRED'].includes(superEasySession?.failure()?.code ?? '')) {
+            if (!await openSuperEasySetup('colab')) return;
+          }
+          await superEasySession?.retry();
+        })();
       },
       onRecoverDownloadedOutputs: () => { void superEasySession?.recoverDownloadedOutputs?.(); },
       onReview: (packageId) => openStudioFromSuperEasy('review', packageId),
