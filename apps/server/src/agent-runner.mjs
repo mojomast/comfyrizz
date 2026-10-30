@@ -22,7 +22,7 @@ import { isConversationId, loadConversationContext } from './conversation-contex
 import { reviseNarration } from './narration-revision.mjs';
 import { reviseProposal } from './proposal-revision.mjs';
 import { csvWallProblems, repairCsvWallScenes, recoverCsvWallScene, visualClaimProblems } from './csv-wall-contract.mjs';
-import { adoptProductWalkthroughAttachments } from './product-walkthrough.mjs';
+import { adoptProductWalkthroughAttachments, createReferenceImageAdopter } from './product-walkthrough.mjs';
 import { adoptSuppliedFont } from './supplied-font.mjs';
 import {
   adoptMusicVideoAttachments,
@@ -981,7 +981,10 @@ export function createCpuAgentRunner({ runtimeDir, now = () => new Date().toISOS
       : null;
     const conversation = contextSnapshot ?? (conversationId === undefined
       ? null
-      : loadConversationContext({ runtimeDir, conversationId, editorialScope: videoType ?? 'custom' }));
+      : loadConversationContext({ runtimeDir, conversationId, editorialScope: videoType ?? 'custom', referenceImageConditioning: videoType === undefined || videoType === 'custom' }));
+    const adoptReferenceImage = videoType === undefined || videoType === 'custom'
+      ? createReferenceImageAdopter({ runtimeDir, conversationId })
+      : undefined;
     let editorialSong = null;
     if (videoType === 'music-video') {
       if (!conversationId) {
@@ -1143,6 +1146,7 @@ export function createCpuAgentRunner({ runtimeDir, now = () => new Date().toISOS
           persistSvg,
           persistAudio,
           prepareDialogueAudio,
+          ...(adoptReferenceImage ? { adoptReferenceImage } : {}),
           motionModel,
           initialIntent: intent,
           ...(videoType !== undefined ? { videoType } : {}),

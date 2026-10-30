@@ -2113,7 +2113,7 @@ export function createApp({
           originalContext = provenance.context;
           revisionInput = { package: pkg, note, source: provenance.source, originalBrief: provenance.brief, contextSnapshot: originalContext, checkRecovery };
         } else {
-          originalContext = body.conversationId === undefined ? null : loadConversationContext({ runtimeDir, conversationId: body.conversationId, editorialScope: body.videoType ?? 'custom' });
+          originalContext = body.conversationId === undefined ? null : loadConversationContext({ runtimeDir, conversationId: body.conversationId, editorialScope: body.videoType ?? 'custom', referenceImageConditioning: body.videoType === undefined || body.videoType === 'custom' });
         }
         const brand = body.brand ? prepareBrand(body.brand, { assetsDir: join(runtimeDir, 'packages', 'assets') }) : null;
         const aborted = new Promise((_, reject) => {
