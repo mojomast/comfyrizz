@@ -20,8 +20,10 @@ The judge is the **Pi production agent** (deepseek-v4.1-flash over OpenCode Go, 
   - `overall: pass` with a failed hard check is invalid. `overall: fail` needs at least one failed check.
   - A malformed or unparseable judge reply becomes `overall: error`, never `pass`.
   - `fixHints` are positive end-state phrases ("five fingers clearly visible"), never negatives.
-- **RefDecision** `comfyrizz.ref-review.decision/v1` has `jobId, keyframeSha256, action, reason, attempt`, plus action-specific fields: `reprompt` needs `nextPrompt` (optional `nextSeed`), `replace_ref` needs `replaceRef`, and `override` needs `receiptId`.
-  - Actions: `accept | reprompt | replace_ref | escalate | override`.
+- **RefDecision** `comfyrizz.ref-review.decision/v1` has `jobId, keyframeSha256, action, reason, attempt`, plus action-specific fields: `reprompt` needs `nextPrompt` (optional `nextSeed`), `replace_ref` needs `replaceRef`, `override` needs `receiptId`, and `targeted_edit` needs `editInstruction` (a non-empty positive end-state string) and `editDimension`.
+  - Actions: `accept | reprompt | replace_ref | escalate | override | targeted_edit`.
+  - `REF_EDIT_DIMENSIONS` is `text_artifact | anatomy | wardrobe`. `wardrobe` exists only as an edit-dimension label: it is not a verdict dimension, and wardrobe issues keep arriving as prompt/appearance deductions.
+  - A `targeted_edit` counts as one regen against both `maxRegensPerStill` (per still) and `refRegenJobCap` (per production), exactly like any other regen. It does not get an extra budget.
 - **Policy** (`REF_POLICY_DEFAULTS`, approved by Kyle 2026-10-30): `maxRegensPerStill 2`, `maxRegenJobs 6`, `maxRegenFraction 0.25`. The production regen cap is `refRegenJobCap(n) = min(6, max(2, floor(n*0.25)))` for `n > 0`, or 0 when `n <= 0`.
 - **Gate states**: `pending | reviewing | accepted | regenerating | held | overridden`. `refGateOpen` returns true only for `accepted` and `overridden`, so the gate is fail-closed.
 - **Events**: `ref_review_started, ref_review_verdict, ref_review_error, ref_regen_queued, ref_gate_open, ref_gate_held`. Each payload is `{type, productionId, jobId, keyframeSha256, state?, verdict?, decision?, at}`.
