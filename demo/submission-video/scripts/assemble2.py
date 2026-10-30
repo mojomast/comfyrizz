@@ -32,7 +32,7 @@ def ui2(name, parts, cap=None, tail=None):
     if cap: ins+=['-i',f'{C}/{cap}.png']; fl.append(f'[c][{k}:v]overlay=0:0[o]'); last='[o]'
     ff([*ins,'-filter_complex',';'.join(fl),'-map',last,f'{S}/{name}.mp4'])
 def still(name, img, d):
-    ff(['-i',img,'-vf',f"scale=1920:1080,zoompan=z='1+0.0006*on':d={int(d*30)}:s=1920x1080:fps=30,{V}",f'{S}/{name}.mp4'])
+    ff(['-loop','1','-framerate','30','-t',str(d),'-i',img,'-vf',f'scale=1920:1080,{V}',f'{S}/{name}.mp4'])
 def film(name, src, st, d, cap=None):
     a=['-ss',str(st),'-t',str(d),'-i',src]; fl=f'[0:v]scale=1920:1080,{V}[c]'
     if cap: a+=['-i',f'{C}/{cap}.png']; fl+=f';[c][1:v]overlay=0:0[c2]'; m='[c2]'
