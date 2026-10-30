@@ -12,6 +12,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { collectMockContribution } from '../helpers/comfy-contribution.mjs';
+import { writeStubSource } from '../helpers/stub-source.mjs';
 import { deriveClipState } from '../../src/takes/model.mjs';
 import { createHash } from 'node:crypto';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
@@ -299,6 +300,7 @@ test('IP11: final mode rebases onto a concurrent edit to another asset', async (
   delete pending.scenes.at(-1).transitionOut;
   pending.scenes.forEach(scene => { delete scene.narration; });
   collectMockContribution(pending, app.store.dir);
+  writeStubSource(pending, app.store.dir, 'a_hero');
   pending.assets[ASSET_ID].status = 'pending';
   app.store.save(FIXTURE.id, pending, pending.revision);
 

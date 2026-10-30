@@ -5,6 +5,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { collectMockContribution, approveMockContribution } from '../helpers/comfy-contribution.mjs';
+import { writeStubSource } from '../helpers/stub-source.mjs';
 import { createHash } from 'node:crypto';
 import { createServer, request as httpRequest } from 'node:http';
 import {
@@ -50,6 +51,7 @@ function seedPackage(app, pkg) {
   writeFileSync(target, INITIAL_BYTES);
   asset.sha256 = sha256(INITIAL_BYTES);
   asset.bytes = INITIAL_BYTES.length;
+  writeStubSource(pkg, dir, 'a_hero');
   app.store.seed(pkg);
   return dir;
 }
@@ -129,7 +131,7 @@ function makeApp(t) {
     runtimeDir: runtime,
     backendFactory: async id => fakeBackend(id, backendState),
     render: async (packagePath, output) => {
-      renderCalls.push({ packagePath, output });
+      renderCalls.push({ packagePath, output, package: JSON.parse(readFileSync(packagePath, 'utf8')) });
       const bytes = Buffer.from('fake final mp4');
       writeFileSync(output, bytes);
       return { output, bytes: bytes.length, frames: 3, hash: 'tr18-render' };
@@ -337,7 +339,8 @@ test('TR18: adopted take, approved colab correction, gate and one final render',
     assert.equal(rendered.headers['content-type'], 'video/mp4');
     assert.equal(renderCalls.length, 1, 'the approved gate lets exactly one final render through');
 
-    const renderedPackage = JSON.parse(readFileSync(renderCalls[0].packagePath, 'utf8'));
+    const renderedPackage = renderCalls[0].package;
+    assert.equal(existsSync(renderCalls[0].packagePath), false, 'frozen rendering inputs are cleaned up');
     assert.equal(renderedPackage.assets[ASSET_ID].file, second.file);
     assert.equal(renderedPackage.assets[ASSET_ID].sha256, second.sha256);
     assert.equal(renderedPackage.assets[ASSET_ID].bytes, second.bytes);

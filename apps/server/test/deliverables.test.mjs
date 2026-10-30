@@ -5,6 +5,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { execFileSync, spawnSync } from 'node:child_process';
+import { createHash } from 'node:crypto';
 import { cpSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -171,6 +172,11 @@ test('X1: scripted model cutdown, CPU render, social pack, and the rights filter
     });
     const rightsPackagePath = join(dir, 'rights-package.json');
     collectMockContribution(blocked, dir);
+    // The rights filter must handle real source bytes, not fail earlier because
+    // an actively displayed fixture asset is missing.
+    const photo = readFileSync(join(dir, blocked.assets.a_mock_comfy.file));
+    writeFileSync(join(dir, blocked.assets.a_nc_photo.file), photo);
+    blocked.assets.a_nc_photo.sha256 = createHash('sha256').update(photo).digest('hex');
     writeFileSync(rightsPackagePath, `${JSON.stringify(blocked, null, 2)}\n`);
     const rights = await rightsExporter({ pkg: blocked, packagePath: rightsPackagePath });
     const rightsZip = zipEntries(readFileSync(join(rights.dir, 'package.zip')), dir);

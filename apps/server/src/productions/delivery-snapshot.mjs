@@ -7,6 +7,7 @@ import { captionsToSrt, captionsToVtt, captionsToWordVtt } from '../../../../pac
 import { isAssetRedistributable } from '../../../../packages/sources/dist/src/index.js';
 import { measuredOptionsFromDir } from '../compile-package.mjs';
 import { workflowSidecars } from '../workflow.mjs';
+import { collectCompositionExtras } from '../../../../packages/compositions/src/index.mjs';
 import { finalRenderFormat } from '../../../renderer/scripts/render-package-lib.mjs';
 import { narrationAudio } from '../../../renderer/src/audio-model.js';
 import { verifyModelContribution, copyGenerationReceipts, MODEL_CONTRIBUTION_MESSAGE } from '../../../../packages/jobs/src/model-contribution.mjs';
@@ -150,6 +151,9 @@ function safeRelative(value, label) {
 
 function declaredInputNames(pkg, packageDir) {
   const names = new Set(OPTIONAL_INPUTS);
+  // Full renders consume the same editable composition source as exports.
+  // Validate it before admission and bind its bytes to the frozen snapshot.
+  for (const source of collectCompositionExtras(pkg, packageDir)) names.add(source.path);
   const narrationFile = pkg.assets?.a_narration?.file;
   if (typeof narrationFile === 'string' && /^audio\/generated\/[A-Za-z0-9_-]+\/narration\.norm\.wav$/.test(narrationFile)) names.add(`${dirname(narrationFile)}/durations.json`);
   for (const asset of Object.values(pkg.assets ?? {})) {

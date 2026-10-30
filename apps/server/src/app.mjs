@@ -277,6 +277,8 @@ export function createApp({
   renderModuleUrl,
   sceneModuleUrl,
   agentRunner = null,
+  // Host-owned injection for isolated guest planning; never selected by HTTP input.
+  guestRunnerFactory,
   agentTimeoutMs = 600_000,
   providers = providerAvailability(),
   providerSettings = null,

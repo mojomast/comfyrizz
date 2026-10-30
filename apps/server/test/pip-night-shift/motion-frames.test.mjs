@@ -308,7 +308,7 @@ test('the motionkit look score is at or above the recipe baseline', () => {
   );
 });
 
-test('CPU render produces non-blank, distinct mid-scene stills and a scored MP4 with audio', { skip: skipReason, timeout: 20 * 60 * 1000 }, (t) => {
+test('CPU draft render produces non-blank, distinct mid-scene stills and a scored MP4 with audio', { skip: skipReason, timeout: 20 * 60 * 1000 }, (t) => {
   const work = mkdtempSync(join(tmpdir(), 'pip-motion-frames-'));
   t.after(() => rmSync(work, { recursive: true, force: true }));
 
@@ -349,9 +349,16 @@ test('CPU render produces non-blank, distinct mid-scene stills and a scored MP4 
   console.log(`stills: ${stills.map((still) => `${still.scene.id} luma ${still.stats.mean.toFixed(1)}/edges ${still.stats.edges.toFixed(1)}`).join(', ')}`);
 
   const output = join(example, 'out', 'motion.mp4');
-  const renderResult = runScript('render-package-example.mjs', ['--example', example, '--force'], { OUTPUT: output });
+  // This fixture intentionally tests native motion with no generated media. It
+  // is a draft preview, not a final delivery eligible for a Comfy receipt.
+  const renderModule = new URL('../../../renderer/scripts/render-incremental.mjs', import.meta.url).href;
+  const renderResult = spawnSync(process.execPath, ['--input-type=module', '-e',
+    `import { renderPackageIncremental } from ${JSON.stringify(renderModule)};
+     renderPackageIncremental(${JSON.stringify(join(example, 'package.json'))}, ${JSON.stringify(output)}, { force: true, intent: 'draft' });`], {
+    cwd: repoRoot, env: childEnv(), encoding: 'utf8', maxBuffer: 32 * 1024 * 1024, timeout: 15 * 60 * 1000,
+  });
   const renderLog = `${renderResult.stdout ?? ''}\n${renderResult.stderr ?? ''}`;
-  const frameMismatch = /incremental export has (\d+) frames, compiled timeline has (\d+)/.exec(renderLog);
+  const frameMismatch = /incremental export has (\d+) frames, (?:compiled timeline|trimmed master\/timeline) has (\d+)/.exec(renderLog);
   if (renderResult.status !== 0 && !frameMismatch) {
     assert.fail(`renderer exited ${renderResult.status}: ${tail(renderResult)}`);
   }

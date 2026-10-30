@@ -43,3 +43,13 @@ test('guest model results for the same prompt get separately owned packages and 
     await assert.rejects(build({ inviteId: a.id, brief }), /not active/);
   } finally { ledger.close(); rmSync(dir, { recursive: true, force: true }); }
 });
+
+test('default offline guest planning refuses generated film rather than fabricating model output', async t => {
+  const dir = mkdtempSync(join(tmpdir(), 'guest-offline-refusal-'));
+  const ledger = createDurableInviteLedger({ path: join(dir, 'invites.sqlite') });
+  t.after(() => { ledger.close(); rmSync(dir, { recursive: true, force: true }); });
+  const store = new PackageStore(join(dir, 'packages'));
+  const build = createGuestPackageBuilder({ runtimeDir: dir, ledger, store });
+  const { invite } = ledger.mint({ cu: 1, ttlDays: 1 });
+  await assert.rejects(build({ inviteId: invite.id, brief: 'A short video about a friendly robot' }), /generated-film planning requires a live model/);
+});

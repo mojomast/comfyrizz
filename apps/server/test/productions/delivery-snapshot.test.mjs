@@ -49,6 +49,30 @@ function basePackage() {
   return pkg;
 }
 
+test('composition manifest is validated, fingerprinted and frozen with full-render inputs', t => {
+  const { root, packageDir } = workspace(t);
+  const source = join(repo, 'examples/composition-stories');
+  const pkg = JSON.parse(readFileSync(join(source, 'package.json')));
+  const scoped = join(packageDir, 'compositions', pkg.id);
+  mkdirSync(scoped, { recursive: true });
+  const manifestPath = join(scoped, 'manifest.json');
+  const original = readFileSync(join(source, 'compositions/manifest.json'));
+  writeFileSync(manifestPath, original);
+  const snapshot = createDeliverySnapshot({ pkg, packageDir, intent: 'draft' });
+  const path = `compositions/${pkg.id}/manifest.json`;
+  assert.equal(snapshot.inputs.find(input => input.path === path)?.sha256, hash(original));
+  const staged = stageDeliverySnapshot({ snapshot, packageDir, stagingDir: join(root, 'compositions-stage') });
+  assert.deepEqual(readFileSync(join(staged.packageDir, path)), original);
+  const edited = JSON.parse(original);
+  edited.scenes[0].params.title = 'Changed composition';
+  writeFileSync(manifestPath, JSON.stringify(edited));
+  assert.notEqual(createDeliverySnapshot({ pkg, packageDir, intent: 'draft' }).fingerprint, snapshot.fingerprint);
+  assert.throws(() => stageDeliverySnapshot({ snapshot, packageDir, stagingDir: join(root, 'stale-compositions') }), /source changed/);
+  assert.deepEqual(readFileSync(join(staged.packageDir, path)), original);
+  writeFileSync(manifestPath, '{"version":99,"scenes":[]}');
+  assert.throws(() => createDeliverySnapshot({ pkg, packageDir, intent: 'draft' }), /manifest.version/);
+});
+
 function sceneId(pkg) {
   return pkg.scenes[0].id;
 }

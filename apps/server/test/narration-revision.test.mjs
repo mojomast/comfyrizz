@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import { readFileSync, mkdtempSync, rmSync } from 'node:fs';
 import { createServer } from 'node:http';
 import { join } from 'node:path';
+import { tmpdir } from 'node:os';
 import { test } from 'node:test';
 import { createApp } from '../src/app.mjs';
 import { createCpuAgentRunner } from '../src/agent-runner.mjs';
@@ -54,7 +55,7 @@ async function postPath(port, path, body) {
 }
 
 test('45-second narration revision uses the original low-trust source, preserves package structure and pins revisions', async t => {
-  const root = mkdtempSync(join(new URL('../../../.tmp/', import.meta.url).pathname, 'narration-revision-'));
+  const root = mkdtempSync(join(tmpdir(), 'narration-revision-'));
   const pkg = fixture();
   assert.equal(validatePackage(pkg).valid, true);
   const docs = createContextAttachmentStore({ rootDir: root, chatId: chat });
@@ -141,7 +142,7 @@ test('invalid narration tool responses are bounded and cannot authorize example 
 });
 
 test('a stale package changed during revision is rejected without overwriting it', async t => {
-  const root = mkdtempSync(join(new URL('../../../.tmp/', import.meta.url).pathname, 'narration-cas-'));
+  const root = mkdtempSync(join(tmpdir(), 'narration-cas-'));
   const pkg = fixture();
   let app;
   app = createApp({ root: new URL('../../..', import.meta.url).pathname, runtimeDir: root, token,

@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { collectMockContribution, approveMockContribution } from '../helpers/comfy-contribution.mjs';
+import { writeStubSource } from '../helpers/stub-source.mjs';
 import { createHash } from 'node:crypto';
 import { createServer, request as httpRequest } from 'node:http';
 import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
@@ -146,6 +147,7 @@ test('PN09: first open with a verified mocked plate reaches the 4/5 gate, then a
   const packagePath = join(runtimeDir, 'packages', `${pkg.id}.json`);
   const fixture = packageWithMedia(pkg, takesDoc);
   collectMockContribution(fixture, join(runtimeDir, 'packages'));
+  for (const id of Object.keys(takesDoc.clips)) writeStubSource(fixture, join(runtimeDir, 'packages'), id);
   writeFileSync(packagePath, `${JSON.stringify(fixture, null, 2)}\n`);
 
   const renderCalls = [];
@@ -232,7 +234,8 @@ test('PN09: first open with a verified mocked plate reaches the 4/5 gate, then a
     assert.match(rendered.headers['x-comfyrizz-render-id'], /^r_[a-f0-9]{12}$/);
     assert.deepEqual(rendered.bytes, renderBytes);
     assert.equal(renderCalls.length, 1);
-    assert.equal(renderCalls[0].packagePath, packagePath);
+    assert.notEqual(renderCalls[0].packagePath, packagePath, 'render uses frozen source staging');
+    assert.equal(existsSync(renderCalls[0].packagePath), false, 'staging is cleaned up');
     assert.equal(backendState.runs, 0, 'the CPU render never touched the fake backend');
   });
 });

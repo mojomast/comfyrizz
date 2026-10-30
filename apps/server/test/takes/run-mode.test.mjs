@@ -7,6 +7,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { collectMockContribution } from '../helpers/comfy-contribution.mjs';
+import { writeStubSource } from '../helpers/stub-source.mjs';
 import { createHash } from 'node:crypto';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -90,6 +91,8 @@ function fakeBackend() {
         sha256: digest(TAKE_BYTES),
         bytes: TAKE_BYTES.length,
       };
+      // A new base output cannot retain the fixture's absent old upscaled file.
+      delete applied.assets[ASSET_ID].variants;
       return {
         jobsDoc: doc,
         manifest: manifest(),
@@ -137,7 +140,7 @@ test('TR07: take mode ingests before the assets copy, selects the take, saves it
     });
     const finished = await app.runs.wait(started.runId);
 
-    assert.equal(finished.status, 'done');
+    assert.equal(finished.status, 'done', finished.renderError ?? finished.error);
     assert.equal(finished.mode, 'take');
     assert.deepEqual(finished.corrections, corrections);
     assert.equal(finished.render, null);
@@ -211,11 +214,13 @@ test('TR07: the default mode is still a final render and lands no takes', async 
     delete pkg.scenes.at(-1).transitionOut;
     pkg.scenes.forEach(scene => { delete scene.narration; });
     collectMockContribution(pkg, app.store.dir);
+    writeStubSource(pkg, app.store.dir, 'a_hero');
+    pkg.assets[ASSET_ID].status = 'pending';
     app.store.write(pkg);
     const started = await app.runs.start({ backendId: 'byo-comfyui', pkg });
     const finished = await app.runs.wait(started.runId);
 
-    assert.equal(finished.status, 'done');
+    assert.equal(finished.status, 'done', finished.renderError ?? finished.error);
     assert.equal(finished.mode, 'final');
     assert.equal(finished.render.frames, 7);
     assert.equal(renderCalls.length, 1, 'default mode still renders once');
