@@ -16,7 +16,7 @@ import { appendFileSync, copyFileSync, createReadStream, existsSync, lstatSync, 
 import { withRunPackage, verifyAgainstManifest } from "./run-package.mjs";
 import { createLivePreviewCollector } from './live-previews.mjs';
 import { packageModelLock, fasth3JobMinutes } from './fasth3-profile.mjs';
-import { dirname, join, resolve } from "node:path";
+import { dirname, isAbsolute, join, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import { spawn, spawnSync } from "node:child_process";
 import {
@@ -1264,6 +1264,28 @@ export function createColabBackend({
           || /\.(mp4|webm)$/i.test(output);
       };
 
+      // The local collect directory is where runBatch just verified this batch's outputs. Only a job
+      // whose main output actually landed may release the next chained shot.
+      function collectedOutputPath(job) {
+        if (!collect || !collect.local) return null;
+        const candidates = [];
+        if (typeof job.output === "string" && job.output) candidates.push(job.output);
+        const entry = (collect.manifest?.jobs || []).find((item) => item?.job === job.id);
+        for (const output of Array.isArray(entry?.outputs) ? entry.outputs : []) {
+          const relative = output?.relative || output?.file;
+          if (typeof relative === "string" && relative) candidates.push(relative);
+        }
+        const root = resolve(collect.local);
+        for (const candidate of candidates) {
+          if (!candidate || candidate.includes("\0") || isAbsolute(candidate)) continue;
+          const local = resolve(root, candidate);
+          if (local !== root && local.startsWith(`${root}${sep}`) && existsSync(local) && statSync(local).isFile()) {
+            return local;
+          }
+        }
+        return null;
+      }
+
       let refWatchGate = null;
       const refWatchQueue = [];
       let reviewChain = Promise.resolve();
@@ -1278,6 +1300,14 @@ export function createColabBackend({
           submitJobs: async (payload) => { refWatchQueue.push(payload); },
         };
         refWatchGate = typeof refWatch === "function" ? await refWatch(watchContext) : refWatch;
+      }
+
+      // The gate sees preview and collected-video events on one chain, so a queued chained shot is
+      // never admitted before the event that released it has been handled. A gate failure is the
+      // watch's problem, not the run's (same policy as preview_ready).
+      function queueReviewEvent(event) {
+        if (!refWatchGate || typeof refWatchGate.handle !== "function") return;
+        reviewChain = reviewChain.then(() => refWatchGate.handle(event)).then(() => {}, () => {});
       }
 
       async function uploadJobsZip(localJobsFile) {
@@ -1341,9 +1371,7 @@ export function createColabBackend({
           onReady: (payload) => {
             const event = { type: 'preview_ready', ...payload };
             emit(onEvent, event);
-            if (refWatchGate && typeof refWatchGate.handle === "function") {
-              reviewChain = reviewChain.then(() => refWatchGate.handle(event)).then(() => {}, () => {});
-            }
+            queueReviewEvent(event);
           },
           onError: error => emit(onEvent, { type: 'preview_wait', message: error.message }),
         });
@@ -1437,6 +1465,11 @@ export function createColabBackend({
           if (!full) await uploadOverlay(name, group);
           last = await runBatch(name, group);
           if (last?.stop) return last;
+          for (const job of group) {
+            if (!isVideoJob(job)) continue;
+            const path = collectedOutputPath(job);
+            if (path) queueReviewEvent({ type: "video_collected", jobId: job.id, path });
+          }
         }
         return last;
       }
