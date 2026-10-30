@@ -102,7 +102,7 @@ function mountPicker(slot: HTMLElement, ctx: EasyStepContext): { destroy?: () =>
     onChange(level: Level) {
       ctx.store.patch({ level, levelTouched: true });
     },
-    onOpenEditor() { ctx.host.openEditor(); },
+    onOpenEditor() { ctx.host.openEditor(ctx.state.packageId); },
   };
   if (typeof ctx.il?.mountLevelPicker === 'function') {
     return ctx.il.mountLevelPicker(slot, options) ?? null;
@@ -176,7 +176,7 @@ export const step: EasyStepModule = {
       if (!(target instanceof Element)) return;
       if (!target.closest('[data-easy-level-editor]')) return;
       event.preventDefault();
-      ctx.host.openEditor();
+      ctx.host.openEditor(ctx.state.packageId);
     }
 
     el.addEventListener('click', onClick);

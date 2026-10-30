@@ -72,6 +72,13 @@ test('view=editor opens the editor', () => {
   assert.deepEqual({ view: route.view }, { view: 'editor' });
 });
 
+test('hosted guest routes honor explicit editor and Studio steps for the active copy', () => {
+  const state = { ...defaultEasyState(), packageId: 'pkg_guest_copy' };
+  assert.equal(initialRoute('?demo=1&package=pkg_guest_copy&view=editor', state, blocked).view, 'editor');
+  assert.equal(initialRoute('?demo=1&package=pkg_guest_copy&step=plan', state, blocked).view, 'easy');
+  assert.equal(initialRoute('?demo=1&package=pkg_guest_copy', state, blocked).view, 'superEasy');
+});
+
 test('view=editor stays the editor without a package or step', () => {
   const route = initialRoute('?view=editor', null, {
     hasPackage: false,

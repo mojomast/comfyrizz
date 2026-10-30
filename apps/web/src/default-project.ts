@@ -1,8 +1,8 @@
 /**
  * PN07: choose the project the editor opens on first paint.
  *
- * The bundled package (Pip's Night Shift) is always the fallback. When the
- * page has a session token, a `?package=<id>` query still wins; otherwise the
+ * A `?package=<id>` query always wins and failures must reach the caller.
+ * Only an unqualified visit can fall back to the bundled sample. Otherwise the
  * editor asks the local server for the seeded demo so the takes, references,
  * cast and render bar come from the API instead of staying empty.
  *
@@ -68,9 +68,9 @@ function requestedId(search: string): string | null {
  * without a token the statically bundled package stays in place.
  */
 export function initialProjectTarget(search: string, hasToken: boolean): InitialProjectTarget {
-  if (!hasToken) return { source: 'bundled', packageId: null };
   const requested = requestedId(search);
   if (requested) return { source: 'requested', packageId: requested };
+  if (!hasToken) return { source: 'bundled', packageId: null };
   if (new URLSearchParams(search).get('demo') === '1') return { source: 'bundled', packageId: null };
   return { source: 'seeded', packageId: DEFAULT_PACKAGE_ID };
 }
@@ -87,9 +87,8 @@ export function initialProjectActivity(source: InitialProjectSource, packageId: 
 }
 
 /**
- * Open the initial project and report what happened. A failed or malformed
- * response leaves the bundled package untouched, matching the old
- * `?package=` behaviour; the caller only sees the failure through `onError`.
+ * Open the initial project. Explicit requests fail closed: callers must show
+ * the load error, never initialize the editor with an unrelated sample.
  */
 export async function openInitialProject(options: OpenInitialProjectOptions): Promise<OpenedProject> {
   const target = initialProjectTarget(options.search, options.hasToken);
@@ -102,16 +101,16 @@ export async function openInitialProject(options: OpenInitialProjectOptions): Pr
 
   const url = `/api/package/${encodeURIComponent(target.packageId)}`;
   try {
+    if (!options.hasToken) throw new Error(`A session is required to open package ${target.packageId}`);
     const response = await options.request(url);
     if (!response.ok) {
-      options.onError?.(new Error(`package ${target.packageId} returned HTTP ${response.status}`));
-      return bundled;
+      throw new Error(`package ${target.packageId} returned HTTP ${response.status}`);
     }
     const body = await response.json() as { package?: unknown; editor?: unknown; runDefaults?: { budgetUnits?: unknown } };
     if (!isRecord(body.package)) {
-      options.onError?.(new Error(`package ${target.packageId} response has no package`));
-      return bundled;
+      throw new Error(`package ${target.packageId} response has no package`);
     }
+    if (body.package.id !== target.packageId) throw new Error(`package ${target.packageId} response has a different project identity`);
     const editor = isRecord(body.editor) ? body.editor : undefined;
     options.onPackage(body.package as unknown as PackageV1, editor);
     return {
@@ -127,6 +126,7 @@ export async function openInitialProject(options: OpenInitialProjectOptions): Pr
     };
   } catch (error) {
     options.onError?.(error);
+    if (target.source === 'requested') throw error;
     return bundled;
   }
 }

@@ -794,7 +794,7 @@ function mountExport(el: HTMLElement, ctx: EasyStepContext): ExportController {
     }
     if (button.hasAttribute('data-easy-export-editor')) {
       event.preventDefault();
-      ctx.host.openEditor();
+      ctx.host.openEditor(ctx.state.packageId);
       return;
     }
     if (button.hasAttribute('data-easy-export-extras')) {

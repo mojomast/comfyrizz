@@ -15,6 +15,7 @@ import type { EasyIdea, LyricsStyle, SongTrim } from '../types.ts';
 import { VIDEO_TYPE_LIST, videoTypeMetadata, type VideoType } from './video-types.ts';
 import { renderSuperEasyContextAttachments } from './context-attachments.ts';
 import { MIN_EASY_SECONDS, MAX_EASY_SECONDS, EASY_DURATION_PRESETS } from '../duration.ts';
+import { renderProjectNavigation } from '../../project-gallery-navigation.ts';
 
 export const SUPER_EASY_MIN_PROMPT_CHARS = 10;
 const LENGTHS = EASY_DURATION_PRESETS;
@@ -122,6 +123,7 @@ export function renderSuperEasyHome(options: SuperEasyHomeOptions = {}): string 
   const lengthS = options.lengthS ?? 30;
   return `<section class="super-easy-home" aria-labelledby="super-easy-title" data-super-easy-home>
 ${superEasyBrandMarkup()}
+<nav class="super-easy-project-navigation" aria-label="Projects and gallery">${renderProjectNavigation({ search: options.search })}</nav>
 <div class="super-easy-hero">
 <p class="super-easy-eyebrow"><span aria-hidden="true">✦</span> SUPER EASY MODE</p>
 <h1 class="super-easy-home-title" id="super-easy-title">${escapeHtml(COPY.home.title)}</h1>

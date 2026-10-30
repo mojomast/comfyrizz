@@ -3,6 +3,7 @@ import { COPY, fill } from './copy.ts';
 import { STEPS, stepIndex } from './steps.ts';
 import { escapeHtml } from './components.ts';
 import { openDialog } from './dialog.ts';
+import { renderProjectNavigation } from '../project-gallery-navigation.ts';
 
 export const PRIMARY_REASON_ID = 'easy-primary-reason';
 
@@ -73,6 +74,7 @@ export function renderShell({ videoName, saveStatus }: ShellModel): string {
 <span class="easy-name" data-easy-name>${escapeHtml(name)}</span>
 <span class="easy-save" data-easy-save aria-live="polite" aria-atomic="true">${escapeHtml(status)}</span>
 <div class="easy-header-actions">
+${renderProjectNavigation()}
 <button type="button" class="btn btn-secondary easy-header-button" data-easy-help>${escapeHtml(COPY.shell.help)}</button>
 <button type="button" class="btn btn-secondary easy-header-button" data-easy-settings>${escapeHtml(COPY.shell.settings)}</button>
 <span class="easy-header-divider" aria-hidden="true"></span>

@@ -98,6 +98,7 @@ export interface EasyHost {
   applySceneChip(sceneId: string, chip: string): Promise<void>;
   aiSelection(): Promise<{ provider: string; model?: string }>;
   openAgentSettings(): void;
-  openEditor(): void;
+  /** Resolves only after the exact active project is loaded and saved. */
+  openEditor(packageId?: string | null): void | Promise<void>;
   playerElement(): HTMLElement;
 }

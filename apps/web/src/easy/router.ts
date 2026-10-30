@@ -35,7 +35,10 @@ export function initialRoute(
   const packageId = params.get('package')?.trim() ?? '';
   const requestedStep = params.get('step')?.trim() ?? '';
   const home = view === 'easy' && packageId === '' && requestedStep === '';
-  if (params.get('demo') === '1') return { step, view: 'superEasy', home };
+  // Hosted invites use the same explicit project routes as the owner. Only
+  // the invite landing defaults to Super Easy; explicit Editor/Studio links
+  // must remain usable for CPU edits of the guest's gallery copy.
+  if (params.get('demo') === '1' && view !== 'editor' && requestedStep === '') return { step, view: 'superEasy', home };
   const preferStudio = prefs === undefined ? readSuperEasyPrefs().preferStudio : prefs?.preferStudio === true;
   const explicitSuperEasy = params.get('view') === 'super-easy' && packageId !== '' && requestedStep === '';
   return { step, view: explicitSuperEasy || home && !preferStudio ? 'superEasy' : view, home };

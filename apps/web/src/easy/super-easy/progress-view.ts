@@ -13,6 +13,7 @@ import { renderSuperEasyDoneActions } from './escape.ts';
 import { escapeHtml, renderProgressBar } from '../components.ts';
 import { agentConsoleMarkup } from '../agent-console.ts';
 import { readGalleryAssetDetails, safeGalleryUrl } from './gallery-asset.ts';
+import { renderProjectNavigation } from '../../project-gallery-navigation.ts';
 import {
   readStages,
   STAGE_STATUS_TEXT,
@@ -415,6 +416,7 @@ ${gallerySlots.map((slot) => slot.html).join('\n')}
 
   const html = `<section class="${rootClasses.join(' ')}"${reducedAttribute} data-super-easy-progress data-super-easy-live-key="${escapeHtml(keys.live)}" data-super-easy-chrome-key="${escapeHtml(keys.chrome)}" data-super-easy-gallery-key="${escapeHtml(keys.gallery)}" data-super-easy-actions-key="${escapeHtml(keys.actions)}" aria-labelledby="super-easy-progress-title">
 ${superEasyBrandMarkup()}
+<nav class="super-easy-project-navigation" aria-label="Projects and gallery">${renderProjectNavigation({ search: options.search })}</nav>
 <h1 class="super-easy-progress-title" id="super-easy-progress-title">${escapeHtml(COPY.making.title)}</h1>
 <p class="super-easy-progress-subtitle">${escapeHtml(COPY.making.subtitle)}</p>
 ${agentConsoleMarkup()}

@@ -51,3 +51,13 @@ actual-spend measurement.
 
 Implementation and final verification results are recorded with the integration
 release in [COMFY_QUALITY_INTEGRATION.md](COMFY_QUALITY_INTEGRATION.md).
+
+## Project navigation and demo readiness
+
+The same release adds one saved-project collection (`?view=projects`) and
+package-scoped links into Super Easy, Easy, Editor and chat. Explicit project
+loads fail closed instead of showing the bundled sample, mode switches load and
+validate the live package before changing view, and chat is bound to that
+package's revision and saved conversation. The hosted `demo=1` route keeps only
+the invite-scoped gallery. The user-facing contract and browser results are in
+[DEMO_READINESS.md](../DEMO_READINESS.md).

@@ -117,7 +117,7 @@ export function mountEasyStudio(root: HTMLElement, baseHost: EasyHost, deps: Eas
     ? readFilmRepair(repairStorage, store.get().packageId!) : null;
   let narrationRecoveryChecked = false;
   let narrationRecoveryReady = false;
-  let primaryAction: () => void = () => host.openEditor();
+  let primaryAction: () => void = () => host.openEditor(store.get().packageId);
   let cpuFlight: Promise<unknown> | null = null;
   let projectName: ProjectNameController | null = null;
   let shellSave: ShellSaveController | null = null;
@@ -924,7 +924,10 @@ export function mountEasyStudio(root: HTMLElement, baseHost: EasyHost, deps: Eas
       const body = root.querySelector<HTMLElement>('[data-easy-body]');
       stopStep = body ? mod.bind(body, ctx) ?? (() => {}) : () => {};
     } else {
-      primaryAction = () => host.openEditor();
+      // The Easy shell may have advanced to a new saved package after its URL
+      // was opened. Hand that exact package to the editor rather than letting
+      // boot resolve a stale URL project.
+      primaryAction = () => host.openEditor(state.packageId);
       shell.setPrimary({ label: COPY.shell.openEditor });
       stopStep = () => {};
     }
@@ -1047,7 +1050,7 @@ export function mountEasyStudio(root: HTMLElement, baseHost: EasyHost, deps: Eas
       },
       onPrimary: () => primaryAction(),
       onSettings: () => { void settings?.open(); },
-      onOpenEditor: () => host.openEditor(),
+      onOpenEditor: () => host.openEditor(store.get().packageId),
     });
     bindMakeItSimple();
     const nameHost = root.querySelector<HTMLElement>('[data-easy-name]');
@@ -1120,7 +1123,26 @@ export function mountEasyStudio(root: HTMLElement, baseHost: EasyHost, deps: Eas
     });
     stopStepper = mountStepper(stepperHost, { onSelect: (next) => go(next) });
   });
-  const stopMode = subscribeMode((mode) => applyShell(mode));
+  // A deep link can boot straight into the editor, leaving the Easy shell
+  // unrendered. Entering Easy later must open the routed step instead of a
+  // blank panel; a live Easy step is left exactly as the user left it.
+  let factsLoaded = false;
+  function showLanding(): void {
+    const boot = initialRoute(search(), store.get(), factsFor());
+    if (boot.view === 'editor') {
+      if (getMode() !== 'advanced') setMode('advanced');
+      return;
+    }
+    if (getMode() !== 'easy') return;
+    const params = new URLSearchParams(search());
+    if (narrationRecoveryReady && !params.has('step')) { showSuperEasy(); return; }
+    if (boot.view === 'superEasy') { if (!superEasy) showSuperEasy(); return; }
+    showStep(boot.step);
+  }
+  const stopMode = subscribeMode((mode) => {
+    applyShell(mode);
+    if (mode === 'easy' && factsLoaded && !shellReady && !superEasy) showLanding();
+  });
   const stopProposalSave = host.editorStore?.subscribeSaveState?.(() => {
     if (!superEasy || !proposalReturnWaiting) return;
     const ticket = superEasyTicket;
@@ -1145,23 +1167,9 @@ export function mountEasyStudio(root: HTMLElement, baseHost: EasyHost, deps: Eas
   else if (landing.home || landing.view === 'superEasy') setMode('easy');
   applyShell(getMode());
   void loadFacts().then(() => {
-    const boot = initialRoute(search(), store.get(), factsFor());
-    if (boot.view === 'editor') {
-      if (getMode() !== 'advanced') setMode('advanced');
-      return;
-    }
+    factsLoaded = true;
     // A saved editor session stays in the editor. Easy still resumes its step.
-    if (getMode() !== 'easy') return;
-    const params = new URLSearchParams(search());
-    if (narrationRecoveryReady && !params.has('step')) {
-      showSuperEasy();
-      return;
-    }
-    if (boot.view === 'superEasy') {
-      if (!superEasy) showSuperEasy();
-      return;
-    }
-    showStep(boot.step);
+    showLanding();
   });
 
   return () => {

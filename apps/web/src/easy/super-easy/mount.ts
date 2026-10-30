@@ -36,6 +36,7 @@ import type { EasyState, LyricsStyle, SongTrim } from '../types.ts';
 import { isEasyDuration } from '../duration.ts';
 import { formatSuperEasyLrcErrors, validateSuperEasyLrc } from './lyrics.ts';
 import { mountAgentConsole } from '../agent-console.ts';
+import { projectNavigationTarget, renderProjectNavigation } from '../../project-gallery-navigation.ts';
 import { isVideoType, videoTypeMetadata, type VideoType } from './video-types.ts';
 import { createSongPreview, songPreviewMaster } from './song-preview.ts';
 import {
@@ -946,7 +947,7 @@ export function mountSuperEasy(options: SuperEasyMountOptions): SuperEasyMountHa
       stopAgentConsole = null;
     }
     if (next === 'progress' && proposal) {
-      root.innerHTML = renderSuperEasyProposal(proposal);
+      root.innerHTML = `<nav class="super-easy-project-navigation" aria-label="Projects and gallery">${renderProjectNavigation({ search: currentSearch(), baseURI: root.ownerDocument.baseURI })}</nav>${renderSuperEasyProposal(proposal)}`;
       progressKeys = null;
     } else if (next === 'progress') {
       paintProgress();
@@ -989,12 +990,14 @@ export function mountSuperEasy(options: SuperEasyMountOptions): SuperEasyMountHa
       if (generate) generate.disabled = !inviteReady || fontPending;
       void refreshInviteCredits();
     }
-    if (hostedInvite && !root.querySelector('[data-guest-gallery]')) {
+    if (hostedInvite && !root.querySelector('[data-project-navigation]')) {
+      const target = projectNavigationTarget({ search: currentSearch(), baseURI: root.ownerDocument.baseURI });
       const gallery = root.ownerDocument.createElement('a');
-      gallery.dataset.guestGallery = '';
+      gallery.dataset.projectNavigation = '';
+      if (hostedInvite) gallery.dataset.guestGallery = '';
       gallery.className = 'btn btn-secondary';
-      gallery.textContent = '← Film gallery';
-      gallery.href = new URL('./gallery/', root.ownerDocument.baseURI).pathname;
+      gallery.textContent = target.label;
+      gallery.href = target.href;
       root.prepend(gallery);
     }
     root.dataset.superEasyView = next;

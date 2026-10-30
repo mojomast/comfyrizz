@@ -118,8 +118,11 @@ responses and do not constitute human audiovisual acceptance.
 
 The user then prioritized demo-ready project continuity: gallery → selected
 project → chat/Super Easy/Easy/editor, including reload and browser navigation.
-Verification of those later navigation changes is recorded separately; the five
-flows above do not establish that coverage.
+That work is complete: an explicit project never falls back to the bundled
+sample, every mode passes and validates the live package, browser history reloads
+the requested identity, and chat restores the selected package's own conversation.
+The contract, fixes and browser results are in
+[DEMO_READINESS.md](../DEMO_READINESS.md).
 
 ## Hosted admission and accounting
 
