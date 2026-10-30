@@ -58,6 +58,12 @@ the model cannot provide a path, transcript, timing observation or certificate.
 
 - Resolves a ready, SHA-256-declared local video within the package store,
   including symlink containment, and hashes its bytes before and after analysis.
+  Ordinary sources use `<packagesRoot>/<asset.file>`; selected `takes/...`
+  sources use `<packagesRoot>/<pkg.id>/<asset.file>`, matching normal Keep
+  storage. Selected takes must resolve inside the owning package, including
+  when the owner directory itself is a symlink. Traversal, cross-package takes
+  and shared-path aliases into package-owned takes are rejected. A missing
+  owned take never falls back to a flat `<packagesRoot>/takes/...` copy.
 - Uses the existing CPU ffprobe implementation (60-second video limit) and the
   actual compiled scene window, including transition overlaps. Files are capped
   at 512 MiB; each turn allows at most four inspections.
@@ -159,6 +165,35 @@ The injection is a trusted server capability, not a tool argument. Current
 runtime integration supplies only the local CPU adapter. Adding a remote/paid
 grader requires separate capability and spend authorization.
 
+The existing live Spoon ASR environment uses **faster-whisper**, not the
+`openai-whisper` API of this optional adapter. It must not be treated as an
+already configured provider for this branch. No adapter inference is claimed
+by the read-only smoke check below.
+
+## Follow-up: selected takes and missing speech in delivered output
+
+The live Spoon follow-up identified two related issues:
+
+1. Normal Keep stores selected takes under
+   `<packagesRoot>/<pkg.id>/takes/...`, while the original source inspector
+   looked only under `<packagesRoot>/<asset.file>`. The follow-up resolver above
+   fixes inspection and trim revalidation independently on this branch. The
+   regression uses the actual `createTakeStore.addTake` and `selectTake` APIs,
+   actual ffmpeg video/ffprobe, and unchanged approval/history sidecars.
+2. The user reported a later successful render whose delivery staging omitted
+   H3 take files: CPU ASR found no speech in the delivered video, while generated
+   source clips still contained the full speech. This is a separate failure from
+   late-speech clipping. A successful render return and a good source report
+   cannot establish delivered speech. Main's analogous delivery-staging fix at
+   `706d93a` was read for context; it was not merged or cherry-picked here.
+
+This branch still does **not** implement automated final-render inspection.
+The next stage must check staged active-media completeness and inspect the
+receipt-bound final MP4's actual audio/speech, comparing it with observed source
+speech and the authored requirements. A source-level pass must not substitute
+for these output checks. Failed render evidence and existing approvals remain
+separate from inspection reports and must be retained.
+
 ## Practical next stages
 
 1. **Final-render inspection:** expose a read-only render inspector resolving
@@ -206,7 +241,7 @@ The optional Whisper inference itself requires separately installed weights and
 is not part of the default test suite. No paid provider or live production run is
 needed for these regressions.
 
-Verification on this branch:
+Initial-slice verification (`1afc1d0`):
 
 - All workspace library builds passed using Node 22.19.0 and pnpm 10.27.0.
   Dependencies were installed in this worktree with the offline lockfile path;
@@ -234,3 +269,29 @@ node --test \
   packages/agent/dist/test/conversation-production.test.js \
   packages/agent/dist/test/ux09-conversation-policy.test.js
 ```
+
+### Selected-take follow-up verification
+
+- `source-review.test.mjs` and `chat-package-edit-http.test.mjs`: **19 passed**.
+  The five added regressions cover actual Keep storage, selected-file hash
+  changes, missing-owner/no-flat-fallback behavior, traversal and cross-package
+  paths, same-hash symlink escapes (including owner-directory aliases), and a
+  permitted symlink that stays within its owning package. Escape checks also
+  run on trim revalidation after an earlier successful inspection.
+- Read-only actual ffprobe smoke against live package
+  `pkg_42de342a7f5929c4` **revision 30** resolved both selected H3 takes:
+
+  | Scene | Source SHA-256 | Observed duration | FPS | Audio stream |
+  | --- | --- | --- | --- | --- |
+  | `s1_statement` | `5d632fd84e77b5b40aab668439099946727261c5e501a1761bd4bdd403589b86` | 7.2916666667 s | 24 | present |
+  | `s4_confession` | `be0484fa60cdeb83e22c91fe8f9eefcc03734966973a403de4b4af7c48fa7d38` | 8 s | 24 | present |
+
+  Both source-coverage checks passed at the saved 0.75 s in-points. Speech
+  timing/transcript comparison remained unknown, ASR and visual capabilities
+  unavailable, final render `not_inspected`, acceptance `not_assessed`.
+  Package bytes were identical before/after the check (package SHA-256
+  `6b79b8f28fac30f238b503987bca5c96fa696cfab92ab0cdb13bad6ba1735f15`).
+- Reports and `smoke-summary.json` were written only under
+  `/tmp/opencode/comfyrizz-source-review-spoon-L5JzSA/`. The smoke ran with
+  `transcribe:null`: no ASR inference, installs/downloads, generation/planning
+  provider calls, Colab work, live-runtime writes or ledger/approval changes.

@@ -3,8 +3,8 @@ import { test } from 'node:test';
 import { createHash } from 'node:crypto';
 import { execFileSync } from 'node:child_process';
 import { createServer } from 'node:http';
-import { mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
-import { join } from 'node:path';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, renameSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import { dirname, join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { createSourceReviewer, sourceFindings } from '../src/source-review.mjs';
 import { applyChatPackageEdit } from '../src/chat-package-edit.mjs';
@@ -12,6 +12,8 @@ import { compilePackage } from '../src/compile-package.mjs';
 import { createApp } from '../src/app.mjs';
 import { createProviderSettings } from '../src/provider-settings.mjs';
 import { createLocalSpeechInspector } from '../src/local-speech-inspector.mjs';
+import { createTakeStore } from '../src/takes/store.mjs';
+import { selectTake } from '../src/takes/select.mjs';
 
 const sha = bytes => createHash('sha256').update(bytes).digest('hex');
 const line = 'At nine-oh-three, the office spoon vanished.';
@@ -43,6 +45,103 @@ function fixture(t, { transcribe = async () => observed, real = false } = {}) {
   const inspect = (candidate = pkg, sceneId = 's1') => reviewer.inspect(candidate, { packageId: candidate.id, expectedRevision: candidate.revision, sceneId });
   return { runtimeDir, packageDir, file, pkg, reviewer, inspect, probe };
 }
+
+function selectedTake(ctx) {
+  const store = createTakeStore({ runtimeDir: ctx.runtimeDir, packageDir: ctx.packageDir });
+  const asset = ctx.pkg.assets.a_native;
+  const take = store.addTake(ctx.pkg.id, 'a_native', { srcPath: ctx.file, media: asset.media, gen: asset.gen, verdict: 'approved' });
+  const doc = store.read(ctx.pkg.id);
+  const pkg = selectTake(ctx.pkg, doc, 'a_native', take.takeId);
+  store.write(pkg.id, doc);
+  return { pkg, take, file: join(ctx.packageDir, pkg.id, take.file), sidecar: join(ctx.runtimeDir, 'takes', `${pkg.id}.json`) };
+}
+
+test('normal Keep storage resolves package-owned take bytes for real ffprobe and repair revalidation', async t => {
+  const ctx = fixture(t, { real: true });
+  const selected = selectedTake(ctx);
+  assert.match(selected.pkg.assets.a_native.file, /^takes\/a_native\/tk_[a-f0-9]{12}\.mp4$/);
+  assert.ok(existsSync(selected.file));
+  const shadow = join(ctx.packageDir, selected.take.file);
+  assert.equal(existsSync(shadow), false, 'the normal take store does not create a root/takes file');
+  // Even an unrelated flat copy must never override the owning package's take.
+  mkdirSync(dirname(shadow), { recursive: true }); writeFileSync(shadow, 'wrong flat source');
+  const originalSidecar = readFileSync(selected.sidecar);
+  const report = await ctx.inspect(selected.pkg);
+  assert.equal(report.source.sha256, selected.take.sha256);
+  assert.equal(report.source.fps, 24); assert.equal(report.source.audio, 'present');
+  const request = { inspectionId: report.inspectionId, inFrame: 18 };
+  assert.deepEqual(await ctx.reviewer.validateTrim(selected.pkg, 's1', request), { startSeconds: 0.75 });
+  const evidencePath = join(ctx.runtimeDir, 'source-reviews', `${report.inspectionId}.json`);
+  const originalEvidence = readFileSync(evidencePath);
+  writeFileSync(selected.file, 'changed selected take bytes');
+  await assert.rejects(ctx.reviewer.validateTrim(selected.pkg, 's1', request), { code: 'SOURCE_REVIEW_STALE' });
+  await assert.rejects(ctx.inspect(selected.pkg), { code: 'SOURCE_REVIEW_STALE' });
+  assert.equal(sha(readFileSync(ctx.file)), ctx.pkg.assets.a_native.sha256, 'shared original is untouched');
+  assert.deepEqual(readFileSync(evidencePath), originalEvidence, 'failed revalidation retains prior evidence');
+  assert.deepEqual(readFileSync(selected.sidecar), originalSidecar, 'inspection never changes Keep/approval history');
+});
+
+test('a missing package-owned take cannot fall back to matching flat take bytes', async t => {
+  const ctx = fixture(t);
+  const selected = selectedTake(ctx);
+  const shadow = join(ctx.packageDir, selected.take.file);
+  mkdirSync(dirname(shadow), { recursive: true }); writeFileSync(shadow, readFileSync(selected.file));
+  rmSync(selected.file);
+  await assert.rejects(ctx.inspect(selected.pkg), /missing from its owning package/);
+});
+
+test('selected sources reject traversal, direct cross-package takes and invalid owner IDs', async t => {
+  const ctx = fixture(t);
+  const selected = selectedTake(ctx);
+  const foreign = join(ctx.packageDir, 'pkg_other', selected.take.file);
+  mkdirSync(dirname(foreign), { recursive: true }); writeFileSync(foreign, readFileSync(selected.file));
+  for (const file of [
+    `pkg_other/${selected.take.file}`, `takes/../../pkg_other/${selected.take.file}`,
+    `assets/../pkg_other/${selected.take.file}`, `./${selected.take.file}`,
+    selected.take.file.replaceAll('/', '\\'), foreign,
+  ]) {
+    const pkg = structuredClone(selected.pkg); pkg.assets.a_native.file = file;
+    await assert.rejects(ctx.inspect(pkg), { code: 'SOURCE_REVIEW_INVALID' }, file);
+  }
+  for (const id of ['../pkg_other', 'pkg_other/../pkg_source_review']) {
+    await assert.rejects(ctx.inspect({ ...selected.pkg, id }), /valid owning package ID/);
+  }
+});
+
+test('source resolution rejects same-hash symlink escapes at file, take directory and owning package boundaries', async t => {
+  for (const mode of ['file-outside', 'file-sibling', 'takes-directory', 'owner-directory', 'shared-alias']) {
+    const ctx = fixture(t);
+    const selected = selectedTake(ctx);
+    const report = await ctx.inspect(selected.pkg);
+    const foreign = join(ctx.packageDir, 'pkg_other', selected.take.file);
+    mkdirSync(dirname(foreign), { recursive: true }); writeFileSync(foreign, readFileSync(selected.file));
+    if (mode === 'file-outside' || mode === 'file-sibling') {
+      const target = mode === 'file-outside' ? join(ctx.runtimeDir, 'outside.mp4') : foreign;
+      if (mode === 'file-outside') writeFileSync(target, readFileSync(selected.file));
+      rmSync(selected.file); symlinkSync(target, selected.file);
+    } else if (mode === 'takes-directory') {
+      const takes = join(ctx.packageDir, selected.pkg.id, 'takes');
+      rmSync(takes, { recursive: true }); symlinkSync(join(ctx.packageDir, 'pkg_other', 'takes'), takes);
+    } else if (mode === 'owner-directory') {
+      const owner = join(ctx.packageDir, selected.pkg.id);
+      rmSync(owner, { recursive: true }); symlinkSync(join(ctx.packageDir, 'pkg_other'), owner);
+    } else {
+      selected.pkg.assets.a_native.file = 'assets/alias.mp4';
+      symlinkSync(foreign, join(ctx.packageDir, 'assets', 'alias.mp4'));
+    }
+    await assert.rejects(ctx.inspect(selected.pkg), { code: 'SOURCE_REVIEW_INVALID' }, mode);
+    if (mode !== 'shared-alias') await assert.rejects(ctx.reviewer.validateTrim(selected.pkg, 's1', { inspectionId: report.inspectionId, inFrame: 18 }), { code: 'SOURCE_REVIEW_INVALID' }, `revalidate ${mode}`);
+  }
+});
+
+test('a take symlink staying within its owning package retains byte validation', async t => {
+  const ctx = fixture(t);
+  const selected = selectedTake(ctx);
+  const actual = join(dirname(selected.file), 'actual.mp4');
+  renameSync(selected.file, actual); symlinkSync(actual, selected.file);
+  const report = await ctx.inspect(selected.pkg);
+  assert.equal(report.source.sha256, selected.take.sha256);
+});
 
 test('late native speech: observed 4.40–6.62s fails a 190/30s shot; 18 source frames repairs it without changing 900-frame timeline', async t => {
   const ctx = fixture(t);

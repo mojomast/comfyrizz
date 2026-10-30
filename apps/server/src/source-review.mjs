@@ -29,15 +29,40 @@ async function hashFile(file, signal) {
   return hash.digest('hex');
 }
 
+function inside(root, file) {
+  const rel = relative(root, file);
+  return rel !== '' && rel !== '..' && !rel.startsWith('../') && !isAbsolute(rel);
+}
+
+function packageOwnedPath(file) {
+  const parts = file.split('/');
+  return parts[0].startsWith('pkg_') || parts.includes('takes');
+}
+
 function sourceFor(pkg, sceneId, packageDir) {
   const scene = pkg.scenes.find(item => item.id === sceneId);
   const plate = scene?.background;
   const asset = pkg.assets?.[plate?.asset];
   if (!scene || asset?.kind !== 'video' || asset.status !== 'ready' || !asset.file || !/^[a-f0-9]{64}$/.test(asset.sha256 ?? '')) fail('Inspect a ready background video with a saved SHA-256.');
+  if (typeof asset.file !== 'string' || isAbsolute(asset.file) || /^[A-Za-z]:/.test(asset.file)
+    || /[\\\0]/.test(asset.file) || asset.file.split('/').some(part => !part || part === '.' || part === '..')) fail('Source requires a canonical relative path without traversal.');
   const root = realpathSync(packageDir);
-  const file = realpathSync(resolve(root, asset.file));
-  const rel = relative(root, file);
-  if (isAbsolute(asset.file) || rel === '..' || rel.startsWith('../') || isAbsolute(rel)) fail('Source must be inside this package store.');
+  const take = asset.file.startsWith('takes/');
+  if (take && !/^pkg_[A-Za-z0-9_-]{4,64}$/.test(pkg.id ?? '')) fail('A selected take requires a valid owning package ID.');
+  if (!take && packageOwnedPath(asset.file)) fail('Selected takes must use takes/ paths within their owning package.');
+  // Keep writes takes/<asset>/<take>.mp4 relative to this package, not the
+  // shared store. Do not fall back to an unowned root/takes copy if it is missing.
+  // Keep the owner boundary lexical: resolving a symlinked owner directory as
+  // the boundary would incorrectly admit a sibling package's take bytes.
+  const owner = take ? resolve(root, pkg.id) : root;
+  let file;
+  try { file = realpathSync(resolve(owner, asset.file)); }
+  catch (error) {
+    if (['ENOENT', 'ENOTDIR'].includes(error.code)) fail('Saved source file is missing from its owning package/store.');
+    throw error;
+  }
+  if (!inside(owner, file)) fail('Source escapes its owning package/store.');
+  if (!take && packageOwnedPath(relative(root, file))) fail('Shared source cannot alias a package-owned take.');
   if (!statSync(file).isFile() || statSync(file).size > 512 * 1024 * 1024) fail('Source inspection supports local files up to 512 MiB.');
   return { scene, plate, asset, file };
 }
