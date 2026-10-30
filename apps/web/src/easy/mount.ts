@@ -43,6 +43,7 @@ import { mountCorrectionShutdown } from './correction-shutdown.ts';
 import { readPlanCard } from '../productions/cards/plan-card.ts';
 
 import './easy.css';
+import './super-easy/creative-home.css';
 
 const easyStyles = import.meta.glob('./**/*.css', { eager: true });
 void easyStyles;
@@ -1040,6 +1041,11 @@ export function mountEasyStudio(root: HTMLElement, baseHost: EasyHost, deps: Eas
   root.addEventListener('change', onCaptureToggle);
   view?.addEventListener('popstate', onPopState);
   // Show the studio before resume facts return. A busy server must not leave the editor in front.
+  // A landing URL opens its landing surface even after a previous editor visit.
+  // Explicit editor deep links and saved-package editor sessions still resume.
+  const landing = initialRoute(search(), store.get(), factsFor());
+  if (landing.view === 'editor') setMode('advanced');
+  else if (landing.home || landing.view === 'superEasy') setMode('easy');
   applyShell(getMode());
   void loadFacts().then(() => {
     const boot = initialRoute(search(), store.get(), factsFor());

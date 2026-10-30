@@ -245,8 +245,8 @@ test('the home has no plan or shot editing on the happy path', () => {
 test('the section is labelled by its heading', () => {
   const html = renderSuperEasyHome();
   assert.match(html, /<section[^>]*aria-labelledby="super-easy-title"[^>]*data-super-easy-home/u);
-  assert.match(html, /<h1[^>]*id="super-easy-title"[^>]*>Make a video<\/h1>/u);
-  assert.equal(COPY.home.title, 'Make a video');
+  assert.match(html, /<h1[^>]*id="super-easy-title"[^>]*>Imagine it\. Make it\.<\/h1>/u);
+  assert.equal(COPY.home.title, 'Imagine it. Make it.');
 });
 
 test('a prefilled prompt is escaped before it reaches the page', () => {

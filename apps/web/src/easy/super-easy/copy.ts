@@ -14,7 +14,7 @@ function deepFreeze<T>(value: T): DeepReadonly<T> {
 
 export const COPY = deepFreeze({
   home: {
-    title: 'Make a video',
+    title: 'Imagine it. Make it.',
     promptLabel: 'What is your video about?',
     promptPlaceholder: 'A friendly robot who learns to bake bread',
     hint: 'One sentence is enough. We write the script, draw the motion graphics and make a preview on this computer, with no GPU and no Google Colab.',

@@ -645,6 +645,8 @@ export function mountSuperEasy(options: SuperEasyMountOptions): SuperEasyMountHa
       selectedVideoType = next;
       options.onVideoTypeChange?.(next);
       const metadata = videoTypeMetadata(next);
+      const typeSummary = root.querySelector<HTMLElement>('[data-super-easy-type-summary]');
+      if (typeSummary) typeSummary.textContent = metadata?.label ?? 'Custom';
       const prompt = root.querySelector<HTMLTextAreaElement>('#super-easy-prompt');
       if (prompt) prompt.placeholder = metadata?.promptPlaceholder ?? SUPER_EASY_EXAMPLE_PROMPT;
       const hint = root.querySelector<HTMLElement>('[data-super-easy-prompt-hint]');

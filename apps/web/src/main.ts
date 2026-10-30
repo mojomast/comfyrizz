@@ -3431,17 +3431,26 @@ function init(opened: OpenedProject): void {
   mountEditorCommandPalette(() => { modeControl?.setMode('easy'); });
 }
 
-const openedProject = await openInitialProject({
-  search: globalThis.location?.search ?? '',
-  hasToken: Boolean(sessionToken()),
-  request: input => apiFetch(input),
-  onPackage: (nextPackage, nextEditor) => {
-    adoptEditorPackage(nextPackage, nextEditor as EditorSidecar | undefined);
-    const compiled = editorStore.getState().derived.timeline;
-    if (compiled) timeline = compiled as unknown as Timeline;
-  },
-  onError: error => console.error('package open failed', error),
-});
-seededChatId = openedProject.chatId ?? null;
-init(openedProject);
-void checkRecoveryOnBoot(openedProject);
+try {
+  const openedProject = await openInitialProject({
+    search: globalThis.location?.search ?? '',
+    hasToken: Boolean(sessionToken()),
+    request: input => apiFetch(input),
+    onPackage: (nextPackage, nextEditor) => {
+      adoptEditorPackage(nextPackage, nextEditor as EditorSidecar | undefined);
+      const compiled = editorStore.getState().derived.timeline;
+      if (compiled) timeline = compiled as unknown as Timeline;
+    },
+    onError: error => console.error('package open failed', error),
+  });
+  seededChatId = openedProject.chatId ?? null;
+  init(openedProject);
+  document.documentElement.removeAttribute('data-app-loading');
+  void checkRecoveryOnBoot(openedProject);
+} catch (error) {
+  console.error('Studio startup failed', error);
+  const status = document.getElementById('app-launch-status');
+  if (status) status.textContent = 'The studio couldn’t open. Please reload to try again.';
+  const retry = document.getElementById('app-launch-retry');
+  if (retry) retry.hidden = false;
+}
