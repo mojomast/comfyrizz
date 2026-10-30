@@ -10,13 +10,13 @@ async function sha256(blob: Blob): Promise<string> {
 }
 
 async function metadata(apiFetch: ApiFetch, id: string, expected: { packageId: string; revision: number | null }) {
-  if (!idPattern.test(id)) throw new Error('Invalid saved render identity');
+  if (!idPattern.test(id)) throw new Error('Saved video details are invalid');
   const response = await apiFetch(`/api/render/artifacts/${id}`);
-  if (!response.ok) throw Object.assign(new Error('Saved render is unavailable'), { status: response.status });
+  if (!response.ok) throw Object.assign(new Error('Saved video is unavailable'), { status: response.status });
   const value = await response.json();
   if (value.exportId !== id || value.packageId !== expected.packageId || value.revision !== expected.revision
     || value.intent !== 'final' || !/^[a-f0-9]{64}$/.test(value.videoSha256)
-    || value.videoUrl !== `/api/render/artifacts/${id}/video`) throw new Error('Saved render binding does not match');
+    || value.videoUrl !== `/api/render/artifacts/${id}/video`) throw new Error('Saved video does not match this project');
   return value;
 }
 
@@ -24,17 +24,17 @@ export async function readRenderedArtifact(apiFetch: ApiFetch, response: Respons
   const url = response.headers.get('x-comfyrizz-artifact-url');
   if (!url) return {}; // Older servers/draft previews do not claim durable delivery.
   const match = /^\/api\/render\/artifacts\/(r_[a-f0-9]{12})$/.exec(url);
-  if (!match) throw new Error('Invalid render artifact URL');
+  if (!match) throw new Error('The video download address is invalid');
   const saved = await metadata(apiFetch, match[1], expected);
   if (response.headers.get('x-comfyrizz-video-sha256') !== saved.videoSha256
-    || await sha256(blob) !== saved.videoSha256 || saved.files?.[0]?.bytes !== blob.size) throw new Error('Downloaded MP4 does not match its render receipt');
+    || await sha256(blob) !== saved.videoSha256 || saved.files?.[0]?.bytes !== blob.size) throw new Error('Downloaded MP4 does not match its verification record');
   return saved;
 }
 
 export async function resolveRenderedArtifact(apiFetch: ApiFetch, record: Saved) {
   const saved = await metadata(apiFetch, record.exportId, record);
   const response = await apiFetch(saved.videoUrl);
-  if (!response.ok) throw Object.assign(new Error('Saved render is unavailable'), { status: response.status });
+  if (!response.ok) throw Object.assign(new Error('Saved video is unavailable'), { status: response.status });
   const blob = await response.blob();
   if (response.headers.get('x-comfyrizz-video-sha256') !== saved.videoSha256
     || await sha256(blob) !== saved.videoSha256 || saved.files?.[0]?.bytes !== blob.size) throw new Error('Saved MP4 bytes no longer match their receipt');
