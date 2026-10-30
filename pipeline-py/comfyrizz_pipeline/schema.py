@@ -417,9 +417,9 @@ def _check_voice(doc, errors) -> None:
     if not _is_obj(voice) or voice.get("enabled") is not True:
         return
     voice_id = voice.get("voice")
-    voiced = voice.get("engine") in ("kokoro", "qwen3-tts")
+    voiced = voice.get("engine") in ("kokoro", "qwen3-tts", "chatterbox")
     if not voiced or not _is_str(voice_id) or voice_id == "":
-        errors.append(_err("SEM_VOICE_INCOMPLETE", "/voice", "voice.enabled requires engine kokoro or qwen3-tts and a non-empty voice"))
+        errors.append(_err("SEM_VOICE_INCOMPLETE", "/voice", "voice.enabled requires engine kokoro, qwen3-tts or chatterbox and a non-empty voice"))
     if voice.get("engine") == "qwen3-tts":
         if voice.get("speed", 1) != 1:
             errors.append(_err("SEM_VOICE_INCOMPLETE", "/voice/speed", "Qwen requires speed=1; use delivery direction for pacing"))
