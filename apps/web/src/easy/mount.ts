@@ -20,7 +20,7 @@ import { levelForState } from './steps/level.ts';
 import { iterationBlocksPaidGeneration } from '../productions/cards/iteration-advanced.ts';
 import { mountSuperEasy } from './super-easy/mount.ts';
 import { setPreferStudio } from './super-easy/prefs.ts';
-import { escapeToHome } from './super-easy/escape.ts';
+import { escapeToHome, escapeToSuperEasy } from './super-easy/escape.ts';
 import { createSuperEasySession, type SuperEasySession } from './super-easy/session.ts';
 import type { SuperEasyHost } from './super-easy/run.ts';
 import { localStageReadings, mergeLocalStages } from './super-easy/local-stages.ts';
@@ -636,6 +636,8 @@ export function mountEasyStudio(root: HTMLElement, baseHost: EasyHost, deps: Eas
         superEasySession?.stop();
         superEasySession = null;
         resetPlanDecisionAnswers();
+        const url = escapeToHome(search());
+        view?.history?.pushState({}, '', url === '' ? './' : url);
         store.startNew();
       },
     });
@@ -841,7 +843,7 @@ export function mountEasyStudio(root: HTMLElement, baseHost: EasyHost, deps: Eas
   function makeItSimple(event?: Event): void {
     event?.preventDefault();
     setPreferStudio(false);
-    const url = escapeToHome(search());
+    const url = escapeToSuperEasy(search(), store.get().packageId);
     view?.history?.pushState({}, '', url === '' ? './' : url);
     showSuperEasy();
   }
