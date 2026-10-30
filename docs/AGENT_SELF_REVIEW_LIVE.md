@@ -97,7 +97,7 @@ unattended controller completion.
 - Fresh final receipt includes both H3 contributions. Original source hashes,
   exact authored timing, unchanged package bytes during export and take history
   were verified. Reopening the saved artifact returned byte-identical output.
-- Private [Pi repair review copy](http://100.72.41.9:8766/the-spoon-files-pi-repair-review.mp4).
+- Private Pi repair review copy: `http://<TAILNET_HOST>:8766/the-spoon-files-pi-repair-review.mp4` (host shared separately).
   The earlier delivered Spoon link is unchanged.
 
 With the same real ASR provider, word timing and analyzer settings:

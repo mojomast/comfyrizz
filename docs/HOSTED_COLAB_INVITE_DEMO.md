@@ -56,7 +56,7 @@ complete live nginx configuration before reloading. Build the guest web app with
 **Comfy Cloud / API Phase 1:** deferred. Prefer the **Google Colab** path.  
 **Ops note:** COLAB ORCHESTRATOR stopped film GPU (assignments 0) — do not restart film sessions from this track.  
 **Date:** 2026-10-28 (America/Toronto)  
-**Branch:** `feat/hosted-colab-invite` @ `/home/box/wt/hosted-colab-invite`  
+**Branch:** `feat/hosted-colab-invite` in the operator's `hosted-colab-invite` worktree.
 **Scope:** Ledger + mint/redeem HTTP + guest Super Easy session + spend wire + owner observability + showcase. No Google Colab spend, no Orbit/launcher, no main merge/tag, no deploy to public host yet.
 
 **Related:**

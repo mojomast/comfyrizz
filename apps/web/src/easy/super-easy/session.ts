@@ -24,6 +24,7 @@ import { planInputsHash } from '../store.ts';
 import { completedFinalRun } from './restore-final.ts';
 import { readPlanCard } from '../../productions/cards/plan-card.ts';
 import type { SuperEasySetup } from './setup.ts';
+import { validFilmTarget, type FilmTarget, type RepairRecord } from './film-review.ts';
 
 const RUN_ALREADY_STARTED = 'The Super Easy run is already going.';
 
@@ -52,6 +53,9 @@ export interface SuperEasySessionOptions extends RunSuperEasyDeps {
 }
 
 export interface SuperEasySession {
+  finalTarget?(): FilmTarget | null;
+  previousVideo?(): string | null;
+  syncRepairedFilm?(record?: RepairRecord, isCurrent?: () => boolean): Promise<void>;
   generate(input: RunSuperEasyInput): Promise<SuperEasyRunResult>;
   /** Re-run the last prompt after a visible planning or preview failure. */
   retry(): Promise<SuperEasyRunResult | null>;
@@ -100,6 +104,8 @@ export function createSuperEasySession(options: SuperEasySessionOptions): SuperE
   let resultRequest = false;
   let generation = 0;
   let objectUrl: string | null = null;
+  let previousObjectUrl: string | null = null;
+  let repairSyncTail: Promise<void> = Promise.resolve();
   let proposal: SuperEasyProposal | null = null;
   let reviewedPackage: any = null;
   let activeRunId: string | null = null;
@@ -162,7 +168,8 @@ export function createSuperEasySession(options: SuperEasySessionOptions): SuperE
       if (!blob.size || (blob.type && blob.type !== 'video/mp4')) throw new Error('The recovered MP4 response is invalid.');
       const url = URL.createObjectURL(blob);
       snapshot = { downloadedOutputsRecovery: 'completed',
-        finalVideo: { ready: true, status: 'done', url, runId: recoveryId } };
+        finalVideo: { ready: true, status: 'done', url, runId: recoveryId,
+          target: { packageId: offer.packageId, expectedRevision: record.revision, renderId: recoveryId } } };
       rememberObjectUrl(snapshot);
       patchStatus('done');
       publish();
@@ -221,6 +228,117 @@ export function createSuperEasySession(options: SuperEasySessionOptions): SuperE
     const url = objectUrl;
     objectUrl = null;
     revokeUrl(url);
+  }
+
+  function finalTarget(): FilmTarget | null {
+    const target = (snapshot as any)?.finalVideo?.target;
+    const pkg = options.host.getPackage?.();
+    const saved = options.host.editorStore?.saveState?.();
+    if (options.hostedInvite || lastInput?.hostedInvite || !validFilmTarget(target)
+      || !hasFinalArtifact(buildGalleryModel(snapshot)) || target.packageId !== options.store.get().packageId
+      || pkg?.id !== target.packageId || pkg.revision !== target.expectedRevision
+      || saved && (!isServerSaved(saved) || saved.acknowledgedRevision !== target.expectedRevision)) return null;
+    return { ...target };
+  }
+
+  function invalidateFinal(): void {
+    if (objectUrl) { revokeUrl(previousObjectUrl); previousObjectUrl = objectUrl; objectUrl = null; }
+    snapshot = { previousFinalVideo: { url: previousObjectUrl }, repairPendingExport: true };
+    preview = false;
+    failure = { ok: false, code: 'SAVED_VIDEO_UNAVAILABLE', stage: 'run', retryable: false,
+      message: 'The saved project changed. The previous video is not current. Review & repair shows its status; Download returns only after a verified current export is available.' };
+    options.store.patch({ exported: { revision: null, at: null }, proposalCheckpoint: null });
+    patchStatus('error'); publish();
+  }
+
+  /** Read-only reconciliation, including failures after a committed edit. Never
+   * renders, starts a model turn, approves work, or resumes a repair operation. */
+  function syncRepairedFilm(record?: RepairRecord, isCurrent: () => boolean = () => true): Promise<void> {
+    const requestedPackage = options.store.get().packageId, requestedEpoch = epoch;
+    const requestedGeneration = options.store.generation?.();
+    const stillRequested = () => isCurrent() && epoch === requestedEpoch
+      && options.store.get().packageId === requestedPackage && options.store.generation?.() === requestedGeneration;
+    const work = repairSyncTail.then(() => reconcileRepairedFilm(record, stillRequested));
+    repairSyncTail = work.catch(() => {});
+    return work;
+  }
+
+  async function reconcileRepairedFilm(record: RepairRecord | undefined, isCurrent: () => boolean): Promise<void> {
+    if (options.hostedInvite || !options.api.getPackage || !options.api.compilePackage || !options.api.getSavedRenderVideo) {
+      throw new Error('Current saved-video recovery is unavailable.');
+    }
+    const state = options.store.get(), packageId = state.packageId;
+    if (!packageId || record && record.input.packageId !== packageId) throw new Error('The repair belongs to another project.');
+    const ticket = epoch, storeGeneration = options.store.generation?.();
+    const current = () => isCurrent() && !stopped && ticket === epoch && options.store.get().packageId === packageId
+      && options.store.generation?.() === storeGeneration;
+    const oldTarget = (snapshot as any)?.finalVideo?.target;
+    if (!current()) return;
+    if (validFilmTarget(oldTarget) && record && [record.currentRevision, record.observedRevision].some(rev => Number.isSafeInteger(rev) && rev! > oldTarget.expectedRevision)) invalidateFinal();
+    const body = await options.api.getPackage(packageId);
+    if (!current()) return;
+    const pkg = body?.package ?? body;
+    if (pkg?.id !== packageId || !Number.isSafeInteger(pkg.revision)) throw new Error('The current saved project is unavailable.');
+    if (validFilmTarget(oldTarget) && pkg.revision !== oldTarget.expectedRevision) invalidateFinal();
+    if (record && pkg.revision !== record.input.expectedRevision && !previousObjectUrl) {
+      // Reopen the original as explicitly historical media, never as current
+      // Download. Both routes verify the original bytes against their receipt.
+      try {
+        const original = record.input;
+        let blob: Blob | undefined;
+        if (original.renderId.startsWith('run_')) {
+          const response = await options.api.getRun(original.renderId) as any;
+          const run = response?.run ?? response;
+          if (run?.runId === original.renderId && run.packageId === packageId && run.revision === original.expectedRevision
+            && ['done', 'completed'].includes(run.status) && run.teardown?.state !== 'stop_unconfirmed') {
+            blob = await options.api.getRunVideo(original.renderId);
+          }
+        } else {
+          blob = (await options.api.getRenderedArtifactVideo?.(packageId, original.expectedRevision, original.renderId))?.blob;
+        }
+        if (!current()) return;
+        if (blob?.size) previousObjectUrl = URL.createObjectURL(blob);
+      } catch { /* A missing historical export never becomes a current-video fallback. */ }
+    }
+    if (!current()) return;
+    const local = options.host.getPackage?.();
+    const save = options.host.editorStore?.saveState?.();
+    if (save && !isServerSaved(save)) throw new Error('Save or resolve your editor changes before loading repaired media.');
+    const unchanged = () => current() && options.host.getPackage?.() === local
+      && (!options.host.editorStore?.saveState || isServerSaved(options.host.editorStore.saveState()));
+    // Always compile before adoption; a package GET is not a build response.
+    const compiled = await options.api.compilePackage({ package: pkg, revision: pkg.revision, ...(body.editor ? { editor: body.editor } : {}) });
+    if (!unchanged()) return;
+    if (!compiled?.timeline) throw new Error('The saved project could not be compiled for preview.');
+    const latest = await options.api.getPackage(packageId);
+    if (!unchanged()) return;
+    if ((latest?.package ?? latest)?.revision !== pkg.revision) { invalidateFinal(); throw new Error('The project changed while loading its export. Check status again.'); }
+    options.host.adoptBuiltPackage({ ...body, package: pkg, revision: pkg.revision, timeline: compiled.timeline });
+    if (record?.status === 'running') return;
+    const adopted = options.host.getPackage?.();
+    const existing = finalTarget();
+    if (existing && existing.expectedRevision === pkg.revision && (!record?.lastRenderId || record.lastRenderId === existing.renderId)) return;
+    const artifact = await options.api.getSavedRenderVideo(packageId, pkg.revision).catch(error => {
+      // An unchanged, already-verified legacy run remains current if no edit occurred.
+      if (finalTarget()?.expectedRevision === pkg.revision && !record?.lastRenderId) return null;
+      throw error;
+    });
+    if (!current() || !artifact) return;
+    if (record?.lastRenderId && artifact.exportId !== record.lastRenderId) throw new Error('The current export does not match the repair output.');
+    const after = await options.api.getPackage(packageId);
+    if (!current()) return;
+    const finalSave = options.host.editorStore?.saveState?.();
+    if ((after?.package ?? after)?.revision !== pkg.revision || options.host.getPackage?.() !== adopted
+      || finalSave && !isServerSaved(finalSave)) {
+      invalidateFinal(); throw new Error('The saved project changed before the verified video could be adopted.');
+    }
+    const url = URL.createObjectURL(artifact.blob);
+    snapshot = { finalVideo: { ready: true, status: 'done', url, exportId: artifact.exportId, revision: pkg.revision,
+      target: { packageId, expectedRevision: pkg.revision, renderId: artifact.exportId } } };
+    rememberObjectUrl(snapshot);
+    failure = null; preview = false; phase = 'run';
+    options.store.patch({ exported: { revision: pkg.revision, at: new Date().toISOString() } });
+    patchStatus('done'); publish(); options.onDone?.(snapshot);
   }
 
   function rememberObjectUrl(value: unknown): void {
@@ -696,6 +814,7 @@ export function createSuperEasySession(options: SuperEasySessionOptions): SuperE
       if (!current()) return;
       const url = URL.createObjectURL(blob);
       snapshot = { ...(serverSnapshot as object), finalVideo: { ready: true, status: 'done', runId, url,
+        target: { packageId: state.packageId, expectedRevision: saved ? pkg.revision : run.revision, renderId: saved?.exportId ?? runId },
         ...(saved ? { exportId: saved.exportId, revision: pkg.revision } : {}) } };
       rememberObjectUrl(snapshot);
       preview = false;
@@ -712,6 +831,7 @@ export function createSuperEasySession(options: SuperEasySessionOptions): SuperE
   }
 
   function stop(): void {
+    revokeUrl(previousObjectUrl); previousObjectUrl = null;
     if (status === 'done') {
       cancelWatch();
       revokeObjectUrl();
@@ -732,6 +852,9 @@ export function createSuperEasySession(options: SuperEasySessionOptions): SuperE
   }
 
   return {
+    finalTarget,
+    previousVideo: () => previousObjectUrl,
+    syncRepairedFilm,
     generate,
     retry,
     recoverDownloadedOutputs,

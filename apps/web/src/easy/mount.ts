@@ -42,6 +42,8 @@ import { PROCEDURE_COPY } from './procedure/copy.ts';
 import { createSuperEasyContextAttachments } from './super-easy/context-attachments.ts';
 import { mountCorrectionShutdown } from './correction-shutdown.ts';
 import { readPlanCard } from '../productions/cards/plan-card.ts';
+import { readFilmRepair } from './super-easy/film-review.ts';
+import { openFilmReview } from './super-easy/film-review-view.ts';
 
 import './easy.css';
 import './super-easy/creative-home.css';
@@ -104,6 +106,11 @@ export function mountEasyStudio(root: HTMLElement, baseHost: EasyHost, deps: Eas
   let superEasySession: SuperEasySession | null = null;
   let proposalReturnWaiting = false;
   let proposalSaveNoticeOpen = false;
+  let filmReview: ReturnType<typeof openFilmReview> | null = null;
+  const repairStorage = (() => { try { return doc.defaultView?.localStorage; } catch { return undefined; } })();
+  const repairOwner = () => host.hasToken() && new URLSearchParams(search()).get('demo') !== '1';
+  const savedFilmRepair = () => repairOwner() && store.get().packageId
+    ? readFilmRepair(repairStorage, store.get().packageId!) : null;
   let narrationRecoveryChecked = false;
   let narrationRecoveryReady = false;
   let primaryAction: () => void = () => host.openEditor();
@@ -312,6 +319,7 @@ export function mountEasyStudio(root: HTMLElement, baseHost: EasyHost, deps: Eas
   }
 
   function destroySuperEasy(stopSession = false): void {
+    filmReview?.close();
     superEasyTicket += 1;
     proposalReturnWaiting = false;
     liveGallery.stop();
@@ -514,6 +522,10 @@ export function mountEasyStudio(root: HTMLElement, baseHost: EasyHost, deps: Eas
     if (!productionId) return;
     if (packageId) liveGallery.start(packageId);
     const ticket = ++superEasyTicket;
+    if (savedFilmRepair()) {
+      void ensureSuperEasySession().syncRepairedFilm?.(undefined, () => ticket === superEasyTicket).catch(() => { superEasy?.render(); });
+      return;
+    }
     void api.getProduction(productionId).then((snapshot) => {
       if (ticket !== superEasyTicket) return;
       superEasySnapshot = snapshot;
@@ -661,6 +673,24 @@ export function mountEasyStudio(root: HTMLElement, baseHost: EasyHost, deps: Eas
       },
       onRecoverDownloadedOutputs: () => { void superEasySession?.recoverDownloadedOutputs?.(); },
       onReview: (packageId) => openStudioFromSuperEasy('review', packageId),
+      reviewRepair: () => !repairOwner() ? 'hidden'
+        : savedFilmRepair() || superEasySession?.finalTarget?.() ? 'ready' : 'unavailable',
+      onReviewRepair: () => {
+        if (filmReview || !repairOwner()) return;
+        const packageId = store.get().packageId;
+        if (!packageId) return;
+        const session = ensureSuperEasySession(), generation = store.generation(), ticket = superEasyTicket;
+        let open = true;
+        const current = () => open && ticket === superEasyTicket && store.generation() === generation
+          && store.get().packageId === packageId && superEasySession === session;
+        filmReview = openFilmReview({ doc, packageId, storage: repairStorage, owner: true,
+          fetch: (path, init) => host.apiFetch(path, init), current,
+          target: () => session.finalTarget?.() ?? null, chatId: () => store.get().chatId,
+          previousUrl: () => session.previousVideo?.() ?? null,
+          sync: record => session.syncRepairedFilm!(record, current),
+          onClose: () => { open = false; filmReview = null; },
+        });
+      },
       onExport: (packageId) => openStudioFromSuperEasy('export', packageId),
       stages: (snapshot) => superEasyStages(snapshot),
       gallery: (snapshot) => mergeLiveGallery(buildGalleryModel(snapshot), liveGalleryItems),
@@ -674,6 +704,7 @@ export function mountEasyStudio(root: HTMLElement, baseHost: EasyHost, deps: Eas
       },
     });
     if (store.get().productionId) refreshSuperEasySnapshot();
+    else if (savedFilmRepair()) void ensureSuperEasySession().syncRepairedFilm?.().catch(() => { superEasy?.render(); });
     else if (store.get().proposalCheckpoint) void ensureSuperEasySession().restoreProposal?.();
   }
 

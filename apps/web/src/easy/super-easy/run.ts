@@ -11,6 +11,7 @@ import { formatSuperEasyLrcErrors, validateSuperEasyLrc } from './lyrics.ts';
 import { narrationPending } from '../narration-status.ts';
 import type { MotionModel } from './setup.ts';
 import type { VideoType } from './video-types.ts';
+import { validFilmTarget, type FilmTarget } from './film-review.ts';
 
 const EMPTY_PROMPT = 'Tell us what your video is about first.';
 const GOOGLE_COLAB_CONFIRM_REQUIRED = 'Google Colab needs your confirmation before it can spend anything. Choose This computer, or confirm Google Colab first.';
@@ -62,6 +63,7 @@ export interface SuperEasyApi {
   cancelRun?(id: string): Promise<unknown>;
   getRunVideo(id: string): Promise<Blob>;
   getSavedRenderVideo?(packageId: string, revision: number): Promise<{ blob: Blob; exportId: string }>;
+  getRenderedArtifactVideo?(packageId: string, revision: number, exportId: string): Promise<{ blob: Blob; exportId: string }>;
   generateLocalNarration?(body: { packageId: string; productionId: string; baseRevision: number; recoveryInputs?: unknown }): Promise<any>;
   colabStatus(): Promise<{ backendId?: string } | null>;
   inviteSession?(): Promise<{ role?: string; backendId?: string; budgetUnits?: number }>;
@@ -400,7 +402,7 @@ export async function pollFinalRun(
   }
 }
 
-function snapshotWithFinalVideo(snapshot: unknown, videoUrl: string, runId: string | null): unknown {
+function snapshotWithFinalVideo(snapshot: unknown, videoUrl: string, runId: string | null, target?: FilmTarget): unknown {
   const root = isRecord(snapshot) ? snapshot : {};
   return {
     ...root,
@@ -409,6 +411,7 @@ function snapshotWithFinalVideo(snapshot: unknown, videoUrl: string, runId: stri
       status: 'done',
       url: videoUrl,
       runId,
+      ...(validFilmTarget(target) ? { target } : {}),
     },
   };
 }
@@ -428,11 +431,12 @@ async function finishWithVideo(
     source: SuperEasyFinalArtifact['source'];
     productionId: string;
     draftCommand: DraftLevelCommand;
+    target?: FilmTarget;
   },
   deps: RunSuperEasyDeps,
 ): Promise<SuperEasyRunSuccess> {
   const videoUrl = objectUrlFor(input.blob);
-  const snapshot = snapshotWithFinalVideo(input.snapshot, videoUrl, input.runId);
+  const snapshot = snapshotWithFinalVideo(input.snapshot, videoUrl, input.runId, input.target);
   deps.store.patch({ generate: { status: 'done' } });
   return {
     ok: true,
@@ -797,8 +801,9 @@ export async function runSuperEasy(input: RunSuperEasyInput, deps: RunSuperEasyD
 
   if (hasPaidWork) {
     if (runId === null || runId === '') return failure('RUN_ID_REQUIRED', 'run', RUN_ID_REQUIRED);
+    let completed: Record<string, unknown>;
     try {
-      await pollFinalRun(deps.api, runId, input.run);
+      completed = await pollFinalRun(deps.api, runId, input.run);
     } catch (error) {
       return { ...failure('RUN_FAILED', 'run', messageOf(error, RUN_FAILED)),
         ...(error instanceof TerminalRunError && error.recoveryEligible ? { failedRunId: runId } : {}) };
@@ -810,6 +815,7 @@ export async function runSuperEasy(input: RunSuperEasyInput, deps: RunSuperEasyD
         blob,
         runId,
         source: 'run',
+        target: { packageId: completed.packageId as string, expectedRevision: completed.revision as number, renderId: runId },
         productionId,
         draftCommand: built.command,
       }, deps);
@@ -826,6 +832,7 @@ export async function runSuperEasy(input: RunSuperEasyInput, deps: RunSuperEasyD
       blob: rendered.blob,
       runId: null,
       source: 'local',
+      target: { packageId: deps.store.get().packageId!, expectedRevision: rendered.revision, renderId: rendered.renderId ?? '' },
       productionId,
       draftCommand: built.command,
     }, deps);

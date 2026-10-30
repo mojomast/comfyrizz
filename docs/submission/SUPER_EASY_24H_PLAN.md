@@ -890,7 +890,7 @@ binding. The web client persists artifact identity rather than tokens or expirin
 URLs, resolves fresh authenticated access on reload and verifies the hash.
 
 Report: `/tmp/opencode/easy-colab-acceptance/neon-reexport-receipted/READY.md`.
-Private share: `http://100.72.41.9:8766/neon-after-rain-revised.mp4`; a full GET
+Private share: `http://<TAILNET_HOST>:8766/neon-after-rain-revised.mp4`; a full GET
 matches the receipt/download hash. **91 focused tests**, typecheck and production
 build passed. Full normal-speed browser playback completed and 14 timed frames
 were inspected; this is not continuous human-viewing acceptance. The original
@@ -932,7 +932,7 @@ apply/save, CPU render, Download and fresh-browser status/re-download. New opera
 21**. This is explicit recovery of the failed original production, not a claim
 that its initial collection succeeded.
 
-Private share: `http://100.72.41.9:8766/the-last-signal-credits.mp4`.
+Private share: `http://<TAILNET_HOST>:8766/the-last-signal-credits.mp4`.
 Report: `/tmp/opencode/easy-colab-acceptance/credits-recovered/PARENT-HANDOFF.md`.
 Artifact: **1920×1080, 1,350 video frames at 30 fps, exactly 45.000 video seconds**,
 H.264/AAC stereo 48 kHz, **46,039,159 bytes**, SHA-256
@@ -1086,7 +1086,7 @@ final render receipt passed the production verification functions. Completed
 package is r4; run **run_fc77b08581f2**. UI Download and Tailscale HTTP bytes match:
 **c89d74ef5d59e5de7f6669f1c19f37eeb227eeb63aa635297bd9e9517d42b216**,
 9,529,133 bytes. Private share:
-http://100.72.41.9:8766/character-reference-space-tea.mp4
+http://<TAILNET_HOST>:8766/character-reference-space-tea.mp4
 
 Actual account delta **0.97 credits** (207.96 → 206.99), versus the unchanged
 conservative app settlement 1.821. The three-credit reservation is released;
@@ -1131,7 +1131,7 @@ fresh-browser reopen and reload returned identical bytes:
 Unprompted CPU ASR recognizes both complete lines; sampled final frames show CASE
 CLOSED after the admission. Automated 1× playback ended normally. Human listening
 and lip-sync acceptance remain pending. Review link:
-http://100.72.41.9:8766/the-spoon-files.mp4
+http://<TAILNET_HOST>:8766/the-spoon-files.mp4
 
 Campaign before teaser approval: **8.00 spent / 0 reserved / 52.00 remaining**;
 last fresh balance **205.11**, zero assignments/sessions, 0.00/hour. The unchanged

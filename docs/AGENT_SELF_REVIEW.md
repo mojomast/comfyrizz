@@ -10,6 +10,27 @@ ASR, while transition and other quality findings remain open. The autonomous
 attempt correctly stopped at an existing approval gate; it is not represented as
 an unattended accepted delivery.
 
+## Super Easy integration (2026-10-30)
+
+The finished-video owner flow now exposes a dedicated **Review & repair** panel.
+Read-only inspection uses `POST /api/render-reviews` with exactly
+`{packageId, expectedRevision, renderId}`; it shares the receipt-bound reviewer
+with repair and refuses a package that changes during inspection. It does not
+invoke Pi. The panel shows findings and then requires explicit authorization for
+existing-media source-in repair and CPU re-export, using the durable
+`/api/self-repairs` start/status contract. Hosted invite credentials are denied
+these owner-only routes in both hosted and local modes.
+
+Fresh legacy runs retain their durable completion state, including render errors.
+Pipeline publication retains write-once original render inputs but does not
+create aliases or make `pipe_*` IDs reviewable. Historical runs still require
+their existing original inputs, completion state and trusted byte-bound receipt.
+No historical evidence is manufactured during review.
+
+See [integration decisions and verification](research/COMFY_QUALITY_INTEGRATION.md)
+for the accompanying model-quality work and release checks. This UI integration
+does not change the genuine-film acceptance limitations documented above.
+
 ## Answer to the product question
 
 Yes: the agent should be able to inspect its work and perform authorized,

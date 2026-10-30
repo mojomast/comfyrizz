@@ -271,6 +271,10 @@ export function createEasyApi(fetchImpl: FetchImpl) {
     cancelRun(id: any) {
       return request('POST', `/api/run/${encodeURIComponent(id)}/cancel`, {});
     },
+    async getRenderedArtifactVideo(packageId: string, revision: number, exportId: string): Promise<{ blob: Blob; exportId: string }> {
+      const { loadRenderedArtifact } = await import('./render-artifact-client.ts');
+      return loadRenderedArtifact(fetchImpl, { exportId, packageId, revision });
+    },
     async getSavedRenderVideo(packageId: string, revision: number): Promise<{ blob: Blob; exportId: string }> {
       const saved = await request('GET', `/api/render/artifacts/latest?packageId=${encodeURIComponent(packageId)}`);
       if (saved?.packageId !== packageId || saved?.revision !== revision || saved?.intent !== 'final') {

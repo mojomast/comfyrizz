@@ -94,6 +94,8 @@ export interface SuperEasyMountOptions {
   onReviseNarration?(): void;
   /** Review the playable preview, then export from Studio. */
   onReview?(packageId: string | null): void;
+  reviewRepair?(): 'ready' | 'unavailable' | 'hidden';
+  onReviewRepair?(): void;
   /** Make the MP4 from the playable preview. Falls back to Review. */
   onExport?(packageId: string | null): void;
   /** Gauges and real collected media, when the caller knows more than the journal does. */
@@ -269,6 +271,11 @@ export function mountSuperEasy(options: SuperEasyMountOptions): SuperEasyMountHa
 
   const onClick = (event: Event): void => {
     const closest = closestOf(event.target);
+    if (closest('[data-super-easy-review-repair]')) {
+      event.preventDefault();
+      if (options.reviewRepair?.() === 'ready') options.onReviewRepair?.();
+      return;
+    }
     if (closest('[data-super-easy-font-remove]')) {
       event.preventDefault();
       const status = root.querySelector<HTMLElement>('[data-super-easy-font-status]');
@@ -713,6 +720,7 @@ export function mountSuperEasy(options: SuperEasyMountOptions): SuperEasyMountHa
       packageId: state.packageId,
       search: currentSearch(),
       previewReady: options.previewReady?.() === true,
+      reviewRepair: options.reviewRepair?.() ?? 'hidden',
       ...(failure === null
         ? {}
         : {

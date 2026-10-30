@@ -33,6 +33,7 @@ export interface SuperEasyProgressFailure {
 }
 
 export interface SuperEasyProgressViewOptions {
+  reviewRepair?: 'ready' | 'unavailable' | 'hidden';
   /** Precomputed stage model, so frequent updates do not read the snapshot twice. */
   stages?: StagesProgress;
   /** Precomputed gallery model, built from the same snapshot by the caller. */
@@ -391,7 +392,11 @@ ${gallerySlots.map((slot) => slot.html).join('\n')}
 </div>`;
   const studioHtml = finalReady ? '' : `<div class="super-easy-progress-mode-actions"><button type="button" class="btn btn-secondary" data-super-easy-more-control>${escapeHtml(COPY.done.openStudio)}</button><span class="hint">Switch views without stopping your work.</span></div>`;
   const recoveryHtml = recoveryText ? `<p data-super-easy-recovery-status>${escapeHtml(recoveryText)}</p>${!finalReady && !failure ? '<button type="button" class="btn btn-primary" disabled>Recovering downloaded outputs…</button><p>Uses downloaded files; no new generation credits.</p>' : ''}` : '';
-  const actionsHtml = `${studioHtml}${recoveryHtml}${primaryActionsHtml}${startOverHtml}`;
+  const reviewRepairHtml = options.reviewRepair === 'ready'
+    ? '<button type="button" class="btn btn-secondary" data-super-easy-review-repair>Review &amp; repair</button>'
+    : finalReady && options.reviewRepair === 'unavailable'
+      ? '<p>Review &amp; repair needs a verified final export matching the current saved project.</p>' : '';
+  const actionsHtml = `${studioHtml}${recoveryHtml}${primaryActionsHtml}${reviewRepairHtml}${startOverHtml}`;
 
   const keys: SuperEasyProgressKeys = {
     live: recoveryText + progressLiveKey(stages, gallery, {
@@ -400,7 +405,7 @@ ${gallerySlots.map((slot) => slot.html).join('\n')}
     }),
     chrome: chromeKeyOf(stages, finalReady),
     gallery: galleryKeyOf(gallery),
-    actions: recoveryText + actionsKeyOf(finalReady, gallery, previewReady, failure, options),
+    actions: (options.reviewRepair ?? 'hidden') + recoveryText + actionsKeyOf(finalReady, gallery, previewReady, failure, options),
   };
 
   const html = `<section class="${rootClasses.join(' ')}"${reducedAttribute} data-super-easy-progress data-super-easy-live-key="${escapeHtml(keys.live)}" data-super-easy-chrome-key="${escapeHtml(keys.chrome)}" data-super-easy-gallery-key="${escapeHtml(keys.gallery)}" data-super-easy-actions-key="${escapeHtml(keys.actions)}" aria-labelledby="super-easy-progress-title">
