@@ -174,3 +174,11 @@ Licences are listed only where the repository states them.
   review before shipping a distribution that includes those dependencies.
 - Model output rights are separate from model-weight licences; see
   `docs/SPEC.md` §6.10 and §8.2 for the export policy.
+
+## 9. Adapted prompt guidance
+
+- **Kara** (DashDashDesign/Kara) — the caption and edit prompt rules in
+  `packages/agent/src/prompts/model-quality.ts` are adapted from Kara's
+  prompt-writing guidance (text adapted, not code copied). MIT licence,
+  Copyright (c) 2026 Greg Stern. Source:
+  https://github.com/DashDashDesign/Kara
