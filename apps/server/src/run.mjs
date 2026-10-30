@@ -7,6 +7,7 @@
 // C9: the plan -> up -> health -> run -> collect -> apply -> teardown middle is H8's
 // `backend.runPackage`; this controller only owns the spend gate, the plan hash, the
 // one-run lock and the record. It never branches on the provider.
+import { spawn } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { mkdirSync, mkdtempSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
@@ -17,8 +18,20 @@ import { createProductionAdmission } from './productions/admission.mjs';
 import { fingerprint } from './pipeline-contract.mjs';
 import { fingerprintJobFiles } from '../../../packages/backends/src/approved-files.mjs';
 import { createPiRefReviewer } from './ref-watch/pi-reviewer.mjs';
+import { createKeyframeReviewer, createLastFrameExtractor } from './ref-watch/last-frame.mjs';
 
 const REF_WATCH_MODEL = 'deepseek-v4.1-flash';
+
+function runFfmpegArgs(args) {
+  return new Promise((resolve, reject) => {
+    const child = spawn('ffmpeg', args, { stdio: 'ignore' });
+    child.once('error', reject);
+    child.once('close', (code) => {
+      if (code === 0) resolve();
+      else reject(new Error(`ffmpeg exited with code ${code}`));
+    });
+  });
+}
 
 function refWatchRequested(value, env) {
   if (value === true || value === '1' || value === 'true') return true;
@@ -30,9 +43,12 @@ function defaultRefWatchLoadImage(imagePath) {
   return { path: imagePath, mediaType: 'image/png' };
 }
 
-function createRefWatchGate({ refWatch = false, env = process.env } = {}) {
+export function createRefWatchGate({ refWatch = false, env = process.env } = {}) {
   if (!refWatchRequested(refWatch, env)) return null;
   const config = refWatch !== null && typeof refWatch === 'object' ? refWatch : {};
+  const injectedExtractLastFrame = typeof config.extractLastFrame === 'function' ? config.extractLastFrame : null;
+  const injectedReviewKeyframe = typeof config.reviewKeyframe === 'function' ? config.reviewKeyframe : null;
+  const runFfmpeg = typeof config.runFfmpeg === 'function' ? config.runFfmpeg : runFfmpegArgs;
   let production = null;
   const productionDeps = () => {
     if (!production) {
@@ -64,8 +80,15 @@ function createRefWatchGate({ refWatch = false, env = process.env } = {}) {
   const reviewer = config.reviewer ?? createPiRefReviewer({ reviewStill, model, loadImage });
   const gate = async (context = {}) => {
     const { createRefWatchController } = await import('./ref-watch/controller.mjs');
+    const extractLastFrame = injectedExtractLastFrame ?? createLastFrameExtractor({
+      runFfmpeg,
+      outDir: join(context.receiptsDir ?? '.', 'chain-frames'),
+    });
+    const reviewKeyframe = injectedReviewKeyframe ?? createKeyframeReviewer({ reviewer });
     return createRefWatchController({
       ...config,
+      extractLastFrame,
+      reviewKeyframe,
       jobsDoc: context.jobsDoc,
       onEvent: context.onEvent,
       submitJobs: context.submitJobs,
