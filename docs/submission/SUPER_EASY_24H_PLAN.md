@@ -2,6 +2,12 @@
 
 Decision date: 2026-10-29. This supersedes the repeated original-Pérez retry strategy, not the original campaign evidence. New simplified briefs are separate experiments, never claimed as completions of the original films.
 
+**Latest production-lane outcome (2026-10-30):** the speaking teaser completed
+generation/export but failed exact-monologue and sampled visual review. Its
+reservation is settled and owned browser/server closed. Campaign: **9.99 spent /
+0 reserved / 50.01 remaining**. See [terminal review and assessment-only next
+action](#2026-10-30-speaking-teaser-terminal-review--closed-not-accepted).
+
 ## Submission objective
 
 Deliver a small set of attractive, reproducible, end-to-end Super Easy films. A mode is not submission-ready merely because its package validates or a CPU test renders. Count a success only after proposal, review, approval, production, export, **Download**, and playback. Record the actual limits of the demonstration.
@@ -1147,6 +1153,99 @@ All scene windows, exact dialogue and conditioning bytes are preserved. Super Ea
 re-reviewed r61 and quoted **5.42 credits** for five Klein images plus eleven H3
 clips. Production `prod_1a4cc5f43ee161269f222c5e` received its atomic **9-credit**
 reservation at fresh balance 205.11, zero sessions, before approval was released.
-Campaign is **8.00 spent / 9 reserved / 43.00 remaining** at that boundary. Runtime:
-`/home/mojo/comfyrizz-gallery-tests/speaking-teaser-reviewed-3e9e609/`. Generation,
-actual native-speech inspection, final delivery and settlement are pending.
+Campaign was **8.00 spent / 9 reserved / 43.00 remaining** at that boundary. Runtime:
+`/home/mojo/comfyrizz-gallery-tests/speaking-teaser-reviewed-3e9e609/`. The terminal
+review below supersedes the pending generation/delivery/settlement status.
+
+## 2026-10-30 speaking teaser terminal review — closed, not accepted
+
+Frozen `3e9e609`, package `pkg_cd5718a31d8fe41f`, production
+`prod_1a4cc5f43ee161269f222c5e`, terminal run **`run_80f94fc29fbf`**. All 16
+generation jobs succeeded; run `done`, production action `completed`, teardown
+`stopped` with watchdog disarmed. Technical render/model receipts pass.
+
+**Actual spend 1.99 credits; balance 205.11 → 203.12.** The existing 9-credit
+reservation was settled through the root ledger helper against
+`/home/mojo/comfyrizz-gallery-tests/video-type-collection-20261028/budget-ledger.json`.
+Campaign is now **9.99 spent / 0 reserved / 50.01 remaining**. Fresh settlement
+CLI evidence reports zero active assignments, no sessions and 0.00/hour. CPU-only
+review/reload/cleanup initiated no further paid work; no paid retry occurred.
+
+Normal Download and subsequent reload/Download returned the same **32,943,736
+bytes**, **45 seconds / 1,350 frames / 1920×1080 / 30 fps**, with audio. Original
+`speaking-terminal-download.mp4` and `delivery-reloaded-download.mp4` both hash to:
+`3101eb6973267361803d92e9dca068d4872d98ef391af96a623b9fca9419905b`.
+
+### Failed exact-monologue and sampled visual review
+
+Offline, unprompted CPU Whisper used existing caches (`HF_HUB_OFFLINE=1`), first
+through `transcribe-live-film.py` on the actual final and nine original source
+clips, then on in-memory final-audio shot windows. Render/preflight dialogue
+matches the exact preserved brief. Eight of nine final dialogue windows are
+incomplete or different; only “Yesterday, the signal went silent” fully matches
+normalized final-window ASR. Word spellings/boundaries remain preliminary ASR
+evidence, not human listening or lip-sync certification.
+
+| Shot | Final duration | Source speech interval | Final review finding |
+|---|---:|---:|---|
+| Intro | 5.033s | 3.920–7.360s | Only “Every night”; remainder absent |
+| Name | 4.033s | 0.820–4.220s | “name” clipped; ASR also reads “it's” |
+| Trick | 4.033s | 5.170–7.370s | Whole line begins after retained source window |
+| Storm | 4.200s | 2.540–8.660s | Unwanted spoken “Mara Vale”; requested storm line absent |
+| Notes | 5.900s | 1.100–8.200s | Loses “the voices, the places nobody should have known” |
+| Signal silent | 3.700s | 0.270–2.310s | Complete requested line recognized |
+| Slept | 3.700s | 4.720–6.640s | Whole line begins after retained source window |
+| Switched | 4.000s | 0.240–7.500s | Missing “the radio switched itself on”; source repeats opening phrase |
+| Like me | 4.967s | 0.110–7.230s | Missing “sounded exactly like me” |
+
+Final/source PCM correlations **0.996992–0.999956 at 1× speed**, offsets within
+0.5 ms, support source-prefix truncation at planned cuts. Measured conditioning
+WAV duration did not predict actual H3 speech onset/pauses/end. Plate metadata
+lists 1.25 retime values, but measured final audio corresponds to 1×; metadata
+alone does not establish audible acceleration. The unwanted spoken name and
+repeated phrase are source-performance concerns beyond simple timing fit.
+
+One midpoint frame per final shot shows the requested radio-room imagery and
+face-visible samples, but the MARA VALE label sits on the forehead rather than
+as a lower-third; a headset-like microphone appears in the closing tight shot.
+These samples cannot establish continuous mouth visibility, motion quality or
+identity continuity. **No accepted publication or teaser share link. User human
+acceptance is unknown**; full-speed listening, audiovisual lip-sync, continuity,
+overlay and pacing acceptance remain outstanding.
+
+### Evidence preservation and cleanup
+
+All paths below are under
+`/home/mojo/comfyrizz-gallery-tests/speaking-teaser-reviewed-3e9e609/evidence/`:
+
+- `delivery-preliminary-review.md`, `delivery-speech-timing-review.json`:
+  findings, exact word differences, source/final windows and PCM correlations.
+- `delivery-final-asr.json`, `delivery-source-*-asr.json`,
+  `delivery-final-window-asr.json`: final/source and per-window recognition.
+- `delivery-final-contact-sheet.jpg` and `.json`: local samples and timestamps.
+- `delivery-reloaded-byte-identity.json`: identical original/reload bytes.
+- `terminal-verifier-failure.log`: preserved original helper crash from assuming
+  dialogue on a non-dialogue title shot. `terminal-supplemental-verification.json`
+  records passing media/provenance checks, not speech/content acceptance.
+- `speaking-terminal-settlement.json`, `speaking-terminal-settlement-usage.txt`,
+  `speaking-terminal-settlement-sessions.txt`: actual spend and zero-use checks.
+- `closed.json`, `delivery-cleanup-verification.json`: documented root `stop`
+  closed the browser/controller and server with exit code 0; PID 1248850 is gone
+  and port 4670 is closed. Only copied `runtime/provider-settings.json` and
+  `runtime/server-token` were removed by the controller; no matching credentials
+  remain in checked frozen runtime/app locations. Original/reload hashes were
+  rechecked after cleanup; failed artifacts, source media and review evidence
+  remain preserved. Cleanup started no account activity, so existing zero-use
+  CLI evidence was retained without another query.
+
+### Next action — source-aware feasibility assessment only
+
+Assess whether existing source words, pauses and clean in/out ranges can satisfy
+the unchanged exact monologue, natural speed, face-visible coverage, listening
+reaction, native overlays and **45-second** total. Distinguish feasible timing
+changes from source-performance defects and visual continuity/layout problems;
+do not infer that every failure can be repaired with source-in offsets. Record
+the assessment and remaining human-review needs before any proposed intervention.
+**No actual trims, regeneration, re-render or paid retry in this next action.**
+Pi self-repair development continues separately; this production-lane handoff
+does not merge or modify the active self-review worktree.

@@ -4,6 +4,50 @@
 
 Updated 2026-10-27 on `feat/hackathon-submission` / draft PR #53.
 
+## 2026-10-30 speaking teaser — production closed, delivery failed review
+
+- **Terminal production:** `run_80f94fc29fbf`, production
+  `prod_1a4cc5f43ee161269f222c5e`, package `pkg_cd5718a31d8fe41f`, frozen
+  `3e9e609`. All 16 jobs succeeded; run `done`, production action `completed`,
+  teardown `stopped`, watchdog disarmed. This is technical completion, not
+  exact-monologue or audiovisual acceptance.
+- **Settled actual spend: 1.99 credits**, account **205.11 → 203.12**. The
+  9-credit reservation is released; campaign **9.99 spent / 0 reserved / 50.01
+  remaining**. Settlement CLI evidence confirms zero assignments, no sessions
+  and 0.00/hour. Review and cleanup initiated no further paid work.
+- **Original and reload Download match:** both are 32,943,736 bytes, 45 seconds,
+  1,350 frames, 1920×1080/30 fps with audio and verified generation/render
+  receipts. SHA-256:
+  `3101eb6973267361803d92e9dca068d4872d98ef391af96a623b9fca9419905b`.
+- **Failed content review:** cached, offline CPU ASR of final/source shot windows
+  finds eight of nine dialogue windows incomplete or different. Actual generated
+  speech starts late or extends beyond planned cuts; the entire trick and slept
+  lines are outside their retained windows. Source ASR also detects an unwanted
+  spoken “Mara Vale” and repeated “But a minute ago”. Final/source PCM matches at
+  1× speed; conditioning duration alone did not establish generated speech fit.
+  Sampled frames show the MARA VALE label on the forehead rather than as a
+  lower-third, plus a headset-like microphone appearing in the closing close-up.
+  **No accepted publication**; user human acceptance is unknown and lip-sync is
+  not certified.
+- **Cleanup complete:** documented root `stop` closed the browser/controller and
+  owned server with exit code 0. Server PID 1248850 is gone, port 4670 is closed,
+  and copied runtime credentials were removed; none remain in the checked frozen
+  runtime/app credential locations. Original/reload MP4s, source media, failed
+  verifier output and review evidence are preserved.
+- Evidence root:
+  `/home/mojo/comfyrizz-gallery-tests/speaking-teaser-reviewed-3e9e609/evidence/`.
+  See `delivery-preliminary-review.md`, `delivery-speech-timing-review.json`,
+  `delivery-final-asr.json`, `delivery-source-*-asr.json`,
+  `delivery-final-window-asr.json`, `delivery-final-contact-sheet.jpg`,
+  `delivery-reloaded-byte-identity.json`, `speaking-terminal-settlement.json`,
+  `closed.json` and `delivery-cleanup-verification.json`. Failed artifacts:
+  `speaking-terminal-download.mp4` and `delivery-reloaded-download.mp4`.
+- **Next action: source-aware feasibility assessment only.** Determine whether
+  the existing source speech, pauses, exact 45-second total, face-visible coverage
+  and native overlays can satisfy the unchanged brief. Record infeasible lines
+  and source-performance defects separately. No actual trims, regeneration or
+  paid retry; active Pi self-repair development remains a separate worktree/lane.
+
 ## 2026-10-30 character-reference delivery
 
 - **Delivered via Super Easy:** user-supplied character photo → Klein reference
@@ -175,6 +219,9 @@ The proposal and model choice make the first result intentional; live assets mak
 generation visible; Advanced mode preserves control. Do not claim completion on
 the basis of fixtures, a successful video encode, or the earlier external film.
 # 2026-10-30 — reload repair and Spoon pre-approval review
+
+Historical approval/progress entries below are preserved. The terminal teaser
+review above supersedes their pending-production and reservation status.
 
 - **Speaking teaser approved and running:** normal full-plan controls saved r61 in isolated `speaking-teaser-reviewed-3e9e609` (frozen `3e9e609`), then Super Easy re-reviewed the revision. All eleven H3 shots now share `a_img_70b7d3645507e649` as their identity image; shot 6's composition image and direction show face/mouth while speaking. Scene timing/copy and every conditioning asset remain byte-for-byte unchanged. Deterministic preflight verifies all exact monologue words in order, only opening/final THE LAST SIGNAL and one MARA VALE overlay, no music/detached narration, and 1,350 frames at 30 fps. The final whole-film plan is **16 jobs: five Klein images and eleven H3 clips**, one candidate per shot, quote **5.42**. Fresh CLI confirmed 205.11 credits and no sessions; the campaign atomically reserved **9 credits** before releasing approval for `prod_1a4cc5f43ee161269f222c5e`. Campaign at reservation: **8.00 spent / 9 reserved / 43.00 remaining**. Actual generated speech/visuals, completed export and shutdown/settlement remain pending. Evidence: `/home/mojo/comfyrizz-gallery-tests/speaking-teaser-reviewed-3e9e609/evidence/`.
 
