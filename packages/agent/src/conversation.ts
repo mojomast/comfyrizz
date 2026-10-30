@@ -662,7 +662,7 @@ export async function runConversationTurn(options: {
   await runPiRuntime({ model: options.model, signal: options.signal, sessionId: options.sessionId,
     prepare: step => {
     trace.steps = step;
-    options.onEvent?.({ type: 'step', step, maxSteps: 6 });
+    options.onEvent?.({ type: 'step', step, maxSteps: Number(process.env.SUBMISSION_DEMO_CHAT_STEPS || 6) });
     modelStarted = Date.now();
     usageBefore = { ...trace.usage };
     text = ''; reasoning = undefined; calls = [];
@@ -814,7 +814,7 @@ export async function runConversationTurn(options: {
     },
     // Give the model one final turn after a successful build so its reply can
     // summarise what changed, rather than returning a canned message here.
-    afterTurn: () => trace.steps < 6,
+    afterTurn: () => trace.steps < Number(process.env.SUBMISSION_DEMO_CHAT_STEPS || 6),
   });
   if (completed) return completed;
   if (built) return finish(buildSummary(), 'built-summary');
