@@ -6,6 +6,29 @@ Updated 2026-10-27 on `feat/hackathon-submission` / draft PR #53.
 
 ## 2026-10-30 Super Easy landing refresh
 
+- **CPU-to-Colab recovery follow-up (`4c31807`, `c0cd83d`):** an unapproved
+  CPU-blocked proposal with no dispatched actions can now recover as review on
+  reload. Confirmed setup switches execution mode without rebuilding the
+  creative package; the existing production receives a fresh execution quote
+  pinned to the reviewed package revision. Retry opens Colab setup for compute
+  blockers, and Make this film offers it before reaching the same blocker.
+  Saving setup waits for an in-flight connection check. Changed inputs, unsaved
+  edits and revision races refuse package reuse.
+- The user's saved **Checkmate at the Golden Arches**, `pkg_31c81c0ed085b529`
+  revision **59**, remained byte-identical. Colab was already signed in; explicit
+  Hugging Face access checks verified Klein, LTX and H3. The account reported
+  **200.28 credits and 0.00/hour** at inspection; this is an account observation,
+  not a revision to the historical campaign ledger.
+- Recovery verification: **109 focused tests passed**, plus a Chromium reload →
+  restored proposal → Colab setup → cap confirmation → execution-quote-boundary
+  test. A separate isolated-browser smoke used the genuine saved server package
+  and live deployed UI, with synthetic persisted failure state. It restored
+  revision 59 and sent `compute: colab, expectedPackageRevision: 59` to the
+  existing production's quote endpoint. That request was intercepted; no quote,
+  approval, generation or planning mutation was submitted. Evidence:
+  `/tmp/opencode/super-easy-colab-recovery/`. The UI was published without a
+  server restart; the user's per-tab compute selection still requires the normal
+  setup/cap confirmation, rather than a claimed remote browser-state edit.
 - UI commit `51fbc33` adds the new responsive prompt-first landing, quieter
   optional references and fine-tuning, and a native video-type disclosure that
   starts collapsed and displays the selected type. Keyboard selection preserves
