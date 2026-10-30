@@ -1,0 +1,100 @@
+{
+  "1": {
+    "class_type": "UNETLoader",
+    "inputs": {
+      "unet_name": "flux-3-image-klein-bf16.safetensors",
+      "weight_dtype": "default"
+    }
+  },
+  "2": {
+    "class_type": "CLIPLoader",
+    "inputs": {
+      "clip_name": "qwen3vl_4b_bf16.safetensors",
+      "type": "flux3",
+      "device": "default"
+    }
+  },
+  "3": {
+    "class_type": "VAELoader",
+    "inputs": {
+      "vae_name": "flux2-vae.safetensors"
+    }
+  },
+  "4": {
+    "class_type": "CLIPTextEncode",
+    "inputs": {
+      "clip": [
+        "2",
+        0
+      ],
+      "text": "A young woman in her early twenties, lighthouse keeper Mira, wearing a bright yellow waterproof raincoat with hood down, wet dark hair plastered to her face, fair skin with wind-chapped cheeks, determined calm expression. She stands in the curved stone stairwell of a lighthouse tower, warm golden-hour sunlight streaming through narrow windows, illuminating dust motes and the wet stone walls. Cinematic painterly photorealism, natural light, real-world textures. palette #1a1a1a, #3d2b1f, #ffb800, #ffffff; wide 16:9 composition; full-bleed scene; no text, no letters, no words, no logos, no watermarks, no UI chrome."
+    }
+  },
+  "5": {
+    "class_type": "ConditioningZeroOut",
+    "inputs": {
+      "conditioning": [
+        "4",
+        0
+      ]
+    }
+  },
+  "7": {
+    "class_type": "KSampler",
+    "inputs": {
+      "model": [
+        "1",
+        0
+      ],
+      "positive": [
+        "4",
+        0
+      ],
+      "negative": [
+        "5",
+        0
+      ],
+      "latent_image": [
+        "6",
+        0
+      ],
+      "seed": 12345,
+      "steps": 16,
+      "cfg": 1.0,
+      "sampler_name": "euler",
+      "scheduler": "simple",
+      "denoise": 1.0
+    }
+  },
+  "8": {
+    "class_type": "VAEDecode",
+    "inputs": {
+      "samples": [
+        "7",
+        0
+      ],
+      "vae": [
+        "3",
+        0
+      ]
+    }
+  },
+  "9": {
+    "class_type": "SaveImage",
+    "inputs": {
+      "images": [
+        "8",
+        0
+      ],
+      "filename_prefix": "klein_t2i"
+    }
+  },
+  "6": {
+    "class_type": "EmptyFlux2LatentImage",
+    "inputs": {
+      "width": 1920,
+      "height": 1088,
+      "batch_size": 1
+    }
+  }
+}

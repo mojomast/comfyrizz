@@ -1,0 +1,1 @@
+./run.sh 'const t=await page.innerText("body"); const ts=Date.now(); await page.screenshot({path:`/workspace/submission-demo/assets/ui-stills/${ts}.png`}); return ts+" "+t.replace(/\n+/g," | ").slice(0,'${1:-900}')' 60

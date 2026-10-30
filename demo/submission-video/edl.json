@@ -1,0 +1,52 @@
+[
+ {
+  "seg": "01_title",
+  "dur": 7,
+  "vo": "vo01"
+ },
+ {
+  "seg": "02_prompt",
+  "dur": 13,
+  "vo": "vo02"
+ },
+ {
+  "seg": "03_proposal",
+  "dur": 12,
+  "vo": "vo03"
+ },
+ {
+  "seg": "04_gallery",
+  "dur": 18,
+  "vo": "vo04"
+ },
+ {
+  "seg": "05_result",
+  "dur": 6,
+  "vo": "vo05"
+ },
+ {
+  "seg": "06_film",
+  "dur": 12,
+  "vo": null
+ },
+ {
+  "seg": "07_chat",
+  "dur": 15,
+  "vo": "vo06"
+ },
+ {
+  "seg": "08_regen",
+  "dur": 18,
+  "vo": "vo07"
+ },
+ {
+  "seg": "09_split",
+  "dur": 6,
+  "vo": "vo08"
+ },
+ {
+  "seg": "10_end",
+  "dur": 6,
+  "vo": "vo09"
+ }
+]
