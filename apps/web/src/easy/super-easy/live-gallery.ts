@@ -1,4 +1,5 @@
 import { activeReviewTake, type ClipsResponse, type TakesApi, type TakesResponse } from '../../takes/api.ts';
+import { readGalleryAssetDetails } from './gallery-asset.ts';
 import type { GalleryItem, GalleryModel } from './gallery-model.ts';
 
 interface LiveGalleryOptions {
@@ -8,6 +9,8 @@ interface LiveGalleryOptions {
   pollMs?: number;
   setTimer?: typeof setInterval;
   clearTimer?: typeof clearInterval;
+  /** Saved package, for exact prompt/model/media metadata on each preview. */
+  package?: () => Record<string, any> | null;
 }
 
 export interface LiveGalleryController {
@@ -17,7 +20,9 @@ export interface LiveGalleryController {
 }
 
 function readyState(state: string): boolean {
-  return state === 'review' || state === 'approved';
+  // A stale take is still a real take with bytes. Reopening a project after a
+  // reference change must show its media; the stale label stays in details.
+  return state === 'review' || state === 'approved' || state === 'stale';
 }
 
 function labelFor(sceneId: string, index: number): string {
@@ -67,17 +72,36 @@ export function createLiveAssetGallery(options: LiveGalleryOptions): LiveGallery
   let packageId: string | null = null;
   let flight: Promise<void> | null = null;
 
-  async function mediaFor(packageIdValue: string, clip: ClipsResponse['clips'][number]): Promise<{ url: string | null; takeState: string }> {
+  function detailsFor(assetId: string, role: 'reference' | 'generated', state: string, take?: any) {
+    if (!options.package) return undefined;
+    const pkg = options.package();
+    const asset = pkg?.assets?.[assetId];
+    const gen = (asset?.gen ?? take?.gen ?? {}) as Record<string, any>;
+    const inputs = (gen.inputs ?? {}) as Record<string, any>;
+    const media = (asset?.media ?? take?.media ?? {}) as Record<string, any>;
+    const frames = Number(media.frames ?? inputs.frames);
+    const fps = Number(media.fps ?? inputs.fps);
+    return readGalleryAssetDetails({
+      assetId, role, mediaType: asset?.kind ?? take?.kind,
+      status: asset?.status ?? state,
+      prompt: inputs.prompt, model: gen.model, workflow: gen.workflow,
+      width: media.width ?? inputs.width, height: media.height ?? inputs.height,
+      durationSeconds: Number.isFinite(frames) && Number.isFinite(fps) && fps > 0 ? frames / fps : undefined,
+      seed: inputs.seed,
+    });
+  }
+
+  async function mediaFor(packageIdValue: string, clip: ClipsResponse['clips'][number]): Promise<{ url: string | null; takeState: string; take?: any }> {
     if (!readyState(clip.state)) return { url: null, takeState: clip.state };
     const detail: TakesResponse = await options.api.getTakes(packageIdValue, clip.clipId);
     const take = activeReviewTake(detail.takes, detail.selected ?? clip.selected);
     if (!take) return { url: null, takeState: 'generating' };
     const cached = ticketCache.get(take.takeId);
-    if (cached && cached.expiresAt > Date.now() + 60_000) return { url: cached.url, takeState: 'ready' };
+    if (cached && cached.expiresAt > Date.now() + 60_000) return { url: cached.url, takeState: clip.state === 'stale' ? 'stale' : 'ready', take };
     const ticket = await options.api.takeTicket(packageIdValue, clip.clipId, take.takeId);
     const expiresAt = ticket.expiresAt ? Date.parse(ticket.expiresAt) : Date.now() + 10 * 60_000;
     ticketCache.set(take.takeId, { url: ticket.url, expiresAt });
-    return { url: ticket.url, takeState: 'ready' };
+    return { url: ticket.url, takeState: clip.state === 'stale' ? 'stale' : 'ready', take };
   }
 
   async function referenceFor(packageIdValue: string, reference: NonNullable<ClipsResponse['references']>[number], index: number): Promise<GalleryItem> {
@@ -89,14 +113,15 @@ export function createLiveAssetGallery(options: LiveGalleryOptions): LiveGallery
       index,
     };
     try {
+      const details = detailsFor(reference.assetId, 'reference', 'ready');
       const cached = ticketCache.get(reference.takeId);
       if (cached && cached.expiresAt > Date.now() + 60_000) {
-        return { ...base, state: 'ready', url: cached.url, reason: null };
+        return { ...base, state: 'ready', url: cached.url, reason: null, ...(details ? { details } : {}) };
       }
       const ticket = await options.api.takeTicket(packageIdValue, reference.assetId, reference.takeId);
       const expiresAt = ticket.expiresAt ? Date.parse(ticket.expiresAt) : Date.now() + 10 * 60_000;
       ticketCache.set(reference.takeId, { url: ticket.url, expiresAt });
-      return { ...base, state: 'ready', url: ticket.url, reason: null };
+      return { ...base, state: 'ready', url: ticket.url, reason: null, ...(details ? { details } : {}) };
     } catch {
       return { ...base, state: 'loading', url: null, reason: null };
     }
@@ -121,11 +146,13 @@ export function createLiveAssetGallery(options: LiveGalleryOptions): LiveGallery
         }
         try {
           const media = await mediaFor(id, clip);
+          const details = media.url ? detailsFor(clip.assetId, 'generated', media.takeState, media.take) : undefined;
           return {
             ...base,
             state: media.url ? 'ready' : 'loading',
             url: media.url,
             reason: null,
+            ...(details ? { details } : {}),
           };
         } catch {
           // A state can advance between listClips and getTakes. Keep the card
