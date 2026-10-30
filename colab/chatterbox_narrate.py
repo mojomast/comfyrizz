@@ -14,6 +14,7 @@ Multilingual weights are MIT (Resemble AI). No GPL/AGPL/LGPL node pack is used.
 from __future__ import annotations
 
 import argparse
+import re
 from collections.abc import Mapping
 import functools
 import importlib
@@ -204,8 +205,14 @@ def _helper_transcript(helper, path: Path, language: str) -> str:
     return str(value)
 
 
+def asr_language(language: str) -> str:
+    """qwen-asr takes a bare language name: the graph's "English (en)" becomes "English"."""
+    return re.sub(r"\s*\([a-z]{2}\)\s*$", "", str(language or "")).strip() or "English"
+
+
 def transcribe(path, *, asr_python=None, language: str = DEFAULT_LANGUAGE) -> str:
     """Transcribe a take in the separate qwen-asr environment."""
+    language = asr_language(language)
     helper = _qa_qwen_transcriber()
     if helper is not None:
         return _helper_transcript(helper, Path(path), language)

@@ -215,3 +215,10 @@ def test_a_line_with_no_usable_take_flags_the_run_but_still_writes_audio(tmp_pat
     assert [take["status"] for take in take_report["takes"]] == ["rejected", "rejected", "rejected"]
     assert result["exitCode"] == 1
     assert (out / "audio" / "s_only.wav").is_file()
+
+
+def test_asr_language_strips_the_graph_code():
+    import chatterbox_narrate as cn
+    assert cn.asr_language("English (en)") == "English"
+    assert cn.asr_language("French (fr)") == "French"
+    assert cn.asr_language("") == "English"
