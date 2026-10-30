@@ -129,6 +129,9 @@ importers:
       '@comfyrizz/llm':
         specifier: workspace:*
         version: link:../llm
+      '@comfyrizz/schema':
+        specifier: workspace:*
+        version: link:../schema
       '@types/node':
         specifier: 22.10.2
         version: 22.10.2
