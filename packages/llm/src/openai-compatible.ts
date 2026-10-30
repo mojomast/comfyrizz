@@ -1,3 +1,4 @@
+import { readFileSync } from 'node:fs';
 import type { ChatChunk, ChatMessage, ChatModel, ChatRequest, ResolvedProvider, ToolDef } from './types.js';
 
 export interface ModelConfig extends ResolvedProvider {
@@ -33,6 +34,17 @@ function wireMessages(system: string, messages: ChatMessage[]): WireMessage[] {
       });
     } else if (message.role === 'tool') {
       wire.push({ role: 'tool', tool_call_id: message.tool_call_id, content: message.content });
+    } else if (message.role === 'user' && message.images?.length) {
+      wire.push({
+        role: 'user',
+        content: [
+          { type: 'text', text: message.content },
+          ...message.images.map(image => ({
+            type: 'image_url',
+            image_url: { url: `data:${image.mediaType ?? 'image/png'};base64,${readFileSync(image.path).toString('base64')}` },
+          })),
+        ],
+      });
     } else {
       wire.push({ role: message.role, content: message.content });
     }

@@ -1,0 +1,1 @@
+{"schema":"comfyrizz.ref-review.verdict/v1","jobId":"still_s03","keyframeSha256":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","reviewer":"pi","overall":"pass","checks":[{"dimension":"identity","pass":false,"severity":"hard","evidence":"hair is black"}],"fixHints":[]}

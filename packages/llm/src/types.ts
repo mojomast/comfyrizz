@@ -11,8 +11,15 @@ export interface ToolCall {
   args: unknown;
 }
 
+export interface ImagePart {
+  path: string;
+  mediaType?: 'image/png';
+}
+
 export type ChatMessage =
-  | { role: 'system' | 'user'; content: string }
+  | { role: 'system'; content: string }
+  /** `images` are local PNG paths; the transport sends them as base64 `image_url` parts. */
+  | { role: 'user'; content: string; images?: ImagePart[] }
   | { role: 'assistant'; content?: string | null; tool_calls?: ToolCall[]; reasoning_content?: string }
   | { role: 'tool'; content: string; tool_call_id: string };
 

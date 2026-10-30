@@ -12,17 +12,56 @@
 // So the planner appends the guards itself instead of trusting every caller to remember them, and
 // records each one in `warnings[]` so the jobs.json says exactly what the model is asked for.
 
-/** The negative every generated still/plate gets unless the asset opts into text. */
-export const TEXT_GUARD = "no text, no letters, no words, no logos, no watermarks";
+/**
+ * The positive end-state guard every generated still/plate gets unless the asset opts into text.
+ *
+ * FLUX 3 Image Klein is distilled (cfg 1) and has no negative lever, so "no text, no letters" tends
+ * to summon text; the guard names the surfaces and imagery we do want instead.
+ */
+export const TEXT_GUARD = "clean unmarked surfaces, plain untextured backgrounds, blank signage, imagery made only of shapes, colour and light";
 
-/** A prompt that already says it wants no text is left alone (no double negative). */
-export const TEXT_GUARD_SATISFIED = /\bno\s+(text|letters?|lettering|words?|logos?|watermarks?)\b/i;
+/** A prompt that already carries this guard, or the older "no text" phrasing, is left alone. */
+export const TEXT_GUARD_SATISFIED = /clean unmarked surfaces, plain untextured backgrounds, blank signage, imagery made only of shapes, colour and light|\bno\s+(text|letters?|lettering|words?|logos?|watermarks?)\b/i;
 
 /** Motion defaults per plate flavour: seamless loops for t2v, a still camera for image-to-video. */
 export const MOTION_GUARD = {
   t2v: "slow continuous motion, static camera, seamless, no cuts",
   i2v: "static camera, gentle motion, no cuts",
 };
+
+/**
+ * Stage-2 refinement schedules for the two-stage LTX-2.5 graphs.
+ *
+ * `template` is the Comfy-Org built-in `video_ltx2_5_t2v` stage-2 ManualSigmas value, also used
+ * by the open graphs (leafreel, openfield): `0.85, 0.7250, 0.4219, 0.0`.
+ * `lightricks` is the opt-in A/B from the Lightricks advanced Two Stage Distilled example:
+ * `0.909375, 0.725, 0.421875, 0.0`. Both are distilled routes, not the full/dev + distilled-LoRA
+ * route; the stage-2 rounding differs, so this is an experiment rather than a replacement
+ * (docs/research/COMFY_LTX_QUALITY.md, section 2).
+ */
+export const STAGE2_SIGMAS = Object.freeze({
+  template: "0.85, 0.7250, 0.4219, 0.0",
+  lightricks: "0.909375, 0.725, 0.421875, 0.0",
+});
+
+/**
+ * Apply a stage-2 refinement schedule to a job's params, in place.
+ *
+ * The template is already the graph default, so it leaves `params` untouched. `lightricks` writes
+ * `stage2_sigmas` for the graphs whose params map declares it (i2v, i2v upscale, a2v); t2v has no
+ * such param and stays on the template schedule.
+ *
+ * @param {object} params            the job's params (mutated only for `lightricks`)
+ * @param {"template"|"lightricks"} [preset]
+ * @returns {object} the same params object
+ */
+export function applyStage2SigmasPreset(params, preset = "template") {
+  if (!Object.hasOwn(STAGE2_SIGMAS, preset)) {
+    throw new Error(`unknown stage-2 sigmas preset: ${preset}`);
+  }
+  if (preset === "lightricks") params.stage2_sigmas = STAGE2_SIGMAS.lightricks;
+  return params;
+}
 
 /** A prompt that already directs the camera keeps its own direction. */
 export const CAMERA_MENTIONED = /\b(camera|dolly|pan|tilt|orbit|zoom|push[- ]?in|handheld)\b|\btracking\s+(?:shot|view)\b|(?:^|[.!?]\s*)(?:(?:slow|gentle|steady)\s+)?(?:forward|backward|lateral)\s+move\b/i;
@@ -150,7 +189,12 @@ export function applyPromptDefaults(params, { kind, textAllowed = false, hasSour
   const parts = [prompt];
   if (!textAllowed && !TEXT_GUARD_SATISFIED.test(prompt)) {
     parts.push(TEXT_GUARD);
-    applied.push({ guard: "text", value: TEXT_GUARD, because: "GPU test 2: without it the model writes garbled pseudo-text or a stray legible word" });
+    applied.push({
+      guard: "text",
+      value: TEXT_GUARD,
+      because:
+        "GPU test 2: without it the model writes garbled pseudo-text or a stray legible word; FLUX 3 Image Klein is distilled (cfg 1) with no negative lever, so the guard describes the positive end state instead of negatives",
+    });
   }
 
   if (kind === "plate") {

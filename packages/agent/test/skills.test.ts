@@ -34,7 +34,7 @@ test('skills: deterministic selection includes drafting guidance and at most thr
       }
     }
   }
-  assert.equal(SKILL_CATALOG_VERSION, '1.5.2');
+  assert.equal(SKILL_CATALOG_VERSION, '1.6.0');
 });
 
 test('skills: compiled loader includes canonical bodies and excludes metadata and research links', () => {
@@ -54,7 +54,7 @@ test('skills: compiled loader includes canonical bodies and excludes metadata an
     assert.ok(words(composed.text) <= 2600, 'selected instructions including native AV review stay compact');
     assert.ok(composed.text.length <= 19000, 'character budget bounds prompt overhead');
   }
-  const conversationSkillIds = BUNDLED_SKILL_IDS.filter(id => id !== 'motion-style');
+  const conversationSkillIds = BUNDLED_SKILL_IDS.filter(id => id !== 'motion-style' && id !== 'ref-review');
   assert.deepEqual([...seen].sort(), [...conversationSkillIds].sort());
 });
 

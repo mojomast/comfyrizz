@@ -64,9 +64,7 @@ documents the signature, both backends (Google Colab and BYO) and the spend gate
 - **Prompt defaults** (`src/defaults.mjs`, from `docs/GPU_TEST_2.md` "What looked bad"): every
   still/plate prompt the planner writes is the package's prompt **plus** the guards the GPU run
   proved are needed, and each job records them in `promptGuards` so nothing is a VM-side edit:
-  - `no text, no letters, no words, no logos, no watermarks` — unless the asset opts in
-    (`gen.inputs.text: true`) or its prompt already refuses text. On that run a hero still drew
-    garbled pseudo-text and a "sketch" run wrote a legible stray word ("Loss").
+  - `clean unmarked surfaces, plain untextured backgrounds, blank signage, imagery made only of shapes, colour and light` — unless the asset opts in (`gen.inputs.text: true`) or its prompt already refuses text. FLUX 3 Image Klein is distilled (cfg 1) with no negative lever, so the guard describes the wanted end state, and a prompt already saying "no text" is left alone. On that run a hero still drew garbled pseudo-text and a "sketch" run wrote a legible stray word ("Loss").
   - `static camera, gentle motion, no cuts` on an i2v plate, `slow continuous motion, static
     camera, seamless, no cuts` on a t2v plate — unless the prompt directs the camera itself
     (LTX-2.5 turns an orbit into a zoom; a push-in pushes labels out of frame).

@@ -5,6 +5,7 @@ import './characters/characters.css';
 import './ui/look-picker.css';
 import './productions/cards/iteration-card.css';
 import './productions/cards/iteration-advanced.css';
+import './productions/ref-strip.css';
 import { initShellLayout } from './ui/splitter';
 import { mountPalette } from './ui/palette.ts';
 import { createShellToastController } from './shell/toast.ts';
@@ -24,6 +25,7 @@ import { bindQuestions, renderQuestions } from './easy/steps/questions.ts';
 import type { EasyQuestion, EasyState } from './easy/types.ts';
 import { mountInspectorGenerate } from './editor/inspector/generate.ts';
 import { mountProductionTab } from './editor/inspector/production.ts';
+import { mountRefReviewStrip } from './productions/ref-review-client.ts';
 import { mountSettingsDialog } from './settings/dialog.ts';
 import { mountSettingsCard } from './colab-card';
 import { mountRemoteGpuProgress } from './colab-progress';
@@ -975,12 +977,23 @@ function mountProductionInspector(root: HTMLElement): void {
 
   const host = document.createElement('div');
   panel.append(host);
+  const refReviewHost = document.createElement('div');
+  refReviewHost.className = 'ref-review-host';
+  refReviewHost.dataset.refReviewHost = 'true';
+  panel.append(refReviewHost);
   const productionId = lookupBoundProductionId();
   if (productionId) {
     productionTab = mountProductionTab(host, {
       productionId,
       clips: clipStore.all(),
       fetchImpl: (url, init) => apiFetch(url, init ?? {}),
+    });
+    // RW-WIRE-W: renders nothing until the list route reports watch on or a record.
+    mountRefReviewStrip(refReviewHost, {
+      productionId,
+      fetchImpl: (url, init) => apiFetch(url, init ?? {}),
+      eventSourceFactory: (url) => new EventSource(`${url}?token=${encodeURIComponent(token ?? '')}`),
+      onError: logActivity,
     });
   } else {
     host.innerHTML = '<section class="production-tab" data-production-tab aria-label="Production"><p class="hint">No production yet.</p></section>';

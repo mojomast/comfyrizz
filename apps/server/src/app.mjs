@@ -102,6 +102,9 @@ import { createIterationRoutes } from './productions/iteration-routes.mjs';
 import { createSelfRepairIntegration } from './self-repair-integration.mjs';
 import { createRenderReviewer } from './render-review.mjs';
 import { createRenderReviewRoutes } from './routes/render-reviews.mjs';
+import { createRefWatchEventBus } from './ref-watch/events.mjs';
+import { createRefReviewRoutes } from './routes/ref-review.mjs';
+import { REF_DECISION_SCHEMA } from '../../../packages/schema/src/ref-review.mjs';
 
 const MAX_BODY = 5 * 1024 * 1024;
 // IP11: a completion save races with edits. Re-read the latest package and reapply the
@@ -215,6 +218,7 @@ async function defaultBackendFactory(backendId, opts = {}) {
       budgetUnits: opts.budgetUnits ?? 0,
       // PO-3: the rate lives in the backend budget module, not in a literal here.
       ratePerHour: mod.resolveRatePerHour({ gpu: opts.gpu, explicit: opts.ratePerHour }),
+      refWatch: opts.refWatch ?? null,
     });
   }
   if (backendId === 'byo-comfyui') {
@@ -288,6 +292,10 @@ export function createApp({
   providerSettings = null,
   hfTokenSettings: providedHfTokenSettings = null,
   backendFactory = defaultBackendFactory,
+  // Reference watch stays off unless the app passes refWatch; one controller is
+  // built by the run controller and one event bus lives for this app.
+  refWatch = false,
+  refWatchEnv = process.env,
   // IP02F: only the exact string '1' opts into the deterministic CPU placeholder
   // backend; every other value (including 'true' and '0') leaves the default app as-is.
   fakeBackend = process.env.COMFYRIZZ_FAKE_BACKEND === '1',
@@ -335,6 +343,7 @@ export function createApp({
   const store = new PackageStore(join(runtimeDir, 'packages'));
   const takeStore = createTakeStore({ runtimeDir, packageDir: store.dir });
   const events = new EventLog();
+  const refWatchBus = createRefWatchEventBus();
   const agentProgress = new Map();
   const activeAgents = new Map();
   const publishEntry = events.publish.bind(events);
@@ -634,6 +643,21 @@ export function createApp({
     };
   }
 
+  // The run controller builds the one controller per run. This wrapper only adds
+  // the app-owned bus to the controller's onEvent, without replacing the gate.
+  const refWatchBackendFactory = async (backendId, opts = {}) => {
+    const gate = opts.refWatch;
+    if (typeof gate !== 'function') return effectiveBackendFactory(backendId, opts);
+    const gateWithBus = Object.assign(async (context = {}) => gate({
+      ...context,
+      onEvent: (event) => {
+        refWatchBus.publish(event);
+        if (typeof context.onEvent === 'function') context.onEvent(event);
+      },
+    }), gate);
+    return effectiveBackendFactory(backendId, { ...opts, refWatch: gateWithBus });
+  };
+
   // IP24: the production journal is shared by the legacy /api/run adapter and
   // the /api/productions facade, so a bound package can only start from the
   // action slot that was dispatched for it.
@@ -659,9 +683,11 @@ export function createApp({
   let recoveries = null;
   let accountSubmissions = 0;
   const runs = createRunController({
-    backendFactory: effectiveBackendFactory,
+    backendFactory: refWatchBackendFactory,
     events,
     runtimeDir,
+    refWatch,
+    refWatchEnv,
     prepareWorkDir: prepareRunWorkDir,
     prepareNarration: async (pkg, { workDir, outputDir, runId }) => {
       const prepared = await prepareRunNarration({ pkg, workDir, outputDir, packageDir: dirname(store.path(pkg.id)) });
@@ -1495,6 +1521,106 @@ export function createApp({
     onError: (error, context) => {
       console.error(`[productions ${context.route} ${context.productionId}]`, error);
     },
+  });
+
+  // RW09: the review evidence the controller persists under the run receipts.
+  // A keyframe id is resolved against the run's production record so an id that
+  // repeats in another production can never select the wrong receipt.
+  function refReviewEvidence(productionId, keyframeId) {
+    if (typeof productionId !== 'string' || productionId === '') return null;
+    if (typeof keyframeId !== 'string' || keyframeId === '') return null;
+    const runsRoot = join(runtimeDir, 'runs');
+    let entries;
+    try { entries = readdirSync(runsRoot, { withFileTypes: true }); } catch { return null; }
+    const matches = [];
+    for (const entry of entries) {
+      if (!entry.isDirectory()) continue;
+      const runId = entry.name;
+      let runProduction = null;
+      try {
+        runProduction = JSON.parse(readFileSync(join(runsRoot, runId, 'state.json'), 'utf8'))?.productionId ?? null;
+      } catch { runProduction = null; }
+      if (runProduction !== null && runProduction !== productionId) continue;
+      const dir = join(runsRoot, runId, 'receipts', 'ref-review');
+      let names;
+      try { names = readdirSync(dir); } catch { continue; }
+      for (const name of names) {
+        if (!name.endsWith('.json')) continue;
+        const file = join(dir, name);
+        let body;
+        try { body = JSON.parse(readFileSync(file, 'utf8')); } catch { continue; }
+        if (body?.decision?.jobId !== keyframeId) continue;
+        let modifiedAt = 0;
+        try { modifiedAt = statSync(file).mtimeMs; } catch { modifiedAt = 0; }
+        matches.push({ body, file, name, runId, modifiedAt });
+      }
+    }
+    matches.sort((left, right) => right.modifiedAt - left.modifiedAt);
+    return matches[0] ?? null;
+  }
+
+  async function readEvidence({ productionId, keyframeId } = {}) {
+    const found = refReviewEvidence(productionId, keyframeId);
+    if (!found) return null;
+    const verdicts = Array.isArray(found.body.verdicts) ? found.body.verdicts : [];
+    const decision = found.body.decision ?? null;
+    return {
+      ...found.body,
+      productionId,
+      jobId: decision?.jobId ?? keyframeId,
+      keyframeId: decision?.jobId ?? keyframeId,
+      verdict: verdicts[verdicts.length - 1] ?? null,
+      decision,
+      receiptId: decision?.receiptId ?? found.body.keyframeSha256 ?? null,
+      receiptPath: `runs/${found.runId}/receipts/ref-review/${found.name}`,
+    };
+  }
+
+  async function applyOverride({ productionId, keyframeId, stillSha, receiptId, reason }) {
+    const found = refReviewEvidence(productionId, keyframeId);
+    if (!found) throw new Error('reference review evidence not found');
+    const verdicts = Array.isArray(found.body.verdicts) ? found.body.verdicts : [];
+    const previous = found.body.decision ?? {};
+    const decision = {
+      schema: previous.schema ?? REF_DECISION_SCHEMA,
+      jobId: keyframeId,
+      keyframeSha256: stillSha,
+      action: 'override',
+      reason,
+      attempt: Number.isSafeInteger(previous.attempt) ? previous.attempt : 0,
+      receiptId,
+    };
+    const temporary = `${found.file}.${process.pid}.tmp`;
+    writeFileSync(temporary, `${JSON.stringify({ ...found.body, decision }, null, 2)}\n`, { mode: 0o600 });
+    renameSync(temporary, found.file);
+    const at = new Date().toISOString();
+    refWatchBus.publish({
+      type: 'ref_review_verdict',
+      productionId,
+      jobId: keyframeId,
+      keyframeSha256: stillSha,
+      state: 'overridden',
+      verdict: verdicts[verdicts.length - 1] ?? null,
+      decision,
+      at,
+    });
+    refWatchBus.publish({
+      type: 'ref_gate_open',
+      productionId,
+      jobId: keyframeId,
+      keyframeSha256: stillSha,
+      state: 'overridden',
+      at,
+    });
+    return { keyframeId, stillSha, receiptId, decision };
+  }
+
+  const refReviewRoutes = createRefReviewRoutes({
+    bus: refWatchBus,
+    readEvidence,
+    applyOverride,
+    readJson,
+    sendJson,
   });
 
   const renderRoutes = createRenderRoutes({
@@ -2938,6 +3064,7 @@ export function createApp({
     if (await createPackageRoutes({ packagesDir: store.dir }).handle(request, response, url)) return;
     if (await iterationRoutes.handle(request, response, url)) return;
     if (await productionRoutes.handle(request, response, url)) return;
+    if (await refReviewRoutes.handle(request, response, url)) return;
     if (await takeRoutes.handle(request, response, url)) return;
     if (await createCharacterRoutes({
       rootDir: runtimeDir,

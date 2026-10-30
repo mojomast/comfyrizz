@@ -31,6 +31,7 @@
   },
   "devDependencies": {
     "@comfyrizz/llm": "workspace:*",
+    "@comfyrizz/schema": "workspace:*",
     "@types/node": "22.10.2",
     "typescript": "5.6.3"
   }
