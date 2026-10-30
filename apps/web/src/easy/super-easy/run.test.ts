@@ -378,6 +378,15 @@ test('hosted Super Easy polls guest-scoped agent activity while planning', async
   assert.ok(calls.some(call => call.kind === 'announce' && /Planning/.test(call.text)), 'agent activity reaches the visible status');
 });
 
+test('hosted Super Easy honors an explicit Klein-only prompt when motion is Auto', async () => {
+  const { api, host, calls, store } = harness({ hosted: true });
+  host.aiSelection = async () => ({ provider: 'none' });
+  const result = await runSuperEasy({ prompt: `${PROMPT} Klein only. Use stills + code motion.`, hostedInvite: true }, { api, host, store, go: () => {} });
+  assert.equal(result.ok, true, JSON.stringify(result));
+  assert.equal(store.get().motionModel, 'klein');
+  assert.equal(calls.find(call => call.kind === 'build')?.input.motionModel, 'klein');
+});
+
 test('hosted Super Easy refuses before planning when the invite session is unavailable', async () => {
   const { api, host, calls, store } = harness({ session: { role: 'guest', backendId: 'colab', budgetUnits: 0, invite: { status: 'revoked' } } });
   const result = await runSuperEasy({ prompt: PROMPT, hostedInvite: true }, { api, host, store, go: () => {} });

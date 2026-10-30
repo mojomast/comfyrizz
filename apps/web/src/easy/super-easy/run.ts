@@ -558,12 +558,18 @@ export async function runSuperEasy(input: RunSuperEasyInput, deps: RunSuperEasyD
     return failure('GOOGLE_COLAB_CONFIRM_REQUIRED', 'compute', GOOGLE_COLAB_CONFIRM_REQUIRED);
   }
 
+  const requestedMotion = input.motionModel ?? 'auto';
+  // The prompt is authoritative when it explicitly asks for the Klein stills
+  // route. Without this, Auto motion plus a Klein-only brief plans stills that
+  // the generated-film validator refuses because no H3/LTX video was requested.
+  const motionModel = requestedMotion === 'auto' && /\bklein[-\s]?only\b|\bstills\s*\+\s*code motion\b/i.test(prompt)
+    ? 'klein' : requestedMotion;
   const current = deps.store.get();
   deps.store.patch({
     idea: { ...current.idea, text: prompt, ...(input.lengthS === undefined ? {} : { lengthS: input.lengthS }) },
     compute,
     ...(budgetUnits === undefined ? {} : { spendCap: budgetUnits }),
-    motionModel: input.motionModel ?? 'auto',
+    motionModel,
     ...(input.videoType !== undefined ? { videoType: input.videoType } : {}),
     ...(input.songTrim !== undefined ? { songTrim: input.songTrim } : {}),
     ...(input.lyricsStyle !== undefined ? { lyricsStyle: input.lyricsStyle } : {}),
@@ -625,7 +631,7 @@ export async function runSuperEasy(input: RunSuperEasyInput, deps: RunSuperEasyD
       restoreRevisionBase();
       return failure('PLAN_FAILED', 'plan', message);
     }
-    return { ok: true, proposal: { ...proposalForPackage(pkg, basePrompt, revisionNotes, narrationOnly, revisionBase), motionModel: input.motionModel ?? 'auto' }, snapshot: null };
+    return { ok: true, proposal: { ...proposalForPackage(pkg, basePrompt, revisionNotes, narrationOnly, revisionBase), motionModel }, snapshot: null };
   }
 
   const planned = deps.store.get();
@@ -785,7 +791,7 @@ export async function runSuperEasy(input: RunSuperEasyInput, deps: RunSuperEasyD
         const startingPackage = JSON.stringify(pkg);
         const narrated = await deps.api.generateLocalNarration({ packageId: pkg.id, productionId, baseRevision: pkg.revision,
           ...(compute === 'cpu' ? { recoveryInputs: { state: deps.store.get(), input: {
-            prompt: input.prompt, basePrompt, revisionNotes, lengthS: input.lengthS, compute, motionModel: input.motionModel,
+            prompt: input.prompt, basePrompt, revisionNotes, lengthS: input.lengthS, compute, motionModel,
             videoType: input.videoType, conversationId: input.conversationId, attachmentSignature: input.attachmentSignature,
             attachmentRevision: input.attachmentRevision, deepSeekNoThinking: input.deepSeekNoThinking,
           } } } : {}) });
