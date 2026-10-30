@@ -15,11 +15,7 @@ function isObject(value) {
 }
 
 function stillIdOf(still) {
-  for (const key of ['id', 'stillId', 'jobId']) {
-    const value = still?.[key];
-    if (typeof value === 'string' && value.trim()) return value.trim();
-  }
-  return null;
+  return typeof still?.id === 'string' && still.id.trim() ? still.id.trim() : null;
 }
 
 function colourOf(background) {
@@ -36,7 +32,7 @@ export function planSubjectCutout({ still, purpose = 'title', background } = {})
   if (!isObject(still)) fail('still is required');
   const stillId = stillIdOf(still);
   if (!stillId) fail('still needs an id');
-  const state = still.status ?? still.state;
+  const state = still.status;
   if (!refGateOpen(state)) {
     fail(`still must be accepted or overridden by ref-watch, got ${JSON.stringify(state ?? null)}`);
   }
@@ -64,7 +60,7 @@ export function planSubjectCutout({ still, purpose = 'title', background } = {})
 export function cutoutLayer({ cutout, titleLayer } = {}) {
   if (!isObject(cutout)) fail('cutout layer is required');
   if (!isObject(titleLayer)) fail('titleLayer is required');
-  const candidate = titleLayer.background ?? titleLayer.backgroundPlate ?? cutout.background;
+  const candidate = titleLayer.background;
   const background = isObject(candidate) ? candidate : { role: 'background', kind: 'plate' };
   return [background, titleLayer, cutout];
 }

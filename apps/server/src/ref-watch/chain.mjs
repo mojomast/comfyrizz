@@ -6,7 +6,6 @@
 const REQUIRED_STATUS = 'accepted';
 const IDENTITY_DIMENSION = 'identity';
 const IDENTITY_DIMENSIONS = Object.freeze([IDENTITY_DIMENSION]);
-const ORDER_FIELDS = ['index', 'order', 'number', 'shotIndex'];
 
 // Approved chain strengths. Never 1.0: identity drift is reviewed, not amplified.
 export const CHAIN_STRENGTHS = Object.freeze({ strength: 0.7, strength2: 0.7 });
@@ -22,19 +21,12 @@ function isObject(value) {
 }
 
 function shotIndex(shot) {
-  for (const field of ORDER_FIELDS) {
-    const value = shot?.[field];
-    if (Number.isSafeInteger(value)) return value;
-  }
-  return null;
+  return Number.isSafeInteger(shot?.index) ? shot.index : null;
 }
 
 function isHardBoundary(shot) {
   if (!isObject(shot)) return false;
-  if (shot.cut === true) return true;
-  if (shot.transitionHard === true) return true;
-  if (shot.transition === 'hard' || shot.transition === 'cut') return true;
-  return false;
+  return shot.cut === true || shot.transition === 'hard';
 }
 
 /**

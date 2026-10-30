@@ -205,7 +205,7 @@ test('RW06: fillDecision replaces the RW05 steer placeholder and validates', () 
   const source = verdict('fail', [
     check('anatomy', false, 'hard', 'the left hand has six fingers'),
   ], ["Mira's left hand rests flat on the window sill, five slender fingers clearly visible"]);
-  const decision = decide({ verdict: source, attempt: 0, regenJobsUsed: 0, stillCount: 8, identityFailures: 0 });
+  const decision = decide({ verdict: source, attempt: 0, regenJobsUsed: 0, stillCount: 8, identityFailures: 0, editsTried: 1 });
   assert.equal(decision.action, 'reprompt');
   assert.equal(decision.nextPrompt, '<steer>');
 
