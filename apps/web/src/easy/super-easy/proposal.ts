@@ -49,6 +49,41 @@ function sceneTextReview(scene: any, format: any): string {
   return parts.join('; ');
 }
 
+const modelFamilies: Record<string, string> = { 'flux3-klein': 'FLUX 3 Image Klein', ltx25: 'LTX 2.5', 'ltx25-a2v': 'LTX 2.5', 'fasth3-omni': 'MiniMax H3' };
+
+function visiblePlates(scene: any): any[] {
+  if (scene?.drawing || scene?.composition) return [];
+  const panels = scene?.media_only !== true && ['split', 'compare'].includes(scene?.layout);
+  return [
+    ...(panels ? (Array.isArray(scene.media) ? scene.media.slice(0, 2) : []) : scene.background?.asset ? [scene.background] : []),
+    ...(Array.isArray(scene.foreground) ? scene.foreground : []),
+  ];
+}
+
+function sceneVisualReview(scene: any, assets: any): string {
+  if (scene?.drawing) {
+    try {
+      const source = JSON.parse(scene.drawing.source.description);
+      return `Source-bound drawing: ${source.count} tiles; ${source.label_column ? `labels from ${source.label_column}` : 'no per-tile labels'}; ${source.reveal_frames ? `reveals over ${source.reveal_frames} frames` : 'no tile reveal'}.`;
+    } catch { return `Procedural drawing: ${scene.drawing.elements?.length ?? 0} elements`; }
+  }
+  if (scene?.composition) return 'Native composition; inspect its layers in the full plan editor.';
+  const plates = visiblePlates(scene);
+  if (!plates.length) return 'No visible image or video plate';
+  const panels = scene?.media_only !== true && ['split', 'compare'].includes(scene?.layout)
+    && scene.media?.length === 2 && scene.media.every((p: any) => assets?.[p.asset]?.kind === 'image');
+  const prefix = panels ? 'Two still-image panels with native labels. ' : '';
+  return prefix + plates.map(plate => {
+    const asset = assets?.[plate.asset];
+    if (!asset) return `${plate.asset}: missing media`;
+    const family = modelFamilies[asset.gen?.generator];
+    const kind = asset.kind === 'video' ? 'Motion video' : asset.kind === 'image' ? 'Still image' : 'Media';
+    const status = asset.status === 'ready' ? 'available; generation evidence checked at export'
+      : asset.status === 'pending' ? 'planned; generation requires approval' : 'not ready';
+    return `${kind}${family ? ` (${family})` : ''}: ${status}; fit ${plate.fit ?? 'cover'}`;
+  }).join('; ');
+}
+
 export function proposalForPackage(pkg: any, basePrompt: string, revisionNotes: string[] = [], narrationRevised = false, previousPackage?: any): SuperEasyProposal {
   const scenes = Array.isArray(pkg?.scenes) ? pkg.scenes : [];
   const fps = Number(pkg?.format?.fps) > 0 ? Number(pkg.format.fps) : 30;
@@ -113,9 +148,8 @@ export function proposalForPackage(pkg: any, basePrompt: string, revisionNotes: 
     look: short(text(creative.look, 'A coherent, stylized look'), 100),
     soundtrack: short(text(creative.soundtrack, 'Sound designed for the story'), 100),
     comfyContribution: (() => {
-      const families: Record<string, string> = { 'flux3-klein': 'FLUX 3 Image Klein', ltx25: 'LTX 2.5', 'ltx25-a2v': 'LTX 2.5', 'fasth3-omni': 'MiniMax H3' };
-      const uses = scenes.flatMap((scene: any) => [scene.background?.asset, ...(scene.foreground ?? []).map((item: any) => item.asset), ...(scene.media ?? []).map((item: any) => item.asset)].flatMap(id => {
-        const asset = pkg.assets?.[id]; const family = families[asset?.gen?.generator];
+      const uses = scenes.flatMap((scene: any) => visiblePlates(scene).flatMap(plate => {
+        const asset = pkg.assets?.[plate.asset]; const family = modelFamilies[asset?.gen?.generator];
         return family ? [`${family} in ${scene.id}${asset.status === 'ready' ? ' (generation evidence checked at export)' : ' (generation requires approval)'}`] : [];
       }));
       return [...new Set(uses)].join('; ') || 'A visible ComfyUI model contribution is required before final export.';
@@ -131,13 +165,7 @@ export function proposalForPackage(pkg: any, basePrompt: string, revisionNotes: 
         narration: typeof scene?.narration === 'string' ? scene.narration : '',
         copy: sceneTextReview(scene, pkg?.format),
         data: scene?.data ? JSON.stringify(scene.data) : '',
-        visual: (() => {
-          if (!scene?.drawing) return 'No procedural drawing';
-          try {
-            const source = JSON.parse(scene.drawing.source.description);
-            return `Source-bound drawing: ${source.count} tiles; ${source.label_column ? `labels from ${source.label_column}` : 'no per-tile labels'}; ${source.reveal_frames ? `reveals over ${source.reveal_frames} frames` : 'no tile reveal'}.`;
-          } catch { return `Procedural drawing: ${scene.drawing.elements?.length ?? 0} elements`; }
-        })(),
+        visual: sceneVisualReview(scene, pkg?.assets),
       })),
       datasets: pkg?.datasets && typeof pkg.datasets === 'object' && !Array.isArray(pkg.datasets)
         ? Object.entries(pkg.datasets).map(([id, dataset]) => ({ id, details: JSON.stringify(dataset) })) : [],

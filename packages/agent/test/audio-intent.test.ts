@@ -5,9 +5,27 @@ import { applyProductionIntentToScene, createToolset } from '../src/tools.js';
 
 const prohibitions = [
   ['silent', true], ['no audio', true], ['without any audio', true], ['full silence', true],
+  ['Fully silent', true], ['Completely silent', true],
   ['no spoken words', false], ['no narration', false], ['without speech', false],
   ['wordless with native foley and music', false], ['no dialogue, music or narration', false],
 ] as const;
+
+test('requested native dialogue survives bans on singing and a separate narrator', () => {
+  for (const ending of ['No singing.', 'No lyrics.', 'No music, singing, voiceover narrator or other voices.']) {
+    const intent = classifyAudioIntent(`Use native character speech. The investigator says exactly: "It was in my pocket." ${ending}`);
+    assert.equal(intent.wordless, false, ending);
+    assert.equal(intent.speechRequested, true, ending);
+    assert.equal(intent.narrationRequested, false, ending);
+  }
+  assert.equal(classifyAudioIntent('Use native dialogue. No speech.').wordless, true);
+});
+
+test('overlays in an exclusion list do not hide narration and music prohibitions', () => {
+  const intent = classifyAudioIntent('No captions, titles, subtitles, logos, overlays, narration, speech or music.');
+  assert.equal(intent.wordless, true);
+  assert.equal(intent.musicProhibited, true);
+  assert.equal(intent.narrationRequested, false);
+});
 
 for (const kind of ['motion-graphics', 'generated-film'] as const) {
   for (const [request, silent] of prohibitions) {

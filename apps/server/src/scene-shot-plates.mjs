@@ -2,6 +2,7 @@
  * scene.media is a two-panel layout input, not a sequential clip playlist.
  */
 export function sceneShotPlates(scene) {
+  if (scene?.drawing || scene?.composition) return [];
   if (scene?.media_only !== true && ['split', 'compare'].includes(scene?.layout)) {
     return (Array.isArray(scene.media) ? scene.media : []).slice(0, 2)
       .filter(plate => typeof plate?.asset === 'string' && !plate.procedural);

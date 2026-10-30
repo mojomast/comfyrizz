@@ -1015,3 +1015,56 @@ fixes together with saved-package chat correction, bundled collection and durabl
 exports. It retains the original 45-second multi-shot brief, exact monologue and
 nine-credit all-in ceiling. No unnecessary 30-fps requirement is imposed. Actual
 generation/audio/Download results and spending remain pending.
+
+**Subsequent live planning results:** the native-speaking retry stopped before
+approval on duplicate MARA VALE copy and insufficient measured dialogue timing.
+The newly requested humorous 30-second THE SPOON FILES also stopped before paid
+work: its no-singing/no-narrator instruction incorrectly prohibited its requested
+character dialogue, its explicit still-photo comparison was rejected as missing
+motion, and approximate six-second beat pacing blocked exact-duration repair.
+Both attempts spent zero GPU credits. Their original evidence remains at
+`/tmp/opencode/easy-colab-acceptance/speaking-native-final/` and
+`/tmp/opencode/easy-colab-acceptance/spoon-files-showcase/`.
+
+**Mixed-media/audio integration completed:** explicit native speech now survives
+singing/lyrics exclusions, while explicit speech bans still win. Standalone
+“Fully silent”/“Completely silent” and exclusion lists containing overlays are
+also recognized. A bounded numbered-beat contract permits the expressly requested
+two-photograph comparison, requiring its original Klein sources, native labels,
+contained fit and correct position; other beats retain motion and exact dialogue
+checks. Panel photos use their actual panel fit/dimensions. Approximate per-beat
+pacing can yield to the exact total, retaining hard timing/reading constraints.
+The unchanged Spoon fixture repairs to **948 − 48 = 900 frames**, with two H3
+speaking shots, two LTX motion shots and two still comparison images. One prose-only
+timing response receives a confirmation within the existing three-turn limit.
+Proposal source review now distinguishes visible still panels from motion,
+reports pending/available state, and ignores hidden media bindings.
+
+Verification at this source boundary: **60 server integration tests, 57 agent
+audio/intent tests and 33 UI tests passed**, with agent build, web typecheck and
+diff checks. These are offline integration results, including a fake provider and
+local tone-conditioning fixture; they are not a completed Spoon or speaking film.
+
+**User-supplied character-reference test:** the Google thumbnail was downloaded
+as a real 386×518 JPEG. Custom upload conditioning existed at the tool level but
+was not wired into the normal server runner/context snapshot. Commit **8f4c635**
+wires the existing byte-verified conversation-scoped adopter through initial and
+repair planning. A normal HTTP fake-provider test proves uploaded bytes become a
+Klein-reference-edit → LTX dependency chain without displaying the original still.
+The frozen-build reference/context checks passed **9/9**; related UI checks passed
+**24/24**, and the broader server check passed **29/29**.
+
+The first live reference proposal proved the correct original JPEG hash but
+introduced unwanted narration/music; a cold navigation also lost the in-memory
+proposal. It was stopped before spending, with evidence preserved in
+`/home/mojo/comfyrizz-gallery-tests/character-reference-test/`. A fresh normal
+Super Easy attempt on the same immutable build uses explicit silent-film wording,
+the same uploaded photo and a six-second fictional spaceship/teacup scene.
+Package **pkg_ea4d54608fc5a6cf r3**, production
+**prod_3ca8639183280c1f3a9a023b**, received a **1.821-credit** final quote; **3 credits**
+were reserved atomically within the existing campaign before approval. Its
+approved plan contains one original upload, one Klein reference-edit job and one
+LTX motion job, with voice disabled and no music. At this documentation boundary,
+generation/collection/render/Download and final cost reconciliation remain pending
+under `/home/mojo/comfyrizz-gallery-tests/character-reference-final/`. The running
+build remains frozen at 8f4c635; the later mixed-media/audio edits do not alter it.
