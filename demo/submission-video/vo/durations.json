@@ -1,0 +1,47 @@
+[
+ [
+  "vo01",
+  8.35,
+  "Hey! This is Comfyrizz. You type one sentence, and it makes you a real film, with open models running in ComfyUI."
+ ],
+ [
+  "vo02",
+  11.31,
+  "Here's Super Easy mode. I'm describing Mira, a young lighthouse keeper in a yellow raincoat. I'll pick twenty-four seconds, choose the L T X motion route... and that's it."
+ ],
+ [
+  "vo03",
+  8.24,
+  "First, the agent pitches the film: a title, the look, four shots, and the music. Nothing touches a GPU until I say yes."
+ ],
+ [
+  "vo04",
+  11.55,
+  "So I hit Make this film. ComfyUI spins up on Google Colab. Flux Klein paints the keyframes, L T X animates every shot, and you can watch the real results land."
+ ],
+ [
+  "vo05",
+  4.97,
+  "About fifteen minutes later, it's done. Scored, rendered, and ready to download."
+ ],
+ [
+  "vo06",
+  8.28,
+  "Now let's change something, just by chatting. I'd like a bigger ending: send the paper boat way out to sea, and have Mira turn toward us."
+ ],
+ [
+  "vo07",
+  10.29,
+  "The agent turns that into a fix for shot four, and shows me the cost. I approve, and Google Colab re-shoots just that one shot. The other three stay exactly as they were."
+ ],
+ [
+  "vo08",
+  6.17,
+  "Before... and after. The boat sails off toward the horizon, and Mira looks back at us."
+ ],
+ [
+  "vo09",
+  3.67,
+  "That's Comfyrizz. Imagine it... make it."
+ ]
+]

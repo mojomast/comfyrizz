@@ -176,7 +176,7 @@ async function startServer() {
     if (typeof value !== 'string' || value === '') return undefined;
     return value.startsWith('file:') ? value : pathToFileURL(value).href;
   };
-  const app = createApp({
+  const app = createApp({ agentTimeoutMs: Number(process.env.SUBMISSION_DEMO_AGENT_TIMEOUT_MS || 600_000),
     root: repoRoot,
     token,
     runtimeDir,
