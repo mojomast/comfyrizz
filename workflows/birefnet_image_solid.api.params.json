@@ -1,0 +1,12 @@
+{
+ "v": 1,
+ "generator": "birefnet",
+ "kind": "still",
+ "note": "BiRefNet cutout from open-higgsfield-skills @5a1a2d4 (MIT, rossaai/rosesfield); the BiRefNet weights are reported MIT but unverified. ComfyUI core LoadBackgroundRemovalModel/RemoveBackground produce the foreground mask; GetImageSize/EmptyImage build a solid fill at the source size and ImageCompositeMasked lays the cutout over it. The image parameter is the uploaded still and colour is the solid RGB fill (0xRRGGBB).",
+ "files": ["image"],
+ "inputs": ["image", "colour"],
+ "map": {
+  "image": ["1", "image"],
+  "colour": ["7", "color"]
+ }
+}

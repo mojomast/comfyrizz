@@ -1,0 +1,81 @@
+{
+ "1": {
+  "class_type": "LoadImage",
+  "inputs": {
+   "image": ""
+  }
+ },
+ "2": {
+  "class_type": "LoadBackgroundRemovalModel",
+  "inputs": {
+   "bg_removal_name": "birefnet.safetensors"
+  }
+ },
+ "3": {
+  "class_type": "RemoveBackground",
+  "inputs": {
+   "bg_removal_model": [
+    "2",
+    0
+   ],
+   "image": [
+    "1",
+    0
+   ]
+  }
+ },
+ "6": {
+  "class_type": "GetImageSize",
+  "inputs": {
+   "image": [
+    "1",
+    0
+   ]
+  }
+ },
+ "7": {
+  "class_type": "EmptyImage",
+  "inputs": {
+   "width": [
+    "6",
+    0
+   ],
+   "height": [
+    "6",
+    1
+   ],
+   "batch_size": 1,
+   "color": 16777215
+  }
+ },
+ "8": {
+  "class_type": "ImageCompositeMasked",
+  "inputs": {
+   "destination": [
+    "7",
+    0
+   ],
+   "source": [
+    "1",
+    0
+   ],
+   "x": 0,
+   "y": 0,
+   "resize_source": false,
+   "mask": [
+    "3",
+    0
+   ]
+  }
+ },
+ "9": {
+  "class_type": "SaveImage",
+  "inputs": {
+   "images": [
+    "8",
+    0
+   ],
+   "filename_prefix": "background-removal/flat"
+  }
+ }
+}
