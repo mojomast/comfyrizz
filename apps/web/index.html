@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="en">
+<html lang="en" data-app-loading>
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
@@ -13,15 +13,35 @@
     <link rel="stylesheet" href="/src/ui/shell.css" />
     <link rel="stylesheet" href="/src/ui/topbar.css" />
     <style>
+      html[data-app-loading] #app,
+      html[data-app-loading] #easy-root { display: none !important; }
+      .app-launch { display: none; }
+      html[data-app-loading] .app-launch {
+        display: grid; place-content: center; gap: 20px;
+        min-height: 100vh; min-height: 100dvh; padding: 32px;
+        background: #0b0d12; color: #e8ebf3; text-align: center;
+        font: 15px/1.6 system-ui, sans-serif;
+      }
+      .app-launch img { margin: auto; }
+      .app-launch strong { font-size: 24px; letter-spacing: -.04em; }
+      .app-launch p { margin: 0; color: #a3acc0; }
+      .app-launch a { color: #b8a7ff; }
       #app:not([data-shell-timeline='off']) #play,
       #app:not([data-shell-timeline='off']) #scrub,
       #app:not([data-shell-timeline='off']) #time {
         display: none;
       }
     </style>
-    <title>Comfyrizz — CPU motion graphics</title>
+    <title>Comfyrizz — AI film studio</title>
   </head>
   <body>
+    <div class="app-launch" role="status" aria-live="polite">
+      <img src="/favicon.svg" width="48" height="48" alt="" />
+      <strong>Comfyrizz</strong>
+      <p id="app-launch-status">Opening your creative space…</p>
+      <a id="app-launch-retry" href="" hidden>Reload Comfyrizz</a>
+      <noscript>Enable JavaScript to open the studio.</noscript>
+    </div>
     <div id="app" class="app-shell" data-shell="grid">
       <div id="editor-small-screen" class="editor-small-screen" role="status">
         <p>The editor works best on a larger screen.</p>
