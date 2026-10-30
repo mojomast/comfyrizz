@@ -158,6 +158,29 @@ additional Colab allocation was made by this test. Integration coverage also
 checks cross-invite edit denial, local-only admission, unchanged CU/film quota,
 and access revocation.
 
+### Hosted narration runtime prerequisite (2026-10-30)
+
+Guest plans that use local Kokoro narration require a host Python with
+`numpy` and `kokoro_onnx`, plus the Kokoro model files at
+`~/.cache/comfyrizz/kokoro/kokoro-v1.0.onnx` and `voices-v1.0.bin`
+(`packages/tts/scripts/fetch-models.sh` fetches them). Set
+`COMFYRIZZ_PYTHON` in the service environment; otherwise preflight falls back
+to system `python3` and fails before any Colab allocation. The deployed
+drop-in uses:
+
+```ini
+Environment=COMFYRIZZ_PYTHON=/home/mojo/projects/comfyrizz/.venv/bin/python
+```
+
+Validate with `python -c 'import kokoro_onnx, numpy'` and by running
+`packages/tts/py/synth.py` against a planned package. A preflight failure is
+settled at zero CU and does not consume a film slot; retained media and the
+project remain available for a retry. On October 30, run
+`pipe_7b19512ff31943a196046517d96b5940` failed this preflight before allocation,
+was recorded as `verified_no_allocation` at 0 CU, and left the invite active
+with its full budget and film quota. The same package then passed preflight,
+Kokoro synthesis, and measured timing with the pinned environment.
+
 Two isolated browser contexts redeemed the same invite, entered the public
 gallery, opened Super Easy, selected Klein-only generation, submitted distinct
 eight-second silent-film prompts, and approved both proposals through the UI.
