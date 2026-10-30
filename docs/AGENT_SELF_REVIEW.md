@@ -44,6 +44,28 @@ that the delivered film meets its brief.
    LLM. Application here: inspect real local file bytes for duration, frame
    rate and audio-stream presence; do not substitute requested generation
    duration or conditioning duration for observed output.
+5. Pi **1.4.0**, [request preparation and turn finalization](https://github.com/earendil-works/pi/blob/v1.4.0/packages/agent/README.md#request-preparation-and-turn-finalization)
+   and [agent loop](https://github.com/earendil-works/pi/blob/v1.4.0/packages/agent/src/agent-loop.ts):
+   keep Pi as the embedded tool loop and reconstruct canonical evidence on each
+   request. ComfyRizz's `project_build` stages a journaled commit that completes
+   after the turn. Therefore rendering must happen **after the turn commits**,
+   not as a second tool immediately following build inside that turn.
+6. Anthropic, [Effective context engineering](https://www.anthropic.com/engineering/effective-context-engineering-for-ai-agents),
+   and Pi's [compaction reference](https://github.com/earendil-works/pi/blob/v1.4.0/packages/coding-agent/docs/compaction.md):
+   persist exact requirements, evidence IDs and attempt outcomes outside chat
+   truncation. Pi core does not automatically provide the coding-agent SDK's
+   compaction. The repair context is reconstructed separately from chat history.
+7. [Whisper timestamp implementation](https://github.com/openai/whisper/blob/main/whisper/transcribe.py),
+   [faster-whisper implementation](https://github.com/SYSTRAN/faster-whisper/blob/master/faster_whisper/transcribe.py),
+   and [FFmpeg audio filters](https://ffmpeg.org/ffmpeg-filters.html): timestamp
+   estimates, signal energy, recognized words and audible intelligibility are
+   different observations. Local-model loading must also prevent tokenizer
+   fallback downloads. Expected dialogue is compared after ASR, never supplied
+   as a recognition prompt.
+8. OpenAI, [Understanding prompt injections](https://openai.com/index/prompt-injections/):
+   transcripts, frame text and metadata are untrusted content. Their text cannot
+   authorize edits or select tools, file paths or rubric changes. The restricted
+   tool surface is enforced at dispatch as well as in the model declaration.
 
 ## Implemented: first vertical slice
 
@@ -125,7 +147,8 @@ CAS, history and journaled conversation commit still apply. The compiled shot
 positions/durations/transitions must remain identical. At most **two applied
 source-repair batches per conversation/project** are persisted across restarts;
 idempotent replay does not consume another round. This is a bounded editing
-primitive, not yet a cross-conversation production repair controller.
+primitive. The controller below adds a stricter persistent package-wide bound
+across conversations and repair IDs.
 
 ### Optional local ASR capability
 
@@ -147,6 +170,31 @@ It records Whisper version and weights SHA-256 in the provider identity. Its
 capped at 90 seconds and inherits turn cancellation. Missing/invalid optional
 configuration is reported as unknown by inspection, not a startup requirement.
 
+An explicit faster-whisper adapter can use an already installed environment and
+complete local CTranslate2 model directory:
+
+```sh
+export COMFYRIZZ_QA_SPEECH_PROVIDER=faster-whisper
+export COMFYRIZZ_QA_FASTER_WHISPER_PYTHON=/absolute/path/to/asr-env/bin/python
+export COMFYRIZZ_QA_FASTER_WHISPER_MODEL_DIR=/absolute/path/to/local-model-directory
+# Optional, deliberately selected; defaults to false and never auto-retries:
+export COMFYRIZZ_QA_FASTER_WHISPER_VAD=true
+```
+
+It requires `model.bin`, `config.json` and `tokenizer.json`, uses CPU/int8 with two
+threads, disables prior-text conditioning, and forces offline/local-only loading.
+VAD is explicitly configured; when enabled, faster-whisper restores segment/word
+timestamps to original-media coordinates. Reports retain the actual analyzer
+mode. Comparisons across changed providers, timestamp margins or analyzer modes
+stop rather than attributing changed observations to the edit.
+Both adapters require observed duration, independently probe/decode the
+whole presentation up to 120 seconds, and return explicit coverage diagnostics.
+The former silent 60-second truncation is removed. Partial/overlong decoding
+fails as unknown; no inference result can certify an uninspected suffix. ASR
+currently uses mono downmix, not per-channel energy analysis or lip-sync grading.
+Nonzero or unknown stream timestamp origins are refused by these adapters until
+their mapping is supported; the tolerance is at most one native/analysis sample.
+
 Custom local providers can instead be injected as
 `createApp({speechInspector})` / `createProjectChat({speechInspector})`. Contract:
 
@@ -165,10 +213,9 @@ The injection is a trusted server capability, not a tool argument. Current
 runtime integration supplies only the local CPU adapter. Adding a remote/paid
 grader requires separate capability and spend authorization.
 
-The existing live Spoon ASR environment uses **faster-whisper**, not the
-`openai-whisper` API of this optional adapter. It must not be treated as an
-already configured provider for this branch. No adapter inference is claimed
-by the read-only smoke check below.
+The existing live Spoon ASR environment uses **faster-whisper**. Selecting this
+adapter and a complete local model directory is deliberate server configuration;
+the prior read-only source smoke below did not run either adapter.
 
 ## Follow-up: selected takes and missing speech in delivered output
 
@@ -185,31 +232,102 @@ The live Spoon follow-up identified two related issues:
    source clips still contained the full speech. This is a separate failure from
    late-speech clipping. A successful render return and a good source report
    cannot establish delivered speech. Main's analogous delivery-staging fix at
-   `706d93a` was read for context; it was not merged or cherry-picked here.
+    `706d93a` is now cherry-picked on this branch as `580d57e`: export stages
+    selected takes and refuses missing active media before encoding.
 
-This branch still does **not** implement automated final-render inspection.
-The next stage must check staged active-media completeness and inspect the
-receipt-bound final MP4's actual audio/speech, comparing it with observed source
-speech and the authored requirements. A source-level pass must not substitute
-for these output checks. Failed render evidence and existing approvals remain
-separate from inspection reports and must be retained.
+### Receipt-bound final-MP4 inspection
+
+`project_inspect_render({packageId, expectedRevision, renderId})` resolves the
+saved artifact through `readRenderArtifact`. It validates current package and
+historical timeline hashes, trusted render receipts and actual MP4 bytes before
+and after analysis. A newer package cannot use an old render as current evidence.
+Immutable `rr_<sha256>` reports live under `<runtimeDir>/render-reviews`.
+The current resolver accepts ordinary saved `r_...` editor/final-render artifacts.
+Pipeline-only `run_...` outputs need an equivalent immutable historical artifact
+record before this API can inspect them; today's package must not be substituted
+for their original render inputs.
+
+The inspector decodes/counts video frames with ffprobe and checks duration, frame
+rate, resolution, required audio streams and **each required native H3 scene's**
+receipt contribution. A qualifying LTX contribution cannot hide an omitted H3
+plate. Contribution evidence remains renderer-contract evidence, not pixel-level
+recognition. Optional ASR inspects the final MP4 and compares speech separately
+within compiled scene windows, including transition margins. Empty or unavailable
+ASR remains unknown; normalized text matching remains an observation requiring
+review. Source reports cannot substitute for final-output reports.
+
+### Durable Pi repair lifecycle
+
+`apps/server/src/self-repair.mjs` orchestrates:
+
+1. Inspect the current-revision final artifact and preserve the baseline report.
+2. Identify eligible localized speech timing/text observations. Missing media,
+   missing contributions, unknown required evidence and unsupported mappings stop.
+3. Reserve a repair round durably, then ask **ComfyRizz's embedded Pi** to inspect
+   the source, choose a justified trim, stage it and call `project_build`.
+4. Wait for the journal/CAS commit. Check the saved diff independently: only
+   source-in changes in eligible scenes and one revision increment are allowed.
+5. Use the existing admitted final CPU-export route, preserving readiness and
+   production-revision guards. Inspect the new receipt-bound bytes.
+6. Compare the same criteria, preserving previous passes and observed text
+   matches. Stop on regression, repeated output/evidence, no improvement, no-op,
+   tool/export failure, stale package, cancellation or exhausted allocation.
+
+There are at most **two reserved rounds per package across all repair IDs and
+conversations**, at most two CPU renders per run, a 15-minute run deadline and a
+120-second Pi-turn timeout. Reserving before Pi prevents crashes from resetting
+the budget. Interrupted work is inspectable and never automatically replayed;
+already committed edits and previous exports remain preserved.
+
+Repair mode exposes source/render inspection, `production_read`, focused package
+editing, build and history retrieval. Dispatch rejects other tools even if a model
+calls them. The server further restricts package edits to evidence-backed
+`backgroundSourceIn` fields in eligible scenes, and revalidates at stage/build.
+Opening another conversation cannot reset the controller's package budget.
+
+Each model request receives a server-assembled context outside history truncation:
+current package/revision, exact relevant dialogue and timing, allowed scenes,
+artifact/report hashes, localized observed speech, findings, authority and prior
+attempt evidence. Media-derived text remains data. The deterministic controller
+does not invent edits; Pi selects them through the existing tools.
+
+The HTTP entry point is authenticated `POST /api/self-repairs`, with explicit
+`authorizeExistingMediaRepair: true`, IDs/revision and `maxRepairs: 1 | 2`.
+`GET /api/self-repairs/:repairId` returns durable progress/outcome. Provider/model
+configuration stays server-owned; the conversation must already exist. This initial implementation is an API/chat
+capability; automatic invocation after every export and a dedicated UI are not
+implemented. A completed record means only **scoped automated checks satisfied**;
+`acceptance` remains `not_assessed`.
+
+Example request body (use current IDs from the saved film and its conversation):
+
+```json
+{
+  "repairId": "repair_review_001",
+  "packageId": "pkg_example",
+  "expectedRevision": 25,
+  "renderId": "r_012345abcdef",
+  "conversationId": "chat_existing_001",
+  "maxRepairs": 1,
+  "authorizeExistingMediaRepair": true
+}
+```
+
+Use the normal authenticated application client. Extra paths, observations,
+provider overrides or gate-override fields are rejected. Reusing an identical
+repair ID returns its durable record; changing its input is a conflict. Server
+shutdown cancels work. There is no HTTP resume/reset-budget operation.
 
 ## Practical next stages
 
-1. **Final-render inspection:** expose a read-only render inspector resolving
-   render ID from the existing trusted render receipt and binding both rendered
-   MP4 hash and package revision. Reuse `qa.mjs` frame QA/contact sheets and add
+1. **Richer final-render evidence:** reuse `qa.mjs` frame QA/contact sheets and add
    final-audio signal measurements (not just streams), ASR and source-to-output
    utterance comparison. Retain all original renders and reports. Never point a
    “final QA pass” at a source report or a newer package with an older render.
-2. **Production-scoped repair controller:** after render completion, run a
-   deterministic inspection job and feed findings to Pi. Reserve at most two
-   CPU correction rounds per production/output lineage, with a journaled
-   operation ID, cancellation and runtime budget. Reuse existing authorized
-   edit/CAS and CPU-export paths, then inspect new bytes. Stop on unknown
-   required criteria, no feasible repair, no improvement, conflicting authored
-   intent or exhausted budget. The current source-only tool cannot yet close
-   this automatic render→review→repair→re-render loop.
+2. **Live product validation:** exercise the complete controller with a real
+   configured Pi provider, genuine generated media and CPU export, then add an
+   opt-in UI/after-export entry point. Scripted-provider integration tests establish
+   tool execution and guards, not real-model diagnosis or audiovisual quality.
 3. **Brief-grounded criteria:** retain exact dialogue and explicit temporal
    requirements separately from model-generated plans. Align recognition to
    those requirements without prompting ASR to hear the expected line. Treat
@@ -227,6 +345,72 @@ separate from inspection reports and must be retained.
    and byte-bound generation/render receipts. Inspection does not authorize it.
 
 ## Regression evidence / verification
+
+### Final-render/controller follow-up
+
+- Final focused run: **146 tests passed, zero failures** across source/final
+  inspection, local ASR adapters, controller, HTTP integration, actual embedded-Pi
+  journey and agent conversation suites. Log:
+  `/tmp/opencode/comfyrizz-self-review-final-tests.tap`.
+- The embedded-Pi journey uses real local FFmpeg/ffprobe files and trusted test
+  receipts, explicitly synthetic ASR observations, and a scripted model through
+  the actual Pi loop. It inspects, selects an 18-source-frame trim, commits via
+  journal/CAS, renders the **committed** revision, reinspects and preserves the
+  baseline. Exact copy, assets and compiled timing remain unchanged. Forbidden
+  copy/draft/approval/premature-build tools commit nothing; stale final bytes
+  prevent inference. This is not a live-model film-repair acceptance test.
+- Controller tests cover no-op, source/staging faults, absent evidence, text
+  mismatch despite passing segment bounds, pass-to-fail regressions, changed
+  analyzer mode, persistent cross-conversation budgets, exact prior-attempt
+  context, cancellation, concurrency, interruption and idempotency.
+- HTTP integration tests cover normal authentication, explicit existing-media
+  authorization, server-owned provider settings, guarded export admission,
+  streamed completion and shutdown cancellation.
+- Source/final inspectors cover receipt/hash/revision tampering, safe file
+  resolution, silent/wordless films, missing H3 contributions, incomplete ASR
+  coverage, analyzer settings and unavailable capabilities. ASR adapter tests
+  use mocked Python libraries and local executables, including >60-second speech,
+  full bounded coverage and timestamp-origin validation.
+- Export/admission/artifact/snapshot and chat CAS/recovery/production-policy
+  regression suites pass. The newly stricter active-media preflight exposed one
+  old final-gate success fixture lacking its declared media; that fixture now
+  seeds those files before asserting successful admission.
+- Agent TypeScript build and `git diff --check` pass. Earlier pre-existing
+  finished-package drawing-test failures remain recorded below; they are not
+  presented as repaired by this work.
+
+#### Genuine delivered-MP4 smoke (CPU-only, isolated copy)
+
+The inspector ran against Spoon r31 / `r_b1a650b70c84`, hash
+`94115740340c6f124cc845fe5c2909ef67fdce0e8462167f4798c0a3923f1742`.
+It verified the historical package/timeline, both required H3 contributions,
+1920×1080, 900 frames and 30 fps. Video duration is 30 seconds; container duration
+is 30.016 seconds. Original package, final bytes, receipts and approvals were
+read-only; reports were written to an isolated temporary runtime.
+
+The first VAD-disabled recognition attempt hit a faster-whisper word-alignment
+`IndexError`; the inspector correctly reported speech unknown. The failure is
+preserved. Explicitly selecting VAD enabled successful local CPU inference:
+
+- **3.63–5.95 s:** “At 903 the office spoon vanished.”
+- **19.45–20.45 s:** “It was in my pocket.”
+
+Faster-whisper grouped both lines into one segment. The final inspector now
+retains validated word atoms and associates them with their actual scene windows,
+preserving the silent gap. No whole-film transcript is credited to the wrong scene.
+Both detected speech coverage checks pass, while the first transition margin and
+the confession/lower-third margin remain `needs_review`. The first text comparison
+also remains unmatched (`903` versus authored `nine-oh-three`); it is not silently
+rewritten or treated as proof of defective audio. Visual/lip-sync and human
+acceptance remain unassessed. No Pi repair was run against this delivered film.
+
+Successful report and summary:
+`/tmp/opencode/comfyrizz-final-review-spoon-7TiW4X/`, review
+`rr_24e7fcbea8c23cf99194da29802bb797787d8f67e463e4ed9f2c2a05095cc683`.
+Earlier ASR failure, explicit-mode execution and diagnostics:
+`/tmp/opencode/comfyrizz-final-review-spoon-HVToSE/`.
+No weights were downloaded, packages installed, remote model calls made or GPU
+work started by this smoke.
 
 `apps/server/test/source-review.test.mjs` encodes the reported failure arithmetic:
 speech at 4.40–6.62 s in a 190-frame/30-fps scene, repaired by a 0.75 s source-in;

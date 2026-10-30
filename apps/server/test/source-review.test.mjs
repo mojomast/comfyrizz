@@ -234,6 +234,20 @@ test('real CPU ffprobe supplies source bounds/audio presence, with ASR explicitl
   assert.equal(report.suggestedInFrame, null);
 });
 
+test('source inspection retains analyzer mode and refuses declared partial coverage', async t => {
+  const analyzer = { vadFilter: true, conditionOnPreviousText: false, wordTimestamps: true, downmix: 'mono', timestampCoordinates: 'original_media' };
+  const ctx = fixture(t, { transcribe: async () => ({ ...observed, analyzer,
+    coverage: { complete: true, startSeconds: 0, endSeconds: 7.292 } }) });
+  const report = await ctx.inspect();
+  assert.deepEqual(report.speech.analyzer, analyzer);
+  assert.equal(report.speech.coverage.complete, true);
+  const partial = fixture(t, { transcribe: async () => ({ ...observed,
+    coverage: { complete: true, startSeconds: 0, endSeconds: 6.9 } }) });
+  const refused = await partial.inspect();
+  assert.equal(refused.speech.status, 'unknown');
+  assert.equal(refused.suggestedInFrame, null);
+});
+
 test('normal chat tool loop inspects actual bytes, stages a repair, survives restart and saves through revision guards', async t => {
   const ctx = fixture(t, { real: true });
   const token = 'source-review-http-token';

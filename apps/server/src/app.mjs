@@ -89,6 +89,7 @@ import { createProductionCoordinator } from './productions/coordinator.mjs';
 import { createProductionRoutes } from './routes/productions.mjs';
 import { createPreferencesStore } from './productions/preferences.mjs';
 import { createIterationRoutes } from './productions/iteration-routes.mjs';
+import { createSelfRepairIntegration } from './self-repair-integration.mjs';
 
 const MAX_BODY = 5 * 1024 * 1024;
 // IP11: a completion save races with edits. Re-read the latest package and reapply the
@@ -1453,6 +1454,9 @@ export function createApp({
     readJson,
   });
 
+  const selfRepairs = createSelfRepairIntegration({ runtimeDir, store, projectChat, renderRoutes,
+    findBoundProduction, speechInspector, providerSettings });
+
   /**
    * Resolve a render target the same way for every render route: an in-memory draft is written to
    * a throwaway file (C1 compatibility, never mutating the stored package); otherwise the stored
@@ -1582,6 +1586,25 @@ export function createApp({
 
     const denied = auth(request, url);
     if (denied) return sendJson(response, denied.status, { error: denied.error });
+
+    if (url.pathname === '/api/self-repairs' && request.method === 'POST') {
+      try {
+        const record = await selfRepairs.start(await readJson(request));
+        return sendJson(response, record.status === 'running' ? 202 : 200, record,
+          { location: `/api/self-repairs/${record.repairId}` });
+      } catch (error) {
+        return sendJson(response, error.status ?? 500, { error: error.message, code: error.code });
+      }
+    }
+    const selfRepair = /^\/api\/self-repairs\/([^/]+)$/.exec(url.pathname);
+    if (selfRepair && request.method === 'GET') {
+      try {
+        const record = selfRepairs.get(selfRepair[1]);
+        return sendJson(response, record ? 200 : 404, record ?? { error: 'self repair not found' });
+      } catch (error) {
+        return sendJson(response, error.status ?? 500, { error: error.message, code: error.code });
+      }
+    }
 
     if (url.pathname === '/api/correction-shutdown' && request.method === 'GET') {
       try { return sendJson(response, 200, correctionShutdownStatus(productionStore, runtimeDir)); }
@@ -2587,6 +2610,6 @@ export function createApp({
     exportsDir,
     sceneCacheDir,
     webDist,
-    close: () => { pipelines.close(); events.closeAll(); },
+    close: () => { const repairsClosed = selfRepairs.close(); pipelines.close(); events.closeAll(); return repairsClosed; },
   };
 }

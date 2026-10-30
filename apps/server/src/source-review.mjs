@@ -71,6 +71,17 @@ function speechEvidence(raw, durationSeconds) {
   if (!raw || typeof raw.provider !== 'string' || !raw.provider.trim() || raw.provider.length > 120
     || !Number.isFinite(raw.uncertaintySeconds) || raw.uncertaintySeconds < 0 || raw.uncertaintySeconds > 1
     || !Array.isArray(raw.segments) || raw.segments.length > 128) fail('Speech provider returned invalid evidence.');
+  if (raw.coverage !== undefined && (raw.coverage?.complete !== true || raw.coverage.startSeconds !== 0
+    || !Number.isFinite(raw.coverage.endSeconds) || Math.abs(raw.coverage.endSeconds - durationSeconds) > 0.1)) fail('Speech provider did not inspect the complete source.');
+  let analyzer;
+  if (raw.analyzer !== undefined) {
+    const value = raw.analyzer;
+    if (!value || Object.keys(value).length !== 5 || typeof value.vadFilter !== 'boolean'
+      || value.conditionOnPreviousText !== false || value.wordTimestamps !== true
+      || value.downmix !== 'mono' || value.timestampCoordinates !== 'original_media') fail('Unsupported source speech analyzer settings.');
+    analyzer = { vadFilter: value.vadFilter, conditionOnPreviousText: false, wordTimestamps: true,
+      downmix: 'mono', timestampCoordinates: 'original_media' };
+  }
   let end = 0;
   const segments = raw.segments.map(segment => {
     if (!segment || !Number.isFinite(segment.start) || !Number.isFinite(segment.end)
@@ -81,6 +92,8 @@ function speechEvidence(raw, durationSeconds) {
   });
   return { status: segments.length ? 'measured' : 'unknown', provider: raw.provider,
     uncertaintySeconds: raw.uncertaintySeconds, segments,
+    ...(analyzer ? { analyzer } : {}),
+    ...(raw.coverage ? { coverage: { complete: true, startSeconds: 0, endSeconds: raw.coverage.endSeconds } } : {}),
     limitation: 'ASR may omit, misrecognize or hallucinate words; timestamp margin is not a calibrated confidence score. No exact-dialogue or human acceptance certification.' };
 }
 
