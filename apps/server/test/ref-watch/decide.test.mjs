@@ -59,7 +59,7 @@ const rows = [
   },
   {
     name: 'escalates when the production cap is exhausted',
-    input: { verdict: verdict('fail', [failed('anatomy')]), attempt: 0, regenJobsUsed: 1, stillCount: 4, identityFailures: 0 },
+    input: { verdict: verdict('fail', [failed('anatomy')]), attempt: 0, regenJobsUsed: 2, stillCount: 4, identityFailures: 0 },
     action: 'escalate',
   },
   {
@@ -74,7 +74,7 @@ const rows = [
   },
   {
     name: 'escalates identity replacement when no cap slot remains',
-    input: { verdict: verdict('fail', [failed('identity')]), attempt: 0, regenJobsUsed: 1, stillCount: 4, identityFailures: 2 },
+    input: { verdict: verdict('fail', [failed('identity')]), attempt: 0, regenJobsUsed: 2, stillCount: 4, identityFailures: 2 },
     action: 'escalate',
   },
   {
@@ -96,7 +96,7 @@ const rows = [
 
 test('decision table: 12 rows', () => {
   assert.equal(rows.length, 12);
-  assert.equal(refRegenJobCap(4, REF_POLICY_DEFAULTS), 1);
+  assert.equal(refRegenJobCap(4, REF_POLICY_DEFAULTS), 2);
   for (const row of rows) {
     assert.equal(validateRefVerdict(row.input.verdict).ok, true, `${row.name}: fixture verdict is valid`);
     const decision = decide(row.input);

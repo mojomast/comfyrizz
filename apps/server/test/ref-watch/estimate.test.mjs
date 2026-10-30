@@ -119,6 +119,10 @@ test('the per-still cap blocks at maxRegensPerStill attempts', () => {
   assert.equal(open.blocked, false);
 });
 
+test('the production cap uses the max(2, 25%) floor and stays at most 6', () => {
+  assert.deepEqual([0, 1, 4, 8, 12, 24, 40].map((n) => refRegenJobCap(n, REF_POLICY_DEFAULTS)), [0, 2, 2, 2, 3, 6, 6]);
+});
+
 test('the production cap blocks when the next job would exceed refRegenJobCap', () => {
   const cap = refRegenJobCap(8, REF_POLICY_DEFAULTS);
   assert.equal(cap, 2);

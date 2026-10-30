@@ -84,10 +84,10 @@ export function validateRefDecision(d) {
   return result(e);
 }
 
-/** Production-wide regen job cap: min(maxRegenJobs, floor(stills * fraction)), and at least 1 when there is a still. */
+/** Production-wide regen job cap: 0 without stills, else min(maxRegenJobs, max(2, floor(stills * fraction))). */
 export function refRegenJobCap(stillCount, policy = REF_POLICY_DEFAULTS) {
   if (!Number.isSafeInteger(stillCount) || stillCount <= 0) return 0;
-  return Math.min(policy.maxRegenJobs, Math.max(1, Math.floor(stillCount * policy.maxRegenFraction)));
+  return Math.min(policy.maxRegenJobs, Math.max(2, Math.floor(stillCount * policy.maxRegenFraction)));
 }
 
 /** The LTX gate opens only for these states. Everything else holds the video job (fail-closed). */

@@ -125,7 +125,7 @@ function deps(videoId, jobs) {
 }
 
 test('four scripted stills: pass, anatomy regen, identity replace_ref then escalate, reviewer error held', async () => {
-  assert.equal(refRegenJobCap(4), 1);
+  assert.equal(refRegenJobCap(4), 2);
   assert.equal(refRegenJobCap(12), 3);
   const fetch = globalThis.fetch;
   globalThis.fetch = () => { throw new Error('network disabled'); };
@@ -331,8 +331,8 @@ test('four scripted stills: pass, anatomy regen, identity replace_ref then escal
   }
 });
 
-test('a four-still production queues only one regen', async () => {
-  assert.equal(refRegenJobCap(4), 1);
+test('a four-still production queues two regens', async () => {
+  assert.equal(refRegenJobCap(4), 2);
   const runtimeDir = mkdtempSync(join(tmpdir(), 'ref-watch-cap-'));
   const sample = estimateRegen({
     decision: { action: 'reprompt', attempt: 0, jobId: 'still_a' },
@@ -368,12 +368,12 @@ test('a four-still production queues only one regen', async () => {
       await controller.handle(preview(id, shaOf(id)));
     }
     const regens = submitted.filter((entry) => entry.batch === 'regen');
-    assert.equal(regens.length, 1);
+    assert.equal(regens.length, 2);
     assert.ok(regens.length <= refRegenJobCap(4));
     assert.equal(submitted.some((entry) => entry.batch === 'video'), false);
     const status = budgetLedger.status();
     assert.ok(status.committed + status.spent <= status.ceiling);
-    assert.equal(status.openReservations.length, 1);
+    assert.equal(status.openReservations.length, 2);
   } finally {
     rmSync(runtimeDir, { recursive: true, force: true });
   }

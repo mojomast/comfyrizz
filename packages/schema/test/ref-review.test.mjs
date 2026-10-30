@@ -36,9 +36,9 @@ test('reprompt decision validates; override without receipt is rejected', () => 
   assert.equal(r.ok, false);
   assert.ok(r.errors.some(e => e.includes('receiptId')));
 });
-test('regen job cap is min(6, 25% of stills), at least 1', () => {
+test('regen job cap is min(6, max(2, 25% of stills)), and 0 when there is no still', () => {
   assert.deepEqual(REF_POLICY_DEFAULTS, { maxRegensPerStill: 2, maxRegenJobs: 6, maxRegenFraction: 0.25 });
-  assert.deepEqual([0, 1, 4, 8, 20, 24, 40].map(n => refRegenJobCap(n)), [0, 1, 1, 2, 5, 6, 6]);
+  assert.deepEqual([0, 1, 4, 8, 12, 24, 40].map(n => refRegenJobCap(n)), [0, 2, 2, 2, 3, 6, 6]);
 });
 test('gate is fail-closed', () => {
   assert.deepEqual(REF_GATE_STATES.filter(refGateOpen), ['accepted', 'overridden']);
