@@ -597,6 +597,7 @@ export function createRunController({ backendFactory, events = null, runtimeDir,
       finished: record.finished === true,
       error: typeof record.error === 'string' ? record.error : null,
       errorCode: typeof record.errorCode === 'string' ? record.errorCode : null,
+      renderError: typeof record.renderError === 'string' ? record.renderError : null,
       settlement: record.settled ?? null,
       revision: record.revision ?? null,
       render: record.render ?? null,
@@ -1337,16 +1338,15 @@ export function createRunController({ backendFactory, events = null, runtimeDir,
           : { kind: 'completed', units: incrementOf(record) };
       }
       const settled = settle(record, outcome.units, outcome.kind);
-      // IP24L: a production-bound run additionally settles the IP20 slot and
-      // journals the action outcome. The run record is written first, so a
-      // crash between the ledger and the journal is repaired from disk by the
-      // next controller start.
+      // Every fresh run retains its actual completion outcome. Unbound Super
+      // Easy finals need this alongside the original render inputs for review;
+      // a receipt alone never proves successful end-to-end completion.
+      // IP24L: bound runs additionally settle the IP20 slot and journal the
+      // action. Persist first so restart can repair a ledger/journal interruption.
       const bound = Boolean(productionStore && record.productionId && record.actionId);
-      if (bound) {
-        record.finished = true;
-        record.finishedAt = new Date().toISOString();
-        persistRunRecord(record);
-      }
+      record.finished = true;
+      record.finishedAt = new Date().toISOString();
+      persistRunRecord(record);
       if (ledger) settleLedgerRun(ledger, reservationId ?? `run:${record.runId}`, settled);
       if (bound) {
         try {

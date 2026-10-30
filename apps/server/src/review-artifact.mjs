@@ -89,12 +89,17 @@ export function readReviewArtifact({ runtimeDir, packageDir, renderId }) {
       const inputBytes = readOwned(root, 'runs', renderId, 'render-input.json');
       const stateBytes = readOwned(root, 'runs', renderId, 'state.json');
       const input = JSON.parse(inputBytes), state = JSON.parse(stateBytes);
+      // Successful backends may settle measured actual usage rather than the
+      // estimated completed amount. Completion still requires all state, input
+      // and receipt checks below; actual usage alone is never success evidence.
+      const settled = state.settlement?.kind === 'completed'
+        || state.settlement?.kind === 'actual' && Number.isFinite(state.settlement.units) && state.settlement.units >= 0;
       // run.mjs persists this schema with done + finished, not a synthetic
       // succeeded boolean. A completed media settlement alone is insufficient.
       if (state.schema !== 'comfyrizz.run-record/v1' || state.runId !== renderId || input.runId !== renderId
         || state.status !== 'done' || state.finished !== true || state.error != null || state.errorCode != null
         || state.renderError != null || state.manifest?.complete === false
-        || state.settlement?.kind !== 'completed' || state.packageId !== input.packageId
+        || !settled || state.packageId !== input.packageId
         || !state.render || !input.render || canonicalJson(state.render) !== canonicalJson(input.render)) throw missing();
       const render = state.render;
       inputs = { package: input.package, timeline: input.timeline };

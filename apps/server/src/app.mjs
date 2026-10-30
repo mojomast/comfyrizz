@@ -98,6 +98,8 @@ import { createProductionRoutes } from './routes/productions.mjs';
 import { createPreferencesStore } from './productions/preferences.mjs';
 import { createIterationRoutes } from './productions/iteration-routes.mjs';
 import { createSelfRepairIntegration } from './self-repair-integration.mjs';
+import { createRenderReviewer } from './render-review.mjs';
+import { createRenderReviewRoutes } from './routes/render-reviews.mjs';
 
 const MAX_BODY = 5 * 1024 * 1024;
 // IP11: a completion save races with edits. Re-read the latest package and reapply the
@@ -582,7 +584,7 @@ export function createApp({
       renderMetadata = { bytes: rendered.bytes, frames: rendered.frames, timeline_sha256: receipt.timelineHash,
         package_sha256: receipt.packageHash, video_sha256: receipt.videoSha256, url: `/api/run/${record.runId}/video` };
       // Historical downloads bind to this render's inputs, never a later editable revision.
-      // Unbound legacy runs have no durable state.json, so retain their binding here too.
+      // The controller persists the final completion state after this callback.
       writeFileSync(join(runtimeDir, 'runs', record.runId, 'render-input.json'), JSON.stringify({
         ...renderInput, runId: record.runId, packageId: id, render: renderMetadata,
       }), { mode: 0o600 });
@@ -1491,7 +1493,9 @@ export function createApp({
     readJson,
   });
 
-  const selfRepairs = createSelfRepairIntegration({ runtimeDir, store, projectChat, renderRoutes,
+  const renderReviewer = createRenderReviewer({ runtimeDir, packageDir: store.dir, transcribe: speechInspector });
+  const renderReviewRoutes = createRenderReviewRoutes({ store, reviewer: renderReviewer, readJson, sendJson });
+  const selfRepairs = createSelfRepairIntegration({ runtimeDir, store, projectChat, renderRoutes, reviewer: renderReviewer,
     findBoundProduction, speechInspector, providerSettings,
     // Fixed final intent, no caller body/override: this path only reads the
     // existing gate and emits its refusal. Rendering still admits independently.
@@ -1712,6 +1716,12 @@ export function createApp({
     const ownerOk = actor.role === 'owner';
     const guest = actor.guest;
 
+    // These surfaces read owner media/conversations and can authorize repair.
+    // Invite credentials never gain access, including outside the hosted profile.
+    if (!ownerOk && /^\/api\/(?:render-reviews|self-repairs)(?:\/|$)/.test(url.pathname)) {
+      return sendJson(response, 403, { error: 'Render review and repair require owner access.', code: 'GUEST_FORBIDDEN' });
+    }
+
     if (guest && guestShowcase) {
       if (url.pathname === '/api/demo/showcase' && request.method === 'GET') {
         return sendJson(response, 200, { items: guestShowcase.list(guest.inviteId, Number(url.searchParams.get('limit') ?? 50)) });
@@ -1776,6 +1786,8 @@ export function createApp({
       }
     }
 
+    if (await renderReviewRoutes.handle(request, response, url)) return;
+
     if (url.pathname === '/api/self-repairs' && request.method === 'POST') {
       try {
         const record = await selfRepairs.start(await readJson(request));
@@ -1789,7 +1801,7 @@ export function createApp({
     if (selfRepair && request.method === 'GET') {
       try {
         const record = selfRepairs.get(selfRepair[1]);
-        return sendJson(response, record ? 200 : 404, record ?? { error: 'self repair not found' });
+        return sendJson(response, record ? 200 : 404, record ?? { error: 'self repair not found', code: 'SELF_REPAIR_NOT_FOUND' });
       } catch (error) {
         return sendJson(response, error.status ?? 500, { error: error.message, code: error.code });
       }

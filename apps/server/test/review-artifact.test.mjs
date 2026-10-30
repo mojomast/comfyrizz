@@ -131,6 +131,17 @@ test('normal artifact also rejects forged timeline content and oversized or syml
   assert.throws(ctx.read, { code: 'ARTIFACT_MISSING' });
 });
 
+test('actual spend settlement is accepted only with a fully completed render and valid measured units', t => {
+  const ctx = fixture(t), original = json(ctx.stateFile);
+  save(ctx.stateFile, { ...original, settlement: { kind: 'actual', units: 0.25 } });
+  assert.equal(ctx.read().metadata.videoSha256, sha(ctx.video));
+  for (const change of [{ status: 'failed' }, { finished: false }, { renderError: 'render failed' },
+    { settlement: { kind: 'actual' } }, { settlement: { kind: 'actual', units: -1 } }]) {
+    save(ctx.stateFile, { ...original, settlement: { kind: 'actual', units: 0.25 }, ...change });
+    assert.throws(ctx.read, { code: 'ARTIFACT_MISSING' });
+  }
+});
+
 test('rehashed substituted historical timeline cannot reuse the existing receipt', t => {
   const ctx = fixture(t), input = json(ctx.inputFile), state = json(ctx.stateFile);
   const { hash, ...body } = input.timeline;

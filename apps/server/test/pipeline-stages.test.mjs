@@ -6,6 +6,8 @@ import { dirname, join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { fixture } from './pipeline-fixture.mjs';
 import { collectMockContribution } from './helpers/comfy-contribution.mjs';
+import { createHash } from 'node:crypto';
+import { canonicalJson } from '../../../packages/planner/dist/src/index.js';
 
 test('worker reports that music background auditions have no automatic sync diagnostic even with SyncNet configured', async t => {
   const f = fixture(t);
@@ -30,6 +32,17 @@ test('all nine stages enforce voice → measured timing → media shutdown → s
   assert.equal(f.events.filter(e => e.kind === 'stage' && e.status === 'completed').length, 9);
   assert.ok(f.events.some(e => e.kind === 'progress' && e.progress?.unit === 'frames'));
   assert.ok(f.events.some(e => e.kind === 'result'));
+  const inputFile = join(f.spec.runDir, 'render-input.json');
+  const original = readFileSync(inputFile), input = JSON.parse(original);
+  const digest = value => createHash('sha256').update(value).digest('hex');
+  assert.equal(input.schema, 'comfyrizz.pipeline-render-input/v1');
+  assert.equal(input.runId, f.spec.runId);
+  assert.equal(input.render.package_sha256, digest(canonicalJson(input.package)));
+  assert.equal(input.render.timeline_sha256, input.timeline.hash);
+  assert.equal(input.timeline.sourceHash, input.render.package_sha256);
+  assert.equal(input.render.video_sha256, digest(readFileSync(join(f.spec.runDir, 'video.mp4'))));
+  writeFileSync(join(f.spec.workDir, 'package.json'), JSON.stringify({ ...input.package, title: 'Later editable copy' }));
+  assert.deepEqual(readFileSync(inputFile), original, 'later work-package edits do not rewrite original render inputs');
 });
 
 test('a generation failure still cleans up and never invokes sync/render/export', async t => {
@@ -82,6 +95,7 @@ test('wordless native-audio plans still reject a missing soundtrack', async t =>
   assert.equal(await executePipeline(f.spec, f.adapters), 1);
   assert.equal(f.events.at(-1).stageId, 'verify');
   assert.equal(f.calls.includes('export'), false);
+  assert.equal(existsSync(join(f.spec.runDir, 'render-input.json')), false);
 });
 
 test('verify records a passing narration envelope in verification.json', async t => {

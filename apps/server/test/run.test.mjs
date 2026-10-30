@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { createServer, request as httpRequest } from 'node:http';
-import { mkdtempSync, readFileSync, rmSync, mkdirSync, writeFileSync } from 'node:fs';
+import { cpSync, mkdtempSync, readFileSync, rmSync, mkdirSync, writeFileSync } from 'node:fs';
 import { createHash } from 'node:crypto';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -83,6 +83,7 @@ const stubRender = async (_packagePath, output) => {
 function makeApp({ factory }) {
   const runtime = mkdtempSync(join(tmpdir(), 'comfyrizz-run-'));
   const app = createApp({ token: TOKEN, runtimeDir: runtime, backendFactory: factory, render: stubRender });
+  cpSync(join(repoRoot, 'examples', 'launch-demo', 'assets'), join(app.store.dir, 'assets'), { recursive: true });
   return { app, runtime };
 }
 

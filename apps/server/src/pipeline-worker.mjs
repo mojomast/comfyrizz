@@ -1,4 +1,4 @@
-import { copyFileSync, cpSync, existsSync, mkdirSync, readFileSync, rmSync, statSync } from 'node:fs';
+import { copyFileSync, cpSync, existsSync, mkdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { recordGenerationReceipts, assertModelContribution, recordRenderedContribution } from '../../../packages/jobs/src/model-contribution.mjs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -377,8 +377,20 @@ with zipfile.ZipFile(sys.argv[1]) as z:
       }
       if (Object.values(report.checks).some(value => !value)) throw new Error('Final video verification failed');
       const verifiedPackage = json(packagePath);
+      const verifiedTimeline = renderResult.timeline ?? compileTimeline(verifiedPackage, narrationOptions(workDir));
       report.modelContribution = recordRenderedContribution({ pkg: verifiedPackage, packageDir: workDir,
-        timeline: compileTimeline(verifiedPackage, narrationOptions(workDir)), videoPath: join(runDir, 'video.mp4') });
+        timeline: verifiedTimeline, videoPath: join(runDir, 'video.mp4') });
+      // Preserve the exact fresh publication inputs, never reconstruct them from
+      // an editable project on a later review request. Pipeline completion still
+      // requires successful export and clean worker exit; this is not an r_/run_
+      // artifact alias or evidence that the pipeline has completed.
+      writeFileSync(join(runDir, 'render-input.json'), JSON.stringify({
+        schema: 'comfyrizz.pipeline-render-input/v1', runId, packageId: verifiedPackage.id,
+        package: verifiedPackage, timeline: verifiedTimeline,
+        render: { bytes: renderResult.bytes, frames: renderResult.frames,
+          package_sha256: report.modelContribution.packageHash, timeline_sha256: report.modelContribution.timelineHash,
+          video_sha256: report.modelContribution.videoSha256 },
+      }), { flag: 'wx', mode: 0o600 });
     } catch (error) {
       report.error = error.message;
       if (plan.voiced && report.checks.narrationEnvelope === undefined) report.checks.narrationEnvelope = false;
