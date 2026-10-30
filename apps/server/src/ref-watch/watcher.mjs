@@ -1,3 +1,4 @@
+import { join } from 'node:path';
 // RW01: watch verified still previews and seed one reference review per keyframe sha.
 // Pure module: the caller injects enqueue/onEvent, and no disk, network or clock is read.
 import { REF_EVENTS } from '../../../../packages/schema/src/ref-review.mjs';
@@ -59,7 +60,10 @@ export function createRefWatcher({ jobsDoc, enqueue, onEvent, now }) {
         if (consumers.length === 0) continue;
         const key = `${job.id}:${keyframeSha256}`;
         if (seen.has(key)) continue;
-        await enqueue({ jobId: job.id, keyframeSha256, imagePath, consumers });
+        // imagePath stays package-relative (regen/edit inputs name it); imageFile is the collected
+        // file on this host, which is what the judge has to read.
+        const imageFile = typeof event.outputDir === 'string' && event.outputDir ? join(event.outputDir, imagePath) : null;
+        await enqueue({ jobId: job.id, keyframeSha256, imagePath, ...(imageFile ? { imageFile } : {}), consumers });
         seen.add(key);
         onEvent({
           type: REF_REVIEW_STARTED,

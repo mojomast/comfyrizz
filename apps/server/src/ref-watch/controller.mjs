@@ -501,7 +501,7 @@ export function createRefWatchController({
     record.state = 'reviewing';
 
     const measured = typeof measure === 'function'
-      ? await measure({ job, imagePath: seed.imagePath, attempt: record.attempt })
+      ? await measure({ job, imagePath: seed.imageFile ?? seed.imagePath, attempt: record.attempt })
       : null;
     const plannedWidth = job.dims?.width ?? measured?.width ?? 1024;
     const plannedHeight = job.dims?.height ?? measured?.height ?? 576;
@@ -545,7 +545,7 @@ export function createRefWatchController({
     if (!t0HardFail(t0Verdict)) {
       let reviewed;
       try {
-        reviewed = await callReviewer(request, { path: seed.imagePath, sha256: seed.keyframeSha256 });
+        reviewed = await callReviewer(request, { path: seed.imageFile ?? seed.imagePath, sha256: seed.keyframeSha256 });
       } catch (error) {
         const reason = error?.code === 'REVIEW_TIMEOUT' ? 'reviewer timed out' : (error?.message ?? 'reviewer failed');
         failClosed(seed, reason, [...verdicts, errorVerdict(seed)]);

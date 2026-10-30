@@ -1289,6 +1289,7 @@ export function createColabBackend({
       let refWatchGate = null;
       const refWatchQueue = [];
       let reviewChain = Promise.resolve();
+      const previewedJobs = new Set();
       // True while the zip on the VM is the plan that was uploaded for this run. A regen or a
       // partial video release replaces it; the next planned batch puts the plan back first.
       let jobsZipIsPlan = true;
@@ -1369,6 +1370,7 @@ export function createColabBackend({
             if (result.code !== 0) throw new Error('Live preview download unavailable; will retry');
           },
           onReady: (payload) => {
+            for (const entry of payload?.manifest?.jobs ?? []) if (entry?.job) previewedJobs.add(entry.job);
             const event = { type: 'preview_ready', ...payload };
             emit(onEvent, event);
             queueReviewEvent(event);
@@ -1415,6 +1417,21 @@ export function createColabBackend({
         }
         manifest = collect.manifest;
         if (collect.manifest) batchManifests.push(collect.manifest);
+        // SPW e2e: the live preview tap is best effort (it can fail to download while the batch
+        // runs). Every still the batch collected that never produced a preview is handed to the
+        // reference watch from the verified collection, so the gate never waits on a lost preview.
+        if (refWatchGate && collect.manifest && collect.localDir) {
+          for (const entry of collect.manifest.jobs ?? []) {
+            if (!entry?.job || previewedJobs.has(entry.job)) continue;
+            if (entry.status !== "succeeded" && entry.status !== "cached") continue;
+            const planned = doc.jobs.find((job) => job.id === entry.job);
+            if (!planned || isVideoJob(planned)) continue;
+            previewedJobs.add(entry.job);
+            const event = { type: "preview_ready", source: "collected", manifest: { ...collect.manifest, complete: false, jobs: [entry] }, outputDir: collect.localDir };
+            emit(onEvent, event);
+            queueReviewEvent(event);
+          }
+        }
         return null;
       }
 

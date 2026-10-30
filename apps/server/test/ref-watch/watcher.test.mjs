@@ -64,12 +64,14 @@ test('a five-event stream enqueues only the two unique keyframe stills', async (
     jobId: 'still_a',
     keyframeSha256: sha('a'),
     imagePath: 'assets/still_a.png',
+    imageFile: 'run/previews/assets/still_a.png',
     consumers: ['video_a', 'video_b'],
   });
   assert.deepEqual(enqueued[1], {
     jobId: 'still_b',
     keyframeSha256: sha('b'),
     imagePath: 'assets/still_b.jpg',
+    imageFile: 'run/previews/assets/still_b.jpg',
     consumers: ['video_c'],
   });
 });
