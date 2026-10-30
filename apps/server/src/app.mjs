@@ -336,6 +336,16 @@ export function createApp({
   const takeStore = createTakeStore({ runtimeDir, packageDir: store.dir });
   const events = new EventLog();
   const agentProgress = new Map();
+  // Guest planning progress is isolated per redeemed guest session. The owner
+  // registry must never expose a guest's brief or tool activity.
+  const guestAgentProgress = new Map();
+  const GUEST_AGENT_PROGRESS_TTL_MS = 60 * 60 * 1000;
+  const guestProgressOwner = guest => createHash('sha256').update(String(guest?.guestToken ?? '')).digest('hex');
+  function pruneGuestAgentProgress(now = Date.now()) {
+    for (const [sessionId, entry] of guestAgentProgress) {
+      if (now - entry.updatedAt > GUEST_AGENT_PROGRESS_TTL_MS) guestAgentProgress.delete(sessionId);
+    }
+  }
   const activeAgents = new Map();
   const publishEntry = events.publish.bind(events);
   let pipelines = null;
@@ -1840,7 +1850,7 @@ export function createApp({
     // of them are bound to the invite ledger, the hosted profile must deny
     // them rather than let a guest bypass the invite's compute ceiling.
     if (guest && process.env.COMFYRIZZ_HOSTED_INVITES === '1') {
-      const safeRead = request.method === 'GET' && ['/api/brief/presets', '/api/voice-options', '/api/animation-options'].includes(url.pathname);
+      const safeRead = request.method === 'GET' && ['/api/brief/presets', '/api/voice-options', '/api/animation-options', '/api/agent/progress'].includes(url.pathname);
       // Hosted production actions must use the guarded outbox. The direct run
       // route can race that path and has only in-memory guest attribution.
       const safePost = request.method === 'POST' && ['/api/brief', '/api/agent'].includes(url.pathname);
@@ -2287,6 +2297,15 @@ export function createApp({
 
     if (url.pathname === '/api/agent/progress' && request.method === 'GET') {
       const sessionId = url.searchParams.get('sessionId') ?? '';
+      if (guest) {
+        // A guest may read only the planning session started with the same
+        // redeemed session token. Never fall back to the newest owner session.
+        const entry = sessionId ? guestAgentProgress.get(sessionId) : null;
+        if (!entry || entry.ownerKey !== guestProgressOwner(guest)) {
+          return sendJson(response, 404, { error: 'planning session not found' });
+        }
+        return sendJson(response, 200, entry.progress.snapshot());
+      }
       if (!sessionId) {
         const latest = Array.from(agentProgress.values()).at(-1);
         if (latest) return sendJson(response, 200, latest.snapshot());
@@ -2325,27 +2344,49 @@ export function createApp({
     if (url.pathname === '/api/agent' && request.method === 'POST') {
       if (guest && process.env.COMFYRIZZ_HOSTED_INVITES === '1') {
         const body = await readJson(request);
+        const rawSession = typeof body.sessionId === 'string' ? body.sessionId.trim() : '';
+        const sessionId = rawSession || randomUUID();
+        if (!/^[A-Za-z0-9_-]{8,80}$/.test(sessionId)) {
+          return sendJson(response, 400, { error: 'Invalid planning session id.' });
+        }
+        const active = providerSettings?.snapshot?.().active;
+        const provider = process.env.COMFYRIZZ_INVITE_PLANNER_PROVIDER || active?.provider;
+        const model = process.env.COMFYRIZZ_INVITE_PLANNER_MODEL || active?.model;
+        if ((!provider || provider === 'none') && !guestRunnerFactory) return sendJson(response, 503, { error: 'The host has not configured a planning model.', code: 'INVITE_PLANNER_UNAVAILABLE' });
+        if (typeof body.brief !== 'string' || !body.brief.trim() || body.brief.length > 12000) return sendJson(response, 400, { error: 'A brief of at most 12000 characters is required.' });
+        pruneGuestAgentProgress();
+        if (guestAgentProgress.has(sessionId)) {
+          return sendJson(response, 409, { error: 'planning session already active', code: 'PLANNING_SESSION_ACTIVE' });
+        }
+        const progress = createAgentProgress(sessionId);
+        const entry = { ownerKey: guestProgressOwner(guest), progress, updatedAt: Date.now() };
+        guestAgentProgress.set(sessionId, entry);
+        if (guestAgentProgress.size > 100) {
+          guestAgentProgress.delete(guestAgentProgress.keys().next().value);
+        }
+        progress.update({ type: 'request', brief: body.brief });
         try {
-          const active = providerSettings?.snapshot?.().active;
-          const provider = process.env.COMFYRIZZ_INVITE_PLANNER_PROVIDER || active?.provider;
-          const model = process.env.COMFYRIZZ_INVITE_PLANNER_MODEL || active?.model;
-          if ((!provider || provider === 'none') && !guestRunnerFactory) return sendJson(response, 503, { error: 'The host has not configured a planning model.', code: 'INVITE_PLANNER_UNAVAILABLE' });
-          if (typeof body.brief !== 'string' || !body.brief.trim() || body.brief.length > 12000) return sendJson(response, 400, { error: 'A brief of at most 12000 characters is required.' });
           const build = createGuestPackageBuilder({ runtimeDir, store, ledger: inviteLedger,
             ...(guestRunnerFactory ? { runnerFactory: guestRunnerFactory } : {}),
             provider, model, resolveProviderConfig: providerSettings?.resolve });
           const result = await build({ inviteId: guest.inviteId, brief: body.brief,
             proposalRevision: body.proposalRevision, videoType: body.videoType,
             motionModel: ['auto', 'h3', 'ltx', 'klein'].includes(body.motionModel) ? body.motionModel : 'auto',
-            signal: AbortSignal.timeout(300000) });
+            signal: AbortSignal.timeout(300000),
+            onEvent: event => {
+              progress.update(event);
+              entry.updatedAt = Date.now();
+            } });
+          progress.finish('done');
           const timeline = compilePackage(result.package, dirname(store.path(result.package.id)));
           return sendJson(response, 200, {
-            package: result.package, revision: result.package.revision, timeline,
+            package: result.package, revision: result.package.revision, timeline, sessionId,
             generatedAssets: result.generatedAssets ?? {}, routes: result.routes ?? [],
             pendingGpu: result.pendingGpu ?? [], svgAssets: result.svgAssets ?? [],
             live: result.live === true, fallback: false, provider: result.provider, model: result.model,
           });
         } catch (error) {
+          progress.finish('failed', 'Planning failed.');
           // Provider failures can include request headers or host configuration.
           // Never reflect them to guests or copy them into public-service logs.
           console.error('[invite-package-build] planning failed');

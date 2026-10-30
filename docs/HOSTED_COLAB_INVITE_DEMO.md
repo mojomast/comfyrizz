@@ -181,6 +181,17 @@ was recorded as `verified_no_allocation` at 0 CU, and left the invite active
 with its full budget and film quota. The same package then passed preflight,
 Kokoro synthesis, and measured timing with the pinned environment.
 
+Hosted planning now streams guest-scoped agent activity. The guest UI polls
+`GET /api/agent/progress?sessionId=…`; the server accepts it only for a session
+started with the same redeemed guest token. Another guest, a missing session,
+and the owner's newest-progress fallback all return 404 to guests. Events are
+sanitized by the existing agent-progress redactor, and the bounded in-memory
+registry expires after one hour or beyond 100 sessions. The Activity drawer
+shows the submitted brief, planning steps, model milestones, tool calls and
+token totals while the proposal is being written. A live check on October 30
+confirmed the drawer changed from “starting · 0s” to “model streaming · 2s”
+with five events, without approving a film or allocating Google Colab.
+
 Two isolated browser contexts redeemed the same invite, entered the public
 gallery, opened Super Easy, selected Klein-only generation, submitted distinct
 eight-second silent-film prompts, and approved both proposals through the UI.

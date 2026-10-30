@@ -13,7 +13,7 @@ import { guestPackageDirectory } from './guest-editing.mjs';
 
 export function createGuestPackageBuilder({ runtimeDir, store, ledger, runnerFactory = createCpuAgentRunner, resolveProviderConfig, provider, model } = {}) {
   if (!runtimeDir || !store || !ledger) throw new TypeError('guest package builder requires runtime, store and ledger');
-  return async function build({ inviteId, brief, motionModel, signal, proposalRevision, videoType } = {}) {
+  return async function build({ inviteId, brief, motionModel, signal, proposalRevision, videoType, onEvent } = {}) {
     if (typeof brief !== 'string' || brief.trim() === '') throw new TypeError('brief is required');
     const invite = ledger.get(inviteId);
     if (!invite || ['expired', 'revoked'].includes(invite.status)) throw new Error('invite not active');
@@ -32,7 +32,7 @@ export function createGuestPackageBuilder({ runtimeDir, store, ledger, runnerFac
         const original = store.read(rev.packageId);
         if (!original || original.revision !== rev.baseRevision) throw Object.assign(new Error('Stale guest edit'), { status: 409 });
         const metadata = ledger.resourceDetails('package', rev.packageId);
-        const result = await runnerFactory({ runtimeDir: staging, resolveProviderConfig })({ brief, provider, model, signal,
+        const result = await runnerFactory({ runtimeDir: staging, resolveProviderConfig })({ brief, provider, model, signal, onEvent,
           sessionId: `guest-edit-${randomUUID()}`, proposalRevision: { package: original,
             originalBrief: metadata?.originalPrompt ?? metadata?.prompt ?? brief, note: rev.note,
             source: metadata?.originalPrompt ?? metadata?.prompt ?? brief } });
@@ -49,7 +49,7 @@ export function createGuestPackageBuilder({ runtimeDir, store, ledger, runnerFac
           guestPackageDirectory({ ledger, runtimeDir, store }, saved.id)), pendingGpu: [] };
       }
       // Provider/model are host configuration, never accepted from the browser.
-      const result = await runnerFactory({ runtimeDir: staging, resolveProviderConfig })({ brief, provider, model, motionModel, videoType, signal,
+      const result = await runnerFactory({ runtimeDir: staging, resolveProviderConfig })({ brief, provider, model, motionModel, videoType, signal, onEvent,
         sessionId: `guest-plan-${randomUUID()}` });
       const pkg = structuredClone(result.package);
       // The offline agent records image plans without attaching them to its

@@ -350,7 +350,7 @@ function harness(options = {}) {
 test('hosted Super Easy uses the invite budget and dispatches only through the production outbox', async () => {
   const { api, host, calls, store } = harness({ hosted: true });
   const forbidden = [];
-  for (const method of ['proposeActionPlan', 'startRun', 'colabStatus', 'getAgentProgress', 'cancelAgent', 'getRun', 'getRunVideo']) {
+  for (const method of ['proposeActionPlan', 'startRun', 'colabStatus', 'cancelAgent', 'getRun', 'getRunVideo']) {
     api[method] = async () => { forbidden.push(method); throw Error(`Owner API forbidden: ${method}`); };
   }
   host.aiSelection = async () => { throw new Error('Guests cannot read owner provider settings'); };
@@ -361,6 +361,21 @@ test('hosted Super Easy uses the invite budget and dispatches only through the p
   assert.equal(calls.filter(call => call.kind === 'dispatch').length, 1);
   assert.equal(calls.some(call => call.kind === 'run' || call.kind === 'colab-status'), false);
   assert.deepEqual(forbidden, [], 'server-authored hosted plans never enter the owner final-plan or run APIs');
+});
+
+test('hosted Super Easy polls guest-scoped agent activity while planning', async () => {
+  const { api, host, calls, store } = harness({ hosted: true });
+  let polls = 0;
+  api.getAgentProgress = async sessionId => {
+    polls += 1;
+    return { sessionId, status: 'running', activity: 'tool_running', milestone: 'storyboard.propose', recentEvents: [] };
+  };
+  host.aiSelection = async () => ({ provider: 'none' });
+  const result = await runSuperEasy({ prompt: PROMPT, hostedInvite: true }, { api, host, store, go: () => {} });
+  await new Promise(resolve => setTimeout(resolve, 10));
+  assert.equal(result.ok, true, JSON.stringify(result));
+  assert.ok(polls >= 1, 'hosted planning must read its own progress stream');
+  assert.ok(calls.some(call => call.kind === 'announce' && /Planning/.test(call.text)), 'agent activity reaches the visible status');
 });
 
 test('hosted Super Easy refuses before planning when the invite session is unavailable', async () => {
@@ -409,7 +424,7 @@ test('hosted constructor preserves explicit CPU shared-film edits through revise
     const { api, host, store, calls } = harness({ builtPackage: pkg, session: invite,
       actions: [{ id: 'act_cpu_final', kind: 'final', upperBound: 0, backendId: 'cpu' }] });
     const forbidden = [];
-    for (const method of ['proposeActionPlan', 'startRun', 'colabStatus', 'getAgentProgress', 'cancelAgent', 'getRun', 'getRunVideo']) {
+    for (const method of ['proposeActionPlan', 'startRun', 'colabStatus', 'cancelAgent', 'getRun', 'getRunVideo']) {
       api[method] = async () => { forbidden.push(method); throw Error(`Owner API forbidden: ${method}`); };
     }
     host.adoptBuiltPackage({ package: pkg });

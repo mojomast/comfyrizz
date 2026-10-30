@@ -584,7 +584,9 @@ export async function runSuperEasy(input: RunSuperEasyInput, deps: RunSuperEasyD
   }
 
   const write = (proposalOnly = false): Promise<void> => writePlan(deps.store.get(), {
-    api: (hosted ? { ...deps.api, getAgentProgress: undefined, cancelAgent: undefined } : deps.api) as never,
+    // Guest progress is scoped by the redeemed session on the server. Agent
+    // cancellation remains owner-only for now.
+    api: (hosted ? { ...deps.api, cancelAgent: undefined } : deps.api) as never,
     host: hosted ? { ...deps.host, aiSelection: async () => ({ provider: 'none' }) } : deps.host,
     store: deps.store,
   }, { stopAfterPackage: proposalOnly, deepSeekNoThinking: input.deepSeekNoThinking,
