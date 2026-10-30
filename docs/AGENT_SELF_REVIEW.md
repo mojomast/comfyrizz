@@ -3,6 +3,13 @@
 Research/implementation started 2026-10-30 from `de798c9` on
 `feat/agent-self-review-and-repair` in a separate worktree.
 
+Latest genuine-film evidence: [real Pi repair and teaser feasibility](AGENT_SELF_REVIEW_LIVE.md).
+Pi chose and saved a 17-source-frame Spoon correction using the real provider and
+ASR. A user-authorized supervised CPU export recovered the missing ending in final
+ASR, while transition and other quality findings remain open. The autonomous
+attempt correctly stopped at an existing approval gate; it is not represented as
+an unattended accepted delivery.
+
 ## Answer to the product question
 
 Yes: the agent should be able to inspect its work and perform authorized,
@@ -333,10 +340,11 @@ shutdown cancels work. There is no HTTP resume/reset-budget operation.
    final-audio signal measurements (not just streams), ASR and source-to-output
    utterance comparison. Retain all original renders and reports. Never point a
    “final QA pass” at a source report or a newer package with an older render.
-2. **Live product validation:** exercise the complete controller with a real
-   configured Pi provider, genuine generated media and CPU export, then add an
-   opt-in UI/after-export entry point. Scripted-provider integration tests establish
-   tool execution and guards, not real-model diagnosis or audiovisual quality.
+2. **Unattended product validation:** the real-provider correction and supervised
+   export are now evidenced separately. Exercise a normally admitted film through
+   the entire controller, improve remaining source-to-final margin handling, then
+   add an opt-in UI/after-export entry point. Scripted-provider integration tests
+   establish tool execution and guards, not audiovisual quality or acceptance.
 3. **Brief-grounded criteria:** retain exact dialogue and explicit temporal
    requirements separately from model-generated plans. Align recognition to
    those requirements without prompting ASR to hear the expected line. Treat
