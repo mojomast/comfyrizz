@@ -265,7 +265,7 @@ function isPaidAction(action: PlanCard['actions'][number]): boolean {
   return !(action.kind === 'audition' && action.engine === 'kokoro');
 }
 
-function hasPendingGeneratedShots(pkg: unknown): boolean {
+export function hasPendingGeneratedShots(pkg: unknown): boolean {
   if (!isRecord(pkg)) return false;
   const requiredAssetIds = new Set<string>();
   const scenes = Array.isArray(pkg.scenes) ? pkg.scenes : [];
