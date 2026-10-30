@@ -438,7 +438,7 @@ export function createColabBackend({
   const logs = logDir || join(scratch, "logs");
   mkdirSync(scratch, { recursive: true });
   if (modelsLock === join(REPO, 'colab', 'models.lock.json')) {
-    modelsLock = packageModelLock({ packageDir, scratchDir: scratch, repo: REPO, defaultLock: modelsLock });
+    modelsLock = packageModelLock({ packageDir, scratchDir: scratch, repo: REPO, defaultLock: modelsLock, refWatch: Boolean(refWatch) });
   }
   const registryFile = join(scratch, "sessions.json");
   // G4-2: a `pip install --user` CLI lives at ~/.local/bin/colab, which is not on the PATH the child
