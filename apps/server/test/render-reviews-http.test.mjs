@@ -30,8 +30,10 @@ async function harness(t, { transcribe } = {}) {
   await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
   t.after(async () => { await app.close(); server.closeAllConnections(); await new Promise(resolve => server.close(resolve)); rmSync(runtimeDir, { recursive: true, force: true }); });
   const origin = `http://127.0.0.1:${server.address().port}`;
+  // Hosted browser origins must be HTTPS; only the test transport is HTTP.
+  const requestOrigin = () => process.env.COMFYRIZZ_HOSTED_INVITES === '1' ? origin.replace(/^http:/, 'https:') : origin;
   const request = (path, body, credential = token, extraHeaders = {}) => fetch(origin + path, {
-    method: body === undefined ? 'GET' : 'POST', headers: { origin, 'content-type': 'application/json',
+    method: body === undefined ? 'GET' : 'POST', headers: { origin: requestOrigin(), 'content-type': 'application/json',
       ...(credential ? { 'x-comfyrizz-token': credential } : {}), ...extraHeaders },
     ...(body === undefined ? {} : { body: JSON.stringify(body) }),
   });

@@ -25,12 +25,14 @@ test('hosted Super Easy reaches the disabled spend boundary using real HTTP and 
   try {
     const minted = ledger.mint({ cu: 50, ttlDays: 1 });
     const base = `http://127.0.0.1:${server.address().port}`;
+    // Hosted browser origins must be HTTPS; only the test transport is HTTP.
+    const origin = base.replace(/^http:/, 'https:');
     const initial = await fetch(base + minted.path);
     const guest = (await initial.json()).guestToken;
     const calls = [];
     const api = createEasyApi((path, init = {}) => {
       calls.push(`${init.method ?? 'GET'} ${path}`);
-      return fetch(base + path, { ...init, headers: { ...init.headers, origin: base, 'x-comfyrizz-token': guest } });
+      return fetch(base + path, { ...init, headers: { ...init.headers, origin, 'x-comfyrizz-token': guest } });
     });
     const state = createEasyStore({ storage: { getItem: () => null, setItem() {} }, key: 'test' });
     const result = await runSuperEasy({ prompt: 'A short video about a friendly robot', hostedInvite: true }, {

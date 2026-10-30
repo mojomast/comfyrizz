@@ -44,6 +44,8 @@ test('two users of one link run together; shared gallery, models, private admin 
   const server = createServer(app.handler), admin = createServer(app.privateAdminHandler);
   await Promise.all([server, admin].map(s => new Promise(resolve => s.listen(0, '127.0.0.1', resolve))));
   const base = `http://127.0.0.1:${server.address().port}`, privateBase = `http://127.0.0.1:${admin.address().port}`;
+  // The hosted profile accepts only HTTPS browser origins; the transport is local HTTP in this test.
+  const origin = base.replace(/^http:/, 'https:');
   process.env.COMFYRIZZ_ADMIN_HOST = new URL(privateBase).host;
   const get = (path, token, privateRequest = false, extra = {}) => fetch((privateRequest ? privateBase : base) + path, {
     headers: { ...(token ? { 'x-comfyrizz-token': token } : {}), ...extra },
@@ -64,7 +66,7 @@ test('two users of one link run together; shared gallery, models, private admin 
     // Each real browser has its own approval-click latch. This process shares
     // that UI module, so admit each request in turn while holding BOTH workers.
     for (const [index, guest] of guests.entries()) {
-      const api = createEasyApi((path, init = {}) => fetch(base + path, { ...init, headers: { ...init.headers, origin: base, 'x-comfyrizz-token': guest } }));
+      const api = createEasyApi((path, init = {}) => fetch(base + path, { ...init, headers: { ...init.headers, origin, 'x-comfyrizz-token': guest } }));
       const store = createEasyStore({ storage: { getItem: () => null, setItem() {} }, key: `test-${index}` });
       const result = await runSuperEasy({ prompt: prompts[index], hostedInvite: true }, {
         api, store, go() {}, host: { adoptBuiltPackage() {}, async aiSelection() { return { provider: 'none' }; }, editorStore: {}, refreshClips() {} },
@@ -137,7 +139,7 @@ test('two users of one link run together; shared gallery, models, private admin 
     assert.equal(beforeCpu.status, 'exhausted');
     delete process.env.COMFYRIZZ_INVITE_SPEND_ENABLED;
     const guestFetch = (path, init = {}) => fetch(base + path, { ...init,
-      headers: { ...init.headers, origin: base, 'x-comfyrizz-token': guests[0] } });
+      headers: { ...init.headers, origin, 'x-comfyrizz-token': guests[0] } });
     const cpuApi = createEasyApi(guestFetch);
     const editResponse = await guestFetch(`/api/demo/generations/${item.id}/edit`, { method: 'POST' });
     assert.equal(editResponse.status, 200, await editResponse.clone().text());
@@ -147,7 +149,7 @@ test('two users of one link run together; shared gallery, models, private admin 
     assert.equal(ledger.resourceOwner('package', pkg.id), link.invite.id);
     assert.notEqual(pkg.id, packages[0].id);
     assert.equal((await get(`/api/package/${pkg.id}`, viewer)).status, 403);
-    const foreignEdit = await fetch(base + '/api/agent', { method: 'POST', headers: { origin: base, 'content-type': 'application/json', 'x-comfyrizz-token': viewer },
+    const foreignEdit = await fetch(base + '/api/agent', { method: 'POST', headers: { origin, 'content-type': 'application/json', 'x-comfyrizz-token': viewer },
       body: JSON.stringify({ brief: 'Edit a film', proposalRevision: { packageId: pkg.id, baseRevision: pkg.revision, note: 'Change logline' } }) });
     assert.equal(foreignEdit.status, 403);
     const cpuStore = createEasyStore({ storage: { getItem: () => null, setItem() {} }, key: 'cpu-edit' });

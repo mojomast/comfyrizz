@@ -51,9 +51,11 @@ for (const outcome of ['completed', 'failed']) test(`hosted fake pipeline ${outc
     const invite = ledger.mint({ cu: 50, ttlDays: 1 });
     const other = ledger.mint({ cu: 50, ttlDays: 1 });
     let base = `http://127.0.0.1:${server.address().port}`;
+    // Hosted browser origins must be HTTPS; only the test transport is HTTP.
+    let origin = base.replace(/^http:/, 'https:');
     const guest = (await (await fetch(base + invite.path)).json()).guestToken;
     const otherGuest = (await (await fetch(base + other.path)).json()).guestToken;
-    const apiFor = credential => createEasyApi((path, init = {}) => fetch(base + path, { ...init, headers: { ...init.headers, origin: base, 'x-comfyrizz-token': credential } }));
+    const apiFor = credential => createEasyApi((path, init = {}) => fetch(base + path, { ...init, headers: { ...init.headers, origin, 'x-comfyrizz-token': credential } }));
     const api = apiFor(guest);
     const state = createEasyStore({ storage: { getItem: () => null, setItem() {} }, key: 'test' });
     const result = await runSuperEasy({ prompt: 'A short video about a friendly robot', hostedInvite: true }, {
@@ -74,7 +76,7 @@ for (const outcome of ['completed', 'failed']) test(`hosted fake pipeline ${outc
     let sharedCopy;
     if (outcome === 'completed') {
       const sourcePackageId = state.get().packageId;
-      const guestFetch = credential => (path, init = {}) => fetch(base + path, { ...init, headers: { ...init.headers, origin: base, 'x-comfyrizz-token': credential } });
+      const guestFetch = credential => (path, init = {}) => fetch(base + path, { ...init, headers: { ...init.headers, origin, 'x-comfyrizz-token': credential } });
       const gallery = await (await guestFetch(otherGuest)('/api/demo/showcase')).json();
       assert.equal(gallery.items.length, 1);
       assert.equal(gallery.items[0].packageId, sourcePackageId);
@@ -122,6 +124,7 @@ for (const outcome of ['completed', 'failed']) test(`hosted fake pipeline ${outc
     server = createServer(app.handler);
     await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
     base = `http://127.0.0.1:${server.address().port}`;
+    origin = base.replace(/^http:/, 'https:');
     const guestAgain = (await (await fetch(base + invite.path)).json()).guestToken;
     const recovered = await apiFor(guestAgain).guestResult(result.productionId);
     assert.equal(recovered.status, outcome);
@@ -130,10 +133,10 @@ for (const outcome of ['completed', 'failed']) test(`hosted fake pipeline ${outc
       const otherAgain = (await (await fetch(base + other.path)).json()).guestToken;
       const copyResponse = await fetch(base + `/api/package/${sharedCopy.packageId}`, { headers: { 'x-comfyrizz-token': otherAgain } });
       assert.equal(copyResponse.status, 200);
-      const openedAgain = await fetch(base + `/api/demo/showcase/${state.get().packageId}/open`, { method: 'POST', headers: { 'x-comfyrizz-token': otherAgain, origin: base } });
+      const openedAgain = await fetch(base + `/api/demo/showcase/${state.get().packageId}/open`, { method: 'POST', headers: { 'x-comfyrizz-token': otherAgain, origin } });
       const newShare = await openedAgain.json();
       assert.equal(openedAgain.status, 200);
-      const anotherOpen = await fetch(base + `/api/demo/showcase/${state.get().packageId}/open`, { method: 'POST', headers: { 'x-comfyrizz-token': otherAgain, origin: base } });
+      const anotherOpen = await fetch(base + `/api/demo/showcase/${state.get().packageId}/open`, { method: 'POST', headers: { 'x-comfyrizz-token': otherAgain, origin } });
       const sourceShare = await anotherOpen.json();
       assert.equal(anotherOpen.status, 200);
       ledger.revoke(invite.invite.id);
