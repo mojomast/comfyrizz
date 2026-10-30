@@ -256,6 +256,12 @@ export function createEasyApi(fetchImpl: FetchImpl) {
     getRun(id: any) {
       return request('GET', `/api/run/${encodeURIComponent(id)}`);
     },
+    getPackage(id: string) {
+      return request('GET', `/api/package/${encodeURIComponent(id)}`);
+    },
+    compilePackage(body: { package: unknown; revision: number; editor?: unknown }) {
+      return request('POST', '/api/compile', body);
+    },
     getRunRecovery(id: string) {
       return request('GET', `/api/run/${encodeURIComponent(id)}/recovery`);
     },
@@ -264,6 +270,14 @@ export function createEasyApi(fetchImpl: FetchImpl) {
     },
     cancelRun(id: any) {
       return request('POST', `/api/run/${encodeURIComponent(id)}/cancel`, {});
+    },
+    async getSavedRenderVideo(packageId: string, revision: number): Promise<{ blob: Blob; exportId: string }> {
+      const saved = await request('GET', `/api/render/artifacts/latest?packageId=${encodeURIComponent(packageId)}`);
+      if (saved?.packageId !== packageId || saved?.revision !== revision || saved?.intent !== 'final') {
+        throw new Error('The saved export does not match the current project revision.');
+      }
+      const { loadRenderedArtifact } = await import('./render-artifact-client.ts');
+      return loadRenderedArtifact(fetchImpl, { exportId: saved.exportId, packageId, revision });
     },
     async getRunVideo(id: any): Promise<Blob> {
       let response: Response;

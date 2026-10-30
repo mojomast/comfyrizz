@@ -55,10 +55,13 @@ export interface SuperEasyApi {
   dispatchAction(id: string, body: unknown): Promise<unknown>;
   startRun(body: unknown): Promise<unknown>;
   getRun(id: string): Promise<unknown>;
+  getPackage?(id: string): Promise<any>;
+  compilePackage?(body: { package: unknown; revision: number; editor?: unknown }): Promise<any>;
   getRunRecovery?(id: string): Promise<unknown>;
   recoverRunOutputs?(id: string, body: { baseRevision: number }): Promise<unknown>;
   cancelRun?(id: string): Promise<unknown>;
   getRunVideo(id: string): Promise<Blob>;
+  getSavedRenderVideo?(packageId: string, revision: number): Promise<{ blob: Blob; exportId: string }>;
   generateLocalNarration?(body: { packageId: string; productionId: string; baseRevision: number; recoveryInputs?: unknown }): Promise<any>;
   colabStatus(): Promise<{ backendId?: string } | null>;
   inviteSession?(): Promise<{ role?: string; backendId?: string; budgetUnits?: number }>;
@@ -152,6 +155,7 @@ export type SuperEasyRunFailureCode =
   | 'RUN_FAILED'
   | 'RECOVERY_FAILED'
   | 'FINAL_VIDEO_FAILED'
+  | 'SAVED_VIDEO_UNAVAILABLE'
   | 'LOCAL_RENDER_FAILED';
 
 export interface SuperEasyRunFailure {
@@ -267,7 +271,7 @@ function isPaidAction(action: PlanCard['actions'][number]): boolean {
   return !(action.kind === 'audition' && action.engine === 'kokoro');
 }
 
-function hasPendingGeneratedShots(pkg: unknown): boolean {
+export function hasPendingGeneratedShots(pkg: unknown): boolean {
   if (!isRecord(pkg)) return false;
   const requiredAssetIds = new Set<string>();
   const scenes = Array.isArray(pkg.scenes) ? pkg.scenes : [];

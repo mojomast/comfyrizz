@@ -95,7 +95,7 @@ export function renderSuperEasyVideoTypes(selected: VideoType | null | undefined
       : '';
     return `<label class="super-easy-video-type${checked ? ' is-selected' : ''}"><input type="radio" name="super-easy-video-type" value="${escapeHtml(type.id)}" data-super-easy-video-type${checked ? ' checked' : ''} /><span class="super-easy-video-type-name">${escapeHtml(type.label)}</span>${recommended}<span class="super-easy-video-type-description">${escapeHtml(type.description)}</span><span class="super-easy-video-type-cost">${escapeHtml(type.costLabel)}</span></label>`;
   }).join('\n');
-  return `<fieldset class="super-easy-video-types" data-super-easy-video-types aria-describedby="super-easy-video-type-help"><legend>Video type</legend><p id="super-easy-video-type-help">Choose a starting point. This changes the prompt guidance, never the text you have written.</p><div class="super-easy-video-type-grid">${customCard}\n${presets}</div></fieldset>`;
+  return `<details class="super-easy-disclosure super-easy-type-disclosure" data-super-easy-type-disclosure><summary><span class="super-easy-disclosure-icon" aria-hidden="true">▤</span><span>Video type</span><span class="super-easy-disclosure-value" data-super-easy-type-summary>${escapeHtml(videoTypeMetadata(selected)?.label ?? 'Custom')}</span></summary><fieldset class="super-easy-video-types" data-super-easy-video-types aria-describedby="super-easy-video-type-help"><legend>Video type</legend><p id="super-easy-video-type-help">Choose a starting point. This changes the prompt guidance, never the text you have written.</p><div class="super-easy-video-type-grid">${customCard}\n${presets}</div></fieldset></details>`;
 }
 
 /**
@@ -121,29 +121,38 @@ export function renderSuperEasyHome(options: SuperEasyHomeOptions = {}): string 
   const lengthS = options.lengthS ?? 30;
   return `<section class="super-easy-home" aria-labelledby="super-easy-title" data-super-easy-home>
 ${superEasyBrandMarkup()}
+<div class="super-easy-hero">
+<p class="super-easy-eyebrow"><span aria-hidden="true">✦</span> SUPER EASY MODE</p>
 <h1 class="super-easy-home-title" id="super-easy-title">${escapeHtml(COPY.home.title)}</h1>
+<p class="super-easy-home-subtitle">A little idea. A whole new world.<br />Describe it, shape the plan, and bring it to the screen.</p>
+</div>
 <form class="super-easy-home-form" data-super-easy-form novalidate>
+<div class="super-easy-composer-heading"><span>Your next film starts here</span><span class="super-easy-step-label">01 / THE IDEA</span></div>
 ${renderSuperEasyVideoTypes(options.videoType)}
 <label class="super-easy-home-label" for="super-easy-prompt">${escapeHtml(COPY.home.promptLabel)}</label>
 <textarea class="super-easy-home-prompt" id="super-easy-prompt" name="prompt" rows="4" minlength="${SUPER_EASY_MIN_PROMPT_CHARS}" required placeholder="${escapeHtml(promptPlaceholder)}" aria-describedby="super-easy-prompt-hint">${escapeHtml(prompt)}</textarea>
 <p class="super-easy-home-hint" id="super-easy-prompt-hint" data-super-easy-prompt-hint>${escapeHtml(hint)}</p>
 <p class="super-easy-home-error" id="super-easy-prompt-error" role="alert" data-super-easy-prompt-error hidden>${escapeHtml(COPY.home.emptyPrompt)}</p>
-${renderSuperEasyContextAttachments()}
-<fieldset><legend>Editable title font (optional)</legend><p>Upload a TrueType font you are authorized to use. It will be used for text in the video and included in the project.</p><label><input type="checkbox" data-super-easy-font-rights /> I have the rights to use this font in my video.</label><label>Font file (.ttf, max 5 MiB)<input type="file" accept=".ttf,font/ttf" data-super-easy-font-file /></label><button type="button" data-super-easy-font-remove>Remove supplied font</button><p role="status" data-super-easy-font-status></p></fieldset>
+<details class="super-easy-disclosure"><summary><span class="super-easy-disclosure-icon" aria-hidden="true">+</span><span>References &amp; inspiration</span><span class="super-easy-disclosure-value">Optional</span></summary>${renderSuperEasyContextAttachments()}</details>
 ${renderSuperEasySongTrim(options.videoType, options.songTrim, lengthS)}
 ${renderSuperEasyLyrics(options.videoType, options.lyricsStyle, options.lyricsLrc)}
-<fieldset data-super-easy-music-layout><legend>Video layout</legend><label for="super-easy-music-aspect">Output orientation</label><select id="super-easy-music-aspect" data-super-easy-music-aspect><option value="16:9"${(options.aspect ?? '16:9') === '16:9' ? ' selected' : ''}>Landscape (16:9)</option><option value="9:16"${options.aspect === '9:16' ? ' selected' : ''}>Vertical (9:16)</option><option value="1:1"${options.aspect === '1:1' ? ' selected' : ''}>Square (1:1)</option></select><p>Choose one layout for this video.</p></fieldset>
+<div class="super-easy-format-row">
 ${lengthSegments(lengthS)}
+<fieldset data-super-easy-music-layout><legend>Video layout</legend><label for="super-easy-music-aspect">Output orientation</label><select id="super-easy-music-aspect" data-super-easy-music-aspect><option value="16:9"${(options.aspect ?? '16:9') === '16:9' ? ' selected' : ''}>Landscape (16:9)</option><option value="9:16"${options.aspect === '9:16' ? ' selected' : ''}>Vertical (9:16)</option><option value="1:1"${options.aspect === '1:1' ? ' selected' : ''}>Square (1:1)</option></select><p>Choose one layout for this video.</p></fieldset>
+</div>
+<details class="super-easy-disclosure super-easy-advanced"><summary><span class="super-easy-disclosure-icon" aria-hidden="true">☷</span><span>Fine-tune</span><span class="super-easy-disclosure-value">Model, font &amp; planning</span></summary>
+<label class="super-easy-home-motion-model">Motion model<select data-super-easy-motion-model aria-label="Motion model"><option value="auto"${motionModel === 'auto' ? ' selected' : ''}>Auto — H3 acting + LTX camera</option><option value="h3"${motionModel === 'h3' ? ' selected' : ''}>MiniMax H3 — characters + native sound</option><option value="ltx"${motionModel === 'ltx' ? ' selected' : ''}>LTX-2.5 — cinematic motion plates</option><option value="klein"${motionModel === 'klein' ? ' selected' : ''}>Klein only — stills + code motion</option></select></label>
+<fieldset><legend>Editable title font (optional)</legend><p>Upload a TrueType font you are authorized to use. It will be used for text in the video and included in the project.</p><label><input type="checkbox" data-super-easy-font-rights /> I have the rights to use this font in my video.</label><label>Font file (.ttf, max 5 MiB)<input type="file" accept=".ttf,font/ttf" data-super-easy-font-file /></label><button type="button" data-super-easy-font-remove>Remove supplied font</button><p role="status" data-super-easy-font-status></p></fieldset>
 <label><input type="checkbox" data-super-easy-deepseek-no-thinking${options.deepSeekNoThinking ? ' checked' : ''} /> Disable thinking for DeepSeek Flash (OpenCode Go or direct)</label>
+${options.capture ? renderProcedureToggle({ armed: options.capture.armed, id: 'super-easy-capture' }) : ''}
+</details>
 <p class="super-easy-home-hint">Planning uses your model provider and may make up to 12 additional SVG requests. Provider charges may apply.</p>
 <div class="super-easy-home-actions">
 <button type="submit" class="btn btn-primary super-easy-home-generate" data-super-easy-generate>${escapeHtml(COPY.home.generate)}</button>
 <button type="button" class="btn btn-secondary super-easy-home-example" data-super-easy-example>${escapeHtml(COPY.home.tryExample)}</button>
 </div>
-${options.capture ? renderProcedureToggle({ armed: options.capture.armed, id: 'super-easy-capture' }) : ''}
 </form>
 <div class="super-easy-home-setup"><span>${escapeHtml(setupText)}</span><button type="button" class="btn btn-secondary btn-sm" data-super-easy-setup>${colab ? 'Change setup' : 'Set up AI & Google Colab'}</button></div>
-<label class="super-easy-home-motion-model">Motion model<select data-super-easy-motion-model aria-label="Motion model"><option value="auto"${motionModel === 'auto' ? ' selected' : ''}>Auto — H3 acting + LTX camera</option><option value="h3"${motionModel === 'h3' ? ' selected' : ''}>MiniMax H3 — characters + native sound</option><option value="ltx"${motionModel === 'ltx' ? ' selected' : ''}>LTX-2.5 — cinematic motion plates</option><option value="klein"${motionModel === 'klein' ? ' selected' : ''}>Klein only — stills + code motion</option></select></label>
 <div class="super-easy-home-ideas">
 <p class="super-easy-home-ideas-label" id="super-easy-ideas-label">${escapeHtml(COPY.home.ideasLabel)}</p>
 <ul class="super-easy-home-idea-list" aria-labelledby="super-easy-ideas-label">

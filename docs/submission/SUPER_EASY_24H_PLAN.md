@@ -2,6 +2,13 @@
 
 Decision date: 2026-10-29. This supersedes the repeated original-Pérez retry strategy, not the original campaign evidence. New simplified briefs are separate experiments, never claimed as completions of the original films.
 
+**Latest production-lane outcome (2026-10-30):** the speaking teaser completed
+generation/export but failed exact-monologue and sampled visual review. Its
+reservation is settled and owned browser/server closed. Campaign: **9.99 spent /
+0 reserved / 50.01 remaining**. Source-aware assessment is complete: five scenes
+are timing-viable, two uncertain and two impossible at unchanged timing. See the
+[terminal review and assessment follow-up](#2026-10-30-speaking-teaser-terminal-review--closed-not-accepted).
+
 ## Submission objective
 
 Deliver a small set of attractive, reproducible, end-to-end Super Easy films. A mode is not submission-ready merely because its package validates or a CPU test renders. Count a success only after proposal, review, approval, production, export, **Download**, and playback. Record the actual limits of the demonstration.
@@ -1015,3 +1022,253 @@ fixes together with saved-package chat correction, bundled collection and durabl
 exports. It retains the original 45-second multi-shot brief, exact monologue and
 nine-credit all-in ceiling. No unnecessary 30-fps requirement is imposed. Actual
 generation/audio/Download results and spending remain pending.
+
+**Subsequent live planning results:** the native-speaking retry stopped before
+approval on duplicate MARA VALE copy and insufficient measured dialogue timing.
+The newly requested humorous 30-second THE SPOON FILES also stopped before paid
+work: its no-singing/no-narrator instruction incorrectly prohibited its requested
+character dialogue, its explicit still-photo comparison was rejected as missing
+motion, and approximate six-second beat pacing blocked exact-duration repair.
+Both attempts spent zero GPU credits. Their original evidence remains at
+`/tmp/opencode/easy-colab-acceptance/speaking-native-final/` and
+`/tmp/opencode/easy-colab-acceptance/spoon-files-showcase/`.
+
+**Mixed-media/audio integration completed:** explicit native speech now survives
+singing/lyrics exclusions, while explicit speech bans still win. Standalone
+“Fully silent”/“Completely silent” and exclusion lists containing overlays are
+also recognized. A bounded numbered-beat contract permits the expressly requested
+two-photograph comparison, requiring its original Klein sources, native labels,
+contained fit and correct position; other beats retain motion and exact dialogue
+checks. Panel photos use their actual panel fit/dimensions. Approximate per-beat
+pacing can yield to the exact total, retaining hard timing/reading constraints.
+The unchanged Spoon fixture repairs to **948 − 48 = 900 frames**, with two H3
+speaking shots, two LTX motion shots and two still comparison images. One prose-only
+timing response receives a confirmation within the existing three-turn limit.
+Proposal source review now distinguishes visible still panels from motion,
+reports pending/available state, and ignores hidden media bindings.
+
+Verification at this source boundary: **60 server integration tests, 57 agent
+audio/intent tests and 33 UI tests passed**, with agent build, web typecheck and
+diff checks. These are offline integration results, including a fake provider and
+local tone-conditioning fixture; they are not a completed Spoon or speaking film.
+
+**User-supplied character-reference test:** the Google thumbnail was downloaded
+as a real 386×518 JPEG. Custom upload conditioning existed at the tool level but
+was not wired into the normal server runner/context snapshot. Commit **8f4c635**
+wires the existing byte-verified conversation-scoped adopter through initial and
+repair planning. A normal HTTP fake-provider test proves uploaded bytes become a
+Klein-reference-edit → LTX dependency chain without displaying the original still.
+The frozen-build reference/context checks passed **9/9**; related UI checks passed
+**24/24**, and the broader server check passed **29/29**.
+
+The first live reference proposal proved the correct original JPEG hash but
+introduced unwanted narration/music; a cold navigation also lost the in-memory
+proposal. It was stopped before spending, with evidence preserved in
+`/home/mojo/comfyrizz-gallery-tests/character-reference-test/`. A fresh normal
+Super Easy attempt on the same immutable build uses explicit silent-film wording,
+the same uploaded photo and a six-second fictional spaceship/teacup scene.
+Package **pkg_ea4d54608fc5a6cf r3**, production
+**prod_3ca8639183280c1f3a9a023b**, received a **1.821-credit** final quote; **3 credits**
+were reserved atomically within the existing campaign before approval. Its
+approved plan contains one original upload, one Klein reference-edit job and one
+LTX motion job, with voice disabled and no music. At this documentation boundary,
+generation/collection/render/Download and final cost reconciliation remain pending
+under `/home/mojo/comfyrizz-gallery-tests/character-reference-final/`. The running
+build remains frozen at 8f4c635; the later mixed-media/audio edits do not alter it.
+
+**Character-reference delivery completed:** normal Super Easy upload → proposal →
+Make this film → generation → render → Download produced **Tea at the Helm**:
+one six-second spaceship/teacup shot, **1920×1080 / 30 fps / 180 frames**, H.264,
+silent. One Klein reference-edit image and one LTX candidate completed. The trusted
+Klein receipt records the exact uploaded JPEG hash; LTX records consumption of
+that completed image. Both generation receipts and the package/timeline/byte-bound
+final render receipt passed the production verification functions. Completed
+package is r4; run **run_fc77b08581f2**. UI Download and Tailscale HTTP bytes match:
+**c89d74ef5d59e5de7f6669f1c19f37eeb227eeb63aa635297bd9e9517d42b216**,
+9,529,133 bytes. Private share:
+http://100.72.41.9:8766/character-reference-space-tea.mp4
+
+Actual account delta **0.97 credits** (207.96 → 206.99), versus the unchanged
+conservative app settlement 1.821. The three-credit reservation is released;
+campaign **6.12 spent / 0 reserved / 53.88 remaining**. Fresh CLI confirmed no
+assignments/sessions and 0.00/hr. Full 1× player execution reached the six-second
+end; sampled frames show the sip and camera glance, with reference beard, glasses,
+hat and cat-print shirt retained. Facial proportions/detail differ and the
+close-up crops the hat top. This is sampled inspection, not human acceptance or
+an exact facial-reproduction claim.
+
+**Cold-reload limitation:** after successful Download, reloading Super Easy's
+root page restored source/shot gallery entries but lost the final-video/Download
+state and displayed Making your video / 0%. No regenerated output was requested.
+The verified MP4 remains available, but reopened Download did **not** pass for
+this final-run path. Evidence and handoff:
+`/home/mojo/comfyrizz-gallery-tests/character-reference-final/PARENT-HANDOFF.md`.
+# 2026-10-30 continuation — completed reload repair, active Spoon retry
+
+User authorized reload restoration, the humorous Spoon showcase, and the speaking Last Signal teaser in that order. Completed-run fix (`28a901a`, `5200c9b`, `db1ec01`) passed actual fresh-browser + subsequent-reload Downloads of the saved reference-film runtime copy, matching the original `c89d74ef…` MP4 bytes. No generation/render requests; original evidence preserved at its original location. Read-only recovery test evidence: `presentation-final-v2/evidence/reopen-result.json` under `/home/mojo/comfyrizz-gallery-tests/`.
+
+Spoon pre-approval attempts are separately preserved: `spoon-files-final` found early/duplicate copy and no-music synthesis misclassification; `spoon-files-delivery` exhausted exact timing arithmetic (890, 938, 938 instead of 900 frames); `spoon-files-timing` produced a valid proposal but cold reload exposed missing preview compilation. All had zero paid requests. Changes include unapproved revision/input-bound proposal checkpoints, explicit no-music PCM foley, delayed/bottom lower-third support, measured after-admission completion checks, and read-only validated timing suggestions that require an explicit model tool submission. These do not add the deferred Title blue-rule or sequential-word features.
+
+The fresh `spoon-files-ready` runtime is frozen at `35a2572`. Real UI proposal reload passed; normal editor chat saved the exact scoped r23→r24 duplicate-headline correction. Preflight verifies five ordered scenes, 900 frames at 30 fps, two native H3 lines with shared reference identity and real conditioning, two LTX clips, two contained Klein suspect photographs, and ten total planned generation jobs. Final quote 2.734, campaign reservation 9, starting balance 206.99, no pre-existing sessions. Production `prod_e63b9c1a3aea37cb3ca8839f` is in progress, not yet delivered. Reconcile account and shutdown before starting the speaking teaser. No other paid production has started.
+
+Verification boundaries: 222 focused schema/agent-finishing/server/renderer checks passed for the finishing changes; 94 web checks passed before the final checkpoint follow-ups; subsequent timing, checkpoint, routing and typechecks are separately logged under `/tmp/opencode/`. These are focused checks, not a blanket full-suite sign-off. Live restored Studio preview showed a 19-second player counter although server package/compiled preflight were exact 30 seconds; final MP4 timing still requires independent ffprobe verification.
+
+## 2026-10-30 continuation — Spoon corrected export and agent inspection branch
+
+Spoon completed all ten generation jobs for **1.88 actual credits**; original run
+`run_8b3abf9d8459` is stopped and its reservation settled. CPU ASR found the original
+export clipped “vanished”; normal editor controls saved two 0.75-second native
+source trims without changing any media bytes or scene windows. Review exposed
+pending-reference take fingerprints and selected-take staging paths. The original
+run, stale records, revision-conflict attempt and missing-speech export are retained.
+Fixes `26333e0` and `706d93a` address future ingestion, take staging, missing-active-
+media preflight and current-revision saved-export reopening.
+
+A separate frozen CPU-only replay exported **r31**, **30 seconds / 900 frames /
+1920×1080 / 30 fps**, with trusted H3/LTX/Klein and final-byte receipts. Download,
+fresh-browser reopen and reload returned identical bytes:
+`94115740340c6f124cc845fe5c2909ef67fdce0e8462167f4798c0a3923f1742`.
+Unprompted CPU ASR recognizes both complete lines; sampled final frames show CASE
+CLOSED after the admission. Automated 1× playback ended normally. Human listening
+and lip-sync acceptance remain pending. Review link:
+http://100.72.41.9:8766/the-spoon-files.mp4
+
+Campaign before teaser approval: **8.00 spent / 0 reserved / 52.00 remaining**;
+last fresh balance **205.11**, zero assignments/sessions, 0.00/hour. The unchanged
+speaking brief produced an eleven-shot, exact-45-second unapproved proposal; review
+found hands-only speaking coverage and independent identity images. Its original
+planning namespace stopped with **zero paid requests** and is preserved while its
+checkpoint is resumed for normal full-plan edits on frozen `3e9e609`.
+
+User-requested self-review research and implementation are separately pushed on
+`feat/agent-self-review-and-repair`, latest `6302f3b`, unmerged. Source inspection
+and two-batch bounded source-in repairs bind package/revision/media evidence;
+selected-take path handling passed nineteen focused tests and a read-only real
+Spoon ffprobe smoke. Automatic final-render inspection/re-rendering is the next
+stage. Research and explicit capability limits are in that branch's
+`docs/AGENT_SELF_REVIEW.md`.
+
+**Teaser approval boundary:** full-plan UI corrections saved r61 on frozen
+`3e9e609`, with one shared H3 identity image and face-visible notebook coverage.
+All scene windows, exact dialogue and conditioning bytes are preserved. Super Easy
+re-reviewed r61 and quoted **5.42 credits** for five Klein images plus eleven H3
+clips. Production `prod_1a4cc5f43ee161269f222c5e` received its atomic **9-credit**
+reservation at fresh balance 205.11, zero sessions, before approval was released.
+Campaign was **8.00 spent / 9 reserved / 43.00 remaining** at that boundary. Runtime:
+`/home/mojo/comfyrizz-gallery-tests/speaking-teaser-reviewed-3e9e609/`. The terminal
+review below supersedes the pending generation/delivery/settlement status.
+
+## 2026-10-30 speaking teaser terminal review — closed, not accepted
+
+Frozen `3e9e609`, package `pkg_cd5718a31d8fe41f`, production
+`prod_1a4cc5f43ee161269f222c5e`, terminal run **`run_80f94fc29fbf`**. All 16
+generation jobs succeeded; run `done`, production action `completed`, teardown
+`stopped` with watchdog disarmed. Technical render/model receipts pass.
+
+**Actual spend 1.99 credits; balance 205.11 → 203.12.** The existing 9-credit
+reservation was settled through the root ledger helper against
+`/home/mojo/comfyrizz-gallery-tests/video-type-collection-20261028/budget-ledger.json`.
+Campaign is now **9.99 spent / 0 reserved / 50.01 remaining**. Fresh settlement
+CLI evidence reports zero active assignments, no sessions and 0.00/hour. CPU-only
+review/reload/cleanup initiated no further paid work; no paid retry occurred.
+
+Normal Download and subsequent reload/Download returned the same **32,943,736
+bytes**, **45 seconds / 1,350 frames / 1920×1080 / 30 fps**, with audio. Original
+`speaking-terminal-download.mp4` and `delivery-reloaded-download.mp4` both hash to:
+`3101eb6973267361803d92e9dca068d4872d98ef391af96a623b9fca9419905b`.
+
+### Failed exact-monologue and sampled visual review
+
+Offline, unprompted CPU Whisper used existing caches (`HF_HUB_OFFLINE=1`), first
+through `transcribe-live-film.py` on the actual final and nine original source
+clips, then on in-memory final-audio shot windows. Render/preflight dialogue
+matches the exact preserved brief. Eight of nine final dialogue windows are
+incomplete or different; only “Yesterday, the signal went silent” fully matches
+normalized final-window ASR. Word spellings/boundaries remain preliminary ASR
+evidence, not human listening or lip-sync certification.
+
+| Shot | Final duration | Source speech interval | Final review finding |
+|---|---:|---:|---|
+| Intro | 5.033s | 3.920–7.360s | Only “Every night”; remainder absent |
+| Name | 4.033s | 0.820–4.220s | “name” clipped; ASR also reads “it's” |
+| Trick | 4.033s | 5.170–7.370s | Whole line begins after retained source window |
+| Storm | 4.200s | 2.540–8.660s | Unwanted spoken “Mara Vale”; requested storm line absent |
+| Notes | 5.900s | 1.100–8.200s | Loses “the voices, the places nobody should have known” |
+| Signal silent | 3.700s | 0.270–2.310s | Complete requested line recognized |
+| Slept | 3.700s | 4.720–6.640s | Whole line begins after retained source window |
+| Switched | 4.000s | 0.240–7.500s | Missing “the radio switched itself on”; source repeats opening phrase |
+| Like me | 4.967s | 0.110–7.230s | Missing “sounded exactly like me” |
+
+Final/source PCM correlations **0.996992–0.999956 at 1× speed**, offsets within
+0.5 ms, support source-prefix truncation at planned cuts. Measured conditioning
+WAV duration did not predict actual H3 speech onset/pauses/end. Plate metadata
+lists 1.25 retime values, but measured final audio corresponds to 1×; metadata
+alone does not establish audible acceleration. The unwanted spoken name and
+repeated phrase are source-performance concerns beyond simple timing fit.
+
+One midpoint frame per final shot shows the requested radio-room imagery and
+face-visible samples, but the MARA VALE label sits on the forehead rather than
+as a lower-third; a headset-like microphone appears in the closing tight shot.
+These samples cannot establish continuous mouth visibility, motion quality or
+identity continuity. **No accepted publication or teaser share link. User human
+acceptance is unknown**; full-speed listening, audiovisual lip-sync, continuity,
+overlay and pacing acceptance remain outstanding.
+
+### Evidence preservation and cleanup
+
+All paths below are under
+`/home/mojo/comfyrizz-gallery-tests/speaking-teaser-reviewed-3e9e609/evidence/`:
+
+- `delivery-preliminary-review.md`, `delivery-speech-timing-review.json`:
+  findings, exact word differences, source/final windows and PCM correlations.
+- `delivery-final-asr.json`, `delivery-source-*-asr.json`,
+  `delivery-final-window-asr.json`: final/source and per-window recognition.
+- `delivery-final-contact-sheet.jpg` and `.json`: local samples and timestamps.
+- `delivery-reloaded-byte-identity.json`: identical original/reload bytes.
+- `terminal-verifier-failure.log`: preserved original helper crash from assuming
+  dialogue on a non-dialogue title shot. `terminal-supplemental-verification.json`
+  records passing media/provenance checks, not speech/content acceptance.
+- `speaking-terminal-settlement.json`, `speaking-terminal-settlement-usage.txt`,
+  `speaking-terminal-settlement-sessions.txt`: actual spend and zero-use checks.
+- `closed.json`, `delivery-cleanup-verification.json`: documented root `stop`
+  closed the browser/controller and server with exit code 0; PID 1248850 is gone
+  and port 4670 is closed. Only copied `runtime/provider-settings.json` and
+  `runtime/server-token` were removed by the controller; no matching credentials
+  remain in checked frozen runtime/app locations. Original/reload hashes were
+  rechecked after cleanup; failed artifacts, source media and review evidence
+  remain preserved. Cleanup started no account activity, so existing zero-use
+  CLI evidence was retained without another query.
+
+### 2026-10-30 follow-up — source-aware assessment complete
+
+**At unchanged compiled timing: five viable / two uncertain / two impossible.**
+Read-only assessment compared all nine complete expected lines with preserved
+source ASR words, 24-fps source bounds, 30-fps project rounding, 0.100s uncertainty
+at each speech boundary and transition clearances. Intro, trick, storm (after
+excluding the unwanted spoken name), silent and slept have feasible candidates.
+Name's “it”/“it's” and switched's low-confidence repeated opening remain uncertain.
+Notes spans **7.10s against a 5.90s scene**; like-me spans **7.12s against 4.50s
+before its outgoing fade**. Like-me's word alignment also suggests an unresolved
+restart/repetition. In-point changes alone cannot recover the full monologue.
+
+An optional continuous-source **exact-45-second** timing construction requires
+**127 frames reallocated at 30 fps**: notes 177→219 (+42), like-me 149→234 (+85),
+trick 121→75 (−46), silent 111→71 (−40), slept 111→70 (−41). Source-frame-aligned
+in-points, original source ends, natural speed, title/outro durations and both
+14-frame fades are retained: 1,378 scene frames − 28 overlap frames = **1,350**.
+Boundary margins are tight. **Listening to existing speech comes first**;
+incorrect/restarted dialogue could defeat this conditional plan. No trims,
+duration changes or re-render were applied, and the teaser is **not delivered
+or accepted**.
+
+Matched source/final samples and frozen renderer code confirm the forehead
+**MARA VALE is native editable text**, not generated lettering: the package omits
+position and `LowerThird` defaults to `top`. Explicit bottom placement is a
+possible fix, **not applied**; its linear entrance also does not fulfill the
+requested mask-rise/spring animation.
+
+Evidence: `/tmp/opencode/teaser-feasibility-ESwU3BDN/assessment.md` and
+`assessment.json`, plus paired source/final PNGs and `input-integrity.json`
+(30 read-input hashes unchanged). **No new paid generation, inference, GPU work,
+package edits or render.** Settled spend remains 1.99 credits. Real Pi self-repair
+proof is a separate self-review-branch report, not evidence of teaser delivery.

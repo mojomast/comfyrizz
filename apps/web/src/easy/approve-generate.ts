@@ -276,6 +276,8 @@ async function approveBody(
       });
     }
     for (const item of deps.productionDispatchOnly ? [] : dispatched) {
+      // Chat correction actions are consumed by the server's outbox and take
+      // runner. A second /api/run request races that durable dispatch.
       if (item.serverExecuted) continue;
       try {
         // Later dispatches advance the production revision. An action's revision

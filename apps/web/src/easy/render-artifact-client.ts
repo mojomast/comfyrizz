@@ -31,12 +31,17 @@ export async function readRenderedArtifact(apiFetch: ApiFetch, response: Respons
   return saved;
 }
 
-export async function resolveRenderedArtifact(apiFetch: ApiFetch, record: Saved) {
+export async function loadRenderedArtifact(apiFetch: ApiFetch, record: Saved) {
   const saved = await metadata(apiFetch, record.exportId, record);
   const response = await apiFetch(saved.videoUrl);
   if (!response.ok) throw Object.assign(new Error('Saved video is unavailable'), { status: response.status });
   const blob = await response.blob();
   if (response.headers.get('x-comfyrizz-video-sha256') !== saved.videoSha256
     || await sha256(blob) !== saved.videoSha256 || saved.files?.[0]?.bytes !== blob.size) throw new Error('Saved MP4 bytes no longer match their receipt');
+  return { blob, exportId: saved.exportId as string };
+}
+
+export async function resolveRenderedArtifact(apiFetch: ApiFetch, record: Saved) {
+  const { blob } = await loadRenderedArtifact(apiFetch, record);
   return { href: URL.createObjectURL(blob) };
 }

@@ -463,6 +463,7 @@ export function createProductionRoutes(options = {}) {
     // Plan identity is server-owned. A client planId is ignored.
     const planId = `plan_${randomUUID().replaceAll('-', '')}`;
     const commandId = `cmd_easy_${randomUUID().replaceAll('-', '')}`;
+    requirePackageRevision(production.packageId, body.expectedPackageRevision);
     const result = await actions.propose({
       productionId: id,
       body: {

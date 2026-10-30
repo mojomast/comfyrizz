@@ -209,7 +209,7 @@ function resolveFormat(brief: string): PackageFormat {
 
 const plateFitSchema = z.enum(['cover', 'contain']);
 const sceneMediaSchema = z.array(z.object({ fit: plateFitSchema.optional() }).passthrough()).length(2);
-const lowerThirdSchema = z.object({ text: z.string().min(1).max(120), kicker: z.string().min(1).max(40).optional() }).strict();
+const lowerThirdSchema = z.object({ text: z.string().min(1).max(120), kicker: z.string().min(1).max(40).optional(), start_frame: z.number().int().min(0).max(7200).optional(), position: z.enum(['top', 'bottom']).optional() }).strict();
 
 const sceneSchema = z.object({
   id: z.string().min(1),
@@ -515,7 +515,7 @@ const copyParameters = { type: 'object', additionalProperties: false, descriptio
 const nativeTextParameters = {
   copy: copyParameters,
   headline_size: headlineSizeParameters,
-  lower_third: { type: 'object', additionalProperties: false, required: ['text'], properties: { text: { type: 'string', minLength: 1, maxLength: 120 }, kicker: { type: 'string', minLength: 1, maxLength: 40 } } },
+  lower_third: { type: 'object', additionalProperties: false, required: ['text'], properties: { text: { type: 'string', minLength: 1, maxLength: 120 }, kicker: { type: 'string', minLength: 1, maxLength: 40 }, start_frame: { type: 'integer', minimum: 0, maximum: 7200, description: 'Scene-local overlay entrance frame. For after-dialogue copy use measured speech duration plus pause, converted at package fps.' }, position: { type: 'string', enum: ['top', 'bottom'] } } },
   media: {
     type: 'array', minItems: 2, maxItems: 2, description: PANEL_GUIDANCE + ' ' + PANEL_FRAMING_GUIDANCE,
     items: { type: 'object', properties: {

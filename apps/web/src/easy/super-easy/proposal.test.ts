@@ -92,3 +92,33 @@ test('drawing review distinguishes hidden copy metadata from actual native text 
   assert.match(copy, /Whole-scene lower third \(hidden by drawing\):.*COTTON WICK/);
   assert.match(copy, /Drawing text: \["ROOT ZONE"\]/);
 });
+
+test('mixed-film review distinguishes planned still panels from available generated motion', () => {
+  const pkg = { assets: {
+    left: { kind: 'image', status: 'pending', gen: { generator: 'flux3-klein' } },
+    right: { kind: 'image', status: 'pending', gen: { generator: 'flux3-klein' } },
+    motion: { kind: 'video', status: 'ready', gen: { generator: 'ltx25' } },
+  }, scenes: [
+    { id: 'suspects', layout: 'compare', background: { asset: 'motion' }, media: [{ asset: 'left', fit: 'contain', label: 'DISHWASHER' }, { asset: 'right', fit: 'contain', label: 'FERN' }] },
+    { id: 'reveal', layout: 'list', media_only: true, background: { asset: 'motion' } },
+  ] };
+  const review = proposalForPackage(pkg, 'A fictional mystery');
+  assert.match(review.sourceReview!.scenes[0].visual, /Two still-image panels with native labels/);
+  assert.match(review.sourceReview!.scenes[0].visual, /planned; generation requires approval; fit contain/);
+  assert.doesNotMatch(review.sourceReview!.scenes[0].visual, /Motion video|LTX/);
+  assert.match(review.sourceReview!.scenes[1].visual, /Motion video \(LTX 2.5\): available/);
+  assert.doesNotMatch(review.comfyContribution!, /LTX 2.5 in suspects/);
+});
+
+test('hidden media bindings do not claim visible generated footage in a proposal', () => {
+  const video = { kind: 'video', status: 'ready', gen: { generator: 'fasth3-omni' } };
+  for (const scene of [
+    { id: 'drawing', drawing: { elements: [] }, background: { asset: 'video' } },
+    { id: 'composition', composition: { layers: [] }, media: [{ asset: 'video' }] },
+    { id: 'hidden-panels', layout: 'compare', media_only: true, media: [{ asset: 'video' }] },
+  ]) {
+    const review = proposalForPackage({ assets: { video }, scenes: [scene] }, 'Brief');
+    assert.doesNotMatch(review.sourceReview!.scenes[0].visual, /Motion video|MiniMax H3/);
+    assert.doesNotMatch(review.comfyContribution!, /MiniMax H3/);
+  }
+});

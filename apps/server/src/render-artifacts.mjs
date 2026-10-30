@@ -1,6 +1,6 @@
 // Durable normal-MP4 deliveries. Only a newly completed render may publish;
 // historical lookup verifies the saved inputs and actual bytes, never today's package.
-import { readFileSync, writeFileSync, renameSync, realpathSync } from 'node:fs';
+import { readFileSync, writeFileSync, renameSync, realpathSync, readdirSync } from 'node:fs';
 import { join, resolve, sep } from 'node:path';
 import { createHash } from 'node:crypto';
 import { canonicalJson } from '../../../packages/planner/dist/src/index.js';
@@ -61,4 +61,21 @@ export function readRenderArtifact({ renderId, rendersDir, receiptDir }) {
         pkg: record.inputs.package, timelineHash: record.timelineHash })) throw missing();
     return { metadata: publicRenderArtifact(record), bytes };
   } catch { throw missing(); }
+}
+
+// Discover only exports of the current saved revision. Verification still reads
+// historical bytes/receipts; discovery never renders or relabels an older movie.
+export function latestRenderArtifact({ packageId, revision, rendersDir, receiptDir }) {
+  const candidates = [];
+  for (const name of readdirSync(rendersDir)) {
+    if (!/^r_[a-f0-9]{12}\.artifact\.json$/.test(name)) continue;
+    try {
+      const record = JSON.parse(safeRead(rendersDir, name));
+      if (record.packageId === packageId && record.revision === revision && record.intent === 'final'
+        && name === `${record.exportId}.artifact.json`) candidates.push(record);
+    } catch { /* An unreadable record is not a discoverable export. */ }
+  }
+  candidates.sort((a, b) => String(b.createdAt).localeCompare(String(a.createdAt)) || b.exportId.localeCompare(a.exportId));
+  if (!candidates.length) throw missing();
+  return readRenderArtifact({ renderId: candidates[0].exportId, rendersDir, receiptDir });
 }

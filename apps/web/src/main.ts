@@ -872,6 +872,10 @@ async function hydratePreviewAudio(requests: PreviewAudioRequest[]): Promise<voi
 
 /** Every existing preview call goes through here so take swaps and audio sources are never lost. */
 function updatePreview(nextPkg: PackageV1, nextTimeline: Timeline, nextAssets?: Record<string, InlineAsset>): void {
+  // A paused Player need not emit frameupdate when a different project is
+  // adopted. Refresh its counter immediately instead of showing the demo's time.
+  const frame = Math.max(0, Math.min(player?.getCurrentFrame() ?? 0, nextTimeline.durationInFrames - 1));
+  $('time').textContent = `${formatTime(frame, nextTimeline.fps)} / ${formatTime(nextTimeline.durationInFrames, nextTimeline.fps)}`;
   resetPreviewMedia(nextPkg);
   const previewPackage = withTakePreview(nextPkg);
   const plan = previewMediaPlan(previewPackage, previewMediaSources);
@@ -3427,17 +3431,26 @@ function init(opened: OpenedProject): void {
   mountEditorCommandPalette(() => { modeControl?.setMode('easy'); });
 }
 
-const openedProject = await openInitialProject({
-  search: globalThis.location?.search ?? '',
-  hasToken: Boolean(sessionToken()),
-  request: input => apiFetch(input),
-  onPackage: (nextPackage, nextEditor) => {
-    adoptEditorPackage(nextPackage, nextEditor as EditorSidecar | undefined);
-    const compiled = editorStore.getState().derived.timeline;
-    if (compiled) timeline = compiled as unknown as Timeline;
-  },
-  onError: error => console.error('package open failed', error),
-});
-seededChatId = openedProject.chatId ?? null;
-init(openedProject);
-void checkRecoveryOnBoot(openedProject);
+try {
+  const openedProject = await openInitialProject({
+    search: globalThis.location?.search ?? '',
+    hasToken: Boolean(sessionToken()),
+    request: input => apiFetch(input),
+    onPackage: (nextPackage, nextEditor) => {
+      adoptEditorPackage(nextPackage, nextEditor as EditorSidecar | undefined);
+      const compiled = editorStore.getState().derived.timeline;
+      if (compiled) timeline = compiled as unknown as Timeline;
+    },
+    onError: error => console.error('package open failed', error),
+  });
+  seededChatId = openedProject.chatId ?? null;
+  init(openedProject);
+  document.documentElement.removeAttribute('data-app-loading');
+  void checkRecoveryOnBoot(openedProject);
+} catch (error) {
+  console.error('Studio startup failed', error);
+  const status = document.getElementById('app-launch-status');
+  if (status) status.textContent = 'The studio couldn’t open. Please reload to try again.';
+  const retry = document.getElementById('app-launch-retry');
+  if (retry) retry.hidden = false;
+}

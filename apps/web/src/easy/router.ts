@@ -36,7 +36,8 @@ export function initialRoute(
   const requestedStep = params.get('step')?.trim() ?? '';
   const home = view === 'easy' && packageId === '' && requestedStep === '';
   const preferStudio = prefs === undefined ? readSuperEasyPrefs().preferStudio : prefs?.preferStudio === true;
-  return { step, view: home && !preferStudio ? 'superEasy' : view, home };
+  const explicitSuperEasy = params.get('view') === 'super-easy' && packageId !== '' && requestedStep === '';
+  return { step, view: explicitSuperEasy || home && !preferStudio ? 'superEasy' : view, home };
 }
 
 /** Next address bar value. `view=editor` is dropped because a step change stays in Easy. */

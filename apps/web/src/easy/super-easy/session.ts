@@ -7,7 +7,7 @@
 
 import { watchProduction } from '../events.ts';
 import type { ProductionWatchState, WatchProductionOptions } from '../events.ts';
-import { pollFinalRun, runSuperEasy } from './run.ts';
+import { hasPendingGeneratedShots, pollFinalRun, runSuperEasy } from './run.ts';
 import type {
   RunSuperEasyDeps,
   RunSuperEasyInput,
@@ -21,12 +21,17 @@ import type { EasyState } from '../types.ts';
 import { proposalForPackage, type SuperEasyProposal } from './proposal.ts';
 import { isServerSaved, type SaveStateSource } from '../../editor/save-state.ts';
 import { planInputsHash } from '../store.ts';
+import { completedFinalRun } from './restore-final.ts';
+import { readPlanCard } from '../../productions/cards/plan-card.ts';
+import type { SuperEasySetup } from './setup.ts';
 
 const RUN_ALREADY_STARTED = 'The Super Easy run is already going.';
 
 export type SuperEasyWatch = (options: WatchProductionOptions) => () => void;
 
 export interface SuperEasySessionOptions extends RunSuperEasyDeps {
+  /** Current page mode; invite authority is revalidated by the run, never restored from storage. */
+  hostedInvite?: boolean;
   host: RunSuperEasyDeps['host'] & {
     editorStore: RunSuperEasyDeps['host']['editorStore'] & Partial<SaveStateSource>;
   };
@@ -58,6 +63,10 @@ export interface SuperEasySession {
   reviseProposal(note: string): Promise<SuperEasyRunResult | null>;
   reviseNarration(): Promise<SuperEasyRunResult | null>;
   restoreNarrationFailure(input: RunSuperEasyInput, restoredFailure: SuperEasyRunFailure): void;
+  restoreFinalVideo?(snapshot: unknown): Promise<void>;
+  restoreProposal?(): Promise<void>;
+  restoreComputeProposal?(snapshot: unknown): Promise<void>;
+  configureCompute?(setup: SuperEasySetup): boolean;
   stop(): void;
   status(): EasyState['generate']['status'];
   snapshot(): unknown;
@@ -194,6 +203,7 @@ export function createSuperEasySession(options: SuperEasySessionOptions): SuperE
       ...(has('chatId') ? { conversationId: current.chatId } : {}),
       ...(has('attachmentSignature') ? { attachmentSignature: current.attachmentSignature } : {}),
       ...(has('attachmentRevision') ? { attachmentRevision: current.attachmentRevision } : {}),
+      ...(options.hostedInvite ? { hostedInvite: true, compute: 'colab' } : {}),
     };
   }
 
@@ -320,6 +330,7 @@ export function createSuperEasySession(options: SuperEasySessionOptions): SuperE
     lastInput = nextInput;
     generation += 1;
     resultRequest = false;
+    options.store.patch({ proposalCheckpoint: null });
     const ticket = ++epoch;
     recoveryOffer = null;
     recoveryContext = null;
@@ -398,6 +409,7 @@ export function createSuperEasySession(options: SuperEasySessionOptions): SuperE
       }
       snapshot = null;
       phase = 'proposal';
+      saveProposalCheckpoint();
       publish();
       options.onProposal?.(proposal);
       return result;
@@ -463,6 +475,7 @@ export function createSuperEasySession(options: SuperEasySessionOptions): SuperE
     }
     proposal = next;
     reviewedPackage = structuredClone(pkg);
+    saveProposalCheckpoint();
     publish();
     options.onProposal?.(proposal);
     return 'refreshed';
@@ -497,6 +510,7 @@ export function createSuperEasySession(options: SuperEasySessionOptions): SuperE
       basePrompt: proposal.basePrompt,
       revisionNotes: proposal.revisionNotes,
     };
+    options.store.patch({ proposalCheckpoint: null });
     proposal = null;
     status = 'idle';
     return generate(next);
@@ -528,6 +542,60 @@ export function createSuperEasySession(options: SuperEasySessionOptions): SuperE
     return generate(withLiveInputs(lastInput));
   }
 
+  function configureCompute(setup: SuperEasySetup): boolean {
+    const state = options.store.get(), pkg = options.host.getPackage?.();
+    const saved = options.host.editorStore?.saveState?.();
+    const recoverable = phase === 'proposal' && proposal !== null
+      || status === 'error' && ['GENERATED_MEDIA_REQUIRES_COLAB', 'GOOGLE_COLAB_CONFIRM_REQUIRED'].includes(failure?.code ?? '');
+    const revision = proposal?.reviewedPackageRevision ?? lastInput?.reviewedPackageRevision;
+    if (!recoverable || !lastInput || !setup.confirmed || !Number.isFinite(setup.spendCap) || setup.spendCap < 0.5 || setup.spendCap > 500
+      || !pkg || pkg.id !== state.packageId || pkg.revision !== revision
+      || !saved || !isServerSaved(saved) || saved.acknowledgedRevision !== revision
+      || state.builtPackageInputsHash !== planInputsHash(state)) return false;
+    // Compute changes execution/pricing, not the already-reviewed creative package.
+    // Only this guarded setup gesture may rebind the existing package's input hash.
+    const next = { ...state, compute: setup.compute, spendCap: setup.spendCap };
+    options.store.patch({ compute: setup.compute, spendCap: setup.spendCap,
+      builtPackageInputsHash: planInputsHash(next), planHash: null,
+      plan: { ...state.plan, status: 'building', error: null, errorAt: null, wordsChanged: false } });
+    lastInput = { ...lastInput, compute: setup.compute, setupConfirmed: true };
+    if (proposal) saveProposalCheckpoint();
+    return true;
+  }
+
+  async function restoreComputeProposal(serverSnapshot: unknown): Promise<void> {
+    const state = options.store.get();
+    const server = serverSnapshot as any;
+    const card = readPlanCard(serverSnapshot as never);
+    // Recover only a failed, unapproved CPU plan with no dispatched work. A reload
+    // restores review, never approval and never a paid retry.
+    if (status !== 'idle' || phase !== 'idle' || stopped || state.compute !== 'cpu'
+      || state.generate.status !== 'error' || !state.packageId || !state.productionId
+      || !state.idea.text.trim() || state.builtPackageInputsHash !== planInputsHash(state)
+      || server?.production?.id !== state.productionId || server.production.packageId !== state.packageId
+      || server.production.intent !== 'active' || !Array.isArray(server.production.actionIds) || server.production.actionIds.length
+      || card.status !== 'ready' || card.approved || card.rejected || card.actions.length || card.reservationCeiling !== 0
+      || !options.api.getPackage || !options.api.compilePackage) return;
+    const ticket = ++epoch;
+    const identity = JSON.stringify(state);
+    const current = () => !stopped && ticket === epoch && JSON.stringify(options.store.get()) === identity;
+    const body = await options.api.getPackage(state.packageId).catch(() => null);
+    const pkg = body?.package ?? body;
+    if (!current() || pkg?.id !== state.packageId || !Number.isSafeInteger(pkg.revision) || !hasPendingGeneratedShots(pkg)) return;
+    const compiled = await options.api.compilePackage({ package: pkg, revision: pkg.revision,
+      ...(body.editor ? { editor: body.editor } : {}) }).catch(() => null);
+    if (!current() || !compiled?.timeline) return;
+    options.host.adoptBuiltPackage({ ...body, package: pkg, revision: pkg.revision, timeline: compiled.timeline });
+    reviewedPackage = structuredClone(pkg);
+    proposal = { ...proposalForPackage(pkg, state.idea.text, []), motionModel: state.motionModel ?? 'auto' };
+    lastInput = withLiveInputs({ prompt: state.idea.text, basePrompt: state.idea.text, revisionNotes: [],
+      proposalOnly: true, reviewedPackageRevision: pkg.revision, setupConfirmed: false });
+    phase = 'proposal';
+    saveProposalCheckpoint();
+    publish();
+    options.onProposal?.(proposal);
+  }
+
   async function reviseNarration(): Promise<SuperEasyRunResult | null> {
     if (status !== 'error' || !lastInput || !failure?.narrationRevision) return null;
     const next = {
@@ -549,6 +617,98 @@ export function createSuperEasySession(options: SuperEasySessionOptions): SuperE
     phase = 'run';
     patchStatus('error');
     publish();
+  }
+
+  function saveProposalCheckpoint(): void {
+    const state = options.store.get();
+    if (!proposal?.packageId || !Number.isSafeInteger(proposal.reviewedPackageRevision)) return;
+    options.store.patch({ proposalCheckpoint: { packageId: proposal.packageId, revision: proposal.reviewedPackageRevision!,
+      inputsHash: planInputsHash(state), basePrompt: proposal.basePrompt, revisionNotes: [...proposal.revisionNotes],
+      motionModel: state.motionModel ?? 'auto', chatId: state.chatId,
+      deepSeekNoThinking: lastInput?.deepSeekNoThinking === true } });
+  }
+
+  async function restoreProposal(): Promise<void> {
+    const state = options.store.get(), saved = state.proposalCheckpoint;
+    if (status !== 'idle' || phase !== 'idle' || stopped || !saved || !options.api.getPackage || !options.api.compilePackage
+      || state.productionId || state.packageId !== saved.packageId
+      || (state.motionModel ?? 'auto') !== saved.motionModel || state.chatId !== saved.chatId
+      || state.builtPackageInputsHash !== saved.inputsHash || planInputsHash(state) !== saved.inputsHash) return;
+    const ticket = ++epoch;
+    const body = await options.api.getPackage(saved.packageId).catch(() => null);
+    const pkg = body?.package ?? body;
+    const current = options.store.get();
+    if (stopped || ticket !== epoch || current.productionId || current.packageId !== saved.packageId
+      || (current.motionModel ?? 'auto') !== saved.motionModel || current.chatId !== saved.chatId
+      || planInputsHash(current) !== saved.inputsHash || pkg?.id !== saved.packageId || pkg.revision !== saved.revision) return;
+    // GET package is not an agent/build response: the host also requires its
+    // compiled timeline. Compile the saved bytes without planning or rendering.
+    const compiled = await options.api.compilePackage({ package: pkg, revision: pkg.revision,
+      ...(body.editor ? { editor: body.editor } : {}) }).catch(() => null);
+    if (!compiled?.timeline || stopped || ticket !== epoch || options.store.get().productionId
+      || (options.store.get().motionModel ?? 'auto') !== saved.motionModel || options.store.get().chatId !== saved.chatId
+      || options.store.get().packageId !== saved.packageId || planInputsHash(options.store.get()) !== saved.inputsHash) return;
+    options.host.adoptBuiltPackage({ ...body, package: pkg, revision: pkg.revision, timeline: compiled.timeline });
+    reviewedPackage = structuredClone(pkg);
+    proposal = { ...proposalForPackage(pkg, saved.basePrompt, saved.revisionNotes), motionModel: state.motionModel ?? 'auto' };
+    lastInput = withLiveInputs({ prompt: state.idea.text, basePrompt: saved.basePrompt, revisionNotes: saved.revisionNotes,
+      proposalOnly: true, setupConfirmed: true, deepSeekNoThinking: saved.deepSeekNoThinking });
+    phase = 'proposal';
+    publish();
+    options.onProposal?.(proposal);
+  }
+
+  async function restoreFinalVideo(serverSnapshot: unknown): Promise<void> {
+    if (status !== 'idle' || phase !== 'idle' || stopped || !options.api.getPackage) return;
+    const state = options.store.get();
+    const runId = completedFinalRun(serverSnapshot, state);
+    if (!runId || !state.packageId) return;
+    const context = contextKey();
+    const ticket = ++epoch;
+    const current = () => !stopped && epoch === ticket && contextKey() === context
+      && options.store.get().productionId === state.productionId;
+    phase = 'run';
+    snapshot = serverSnapshot;
+    patchStatus('running');
+    publish();
+    try {
+      const response = await options.api.getRun(runId) as any;
+      if (!current()) return;
+      const run = response?.run ?? response;
+      if (run?.runId !== runId || run.productionId !== state.productionId || run.packageId !== state.packageId
+        || !['done', 'completed'].includes(run.status) || run.teardown?.state === 'stop_unconfirmed') {
+        throw new Error('The saved video does not match this completed production.');
+      }
+      const body = await options.api.getPackage(state.packageId);
+      if (!current()) return;
+      const pkg = body?.package ?? body;
+      if (pkg?.id !== state.packageId || !Number.isSafeInteger(run.revision) || !Number.isSafeInteger(pkg.revision)) {
+        throw new Error('The saved video does not match this project.');
+      }
+      if (pkg.revision !== run.revision && !options.api.getSavedRenderVideo) {
+        throw new Error('This project has newer edits than its saved video. Open in Studio to review and export them.');
+      }
+      // The authenticated video endpoint verifies historical package/timeline and
+      // exact movie bytes against its trusted receipt. Never rerender on reopen.
+      const saved = pkg.revision !== run.revision
+        ? await options.api.getSavedRenderVideo!(state.packageId, pkg.revision) : null;
+      const blob = saved?.blob ?? await options.api.getRunVideo(runId);
+      if (!current()) return;
+      const url = URL.createObjectURL(blob);
+      snapshot = { ...(serverSnapshot as object), finalVideo: { ready: true, status: 'done', runId, url,
+        ...(saved ? { exportId: saved.exportId, revision: pkg.revision } : {}) } };
+      rememberObjectUrl(snapshot);
+      preview = false;
+      patchStatus('done');
+      publish();
+      options.onDone?.(snapshot);
+    } catch (error) {
+      if (!current()) return;
+      failure = { ok: false, code: 'SAVED_VIDEO_UNAVAILABLE', stage: 'run', message: error instanceof Error ? error.message : 'The saved video is unavailable.', retryable: false };
+      patchStatus('error');
+      publish();
+      options.onError?.(failure);
+    }
   }
 
   function stop(): void {
@@ -581,6 +741,10 @@ export function createSuperEasySession(options: SuperEasySessionOptions): SuperE
     reviseProposal,
     reviseNarration,
     restoreNarrationFailure,
+    restoreFinalVideo,
+    restoreProposal,
+    restoreComputeProposal,
+    configureCompute,
     stop,
     status: () => status,
     snapshot: () => snapshot,

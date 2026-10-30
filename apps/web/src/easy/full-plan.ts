@@ -270,6 +270,8 @@ function assetMarkup(entry: AssetEntry, index: number): string {
   const prefix = `easy-full-plan-asset-${index}`;
   const fields: string[] = [];
   const inputFields: Array<{ key: string; label: string; rows: number }> = [
+    { key: 'image', label: 'Input image asset ID (H3 identity / LTX start frame)', rows: 2 },
+    { key: 'reference', label: 'Composition reference image asset ID', rows: 2 },
     { key: 'prompt', label: 'Prompt', rows: 5 },
     { key: 'negative', label: 'Negative prompt', rows: 3 },
     { key: 'style', label: 'Style', rows: 2 },
