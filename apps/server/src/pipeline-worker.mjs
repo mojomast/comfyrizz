@@ -1,5 +1,6 @@
 import { copyFileSync, cpSync, existsSync, mkdirSync, readFileSync, rmSync, statSync } from 'node:fs';
 import { recordGenerationReceipts, assertModelContribution, recordRenderedContribution } from '../../../packages/jobs/src/model-contribution.mjs';
+import { completedModels } from './invites/model-provenance.mjs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { planJobs } from '../../../packages/jobs/src/index.mjs';
@@ -403,7 +404,7 @@ with zipfile.ZipFile(sys.argv[1]) as z:
  for a in p['assets'].values():
   if a.get('file') and a.get('sha256'): assert hashlib.sha256(z.read(a['file'])).hexdigest()==a['sha256']`, join(target, 'package.zip')]);
     const files = json(join(runDir, 'export.json')).files.map(file => ({ name: file.name, bytes: file.bytes, url: `/api/pipeline/${runId}/files/${file.name}` }));
-    send({ kind: 'result', result: { packageId: pkg.id, baseRevision: plan.baseRevision, inputHash: plan.inputHash, frames: renderResult.frames, fps: renderResult.fps, renderLocation: renderResult.location ?? 'local', files, packageUrl: `/api/pipeline/${runId}/package`, verificationUrl: `/api/pipeline/${runId}/verification` } });
+    send({ kind: 'result', result: { models: completedModels(pkg, json(join(runDir, 'verification.json')).modelContribution), packageId: pkg.id, baseRevision: plan.baseRevision, inputHash: plan.inputHash, frames: renderResult.frames, fps: renderResult.fps, renderLocation: renderResult.location ?? 'local', files, packageUrl: `/api/pipeline/${runId}/package`, verificationUrl: `/api/pipeline/${runId}/verification` } });
   });
 }
 

@@ -1,15 +1,107 @@
 # Hosted Google Colab invite demo — state, design, next steps
 
-## Main integration: known planning gap
+## Shared-link gallery update (2026-10-30)
 
-After integration with the Pi production changes, the isolated hosted guest
-builder still invokes its offline runner. Generated-film planning now requires
-a live model, so hosted guest planning currently fails before dispatch. The
-offline guest-builder test and the three hosted Super Easy pipeline/no-spend
-tests fail as a result. The earlier no-spend smoke below describes the prior
-host deployment, not a successful test of this integrated version. Reconnect
-guest planning to a host-configured live model with isolated guest storage and
-verify the hosted flow before deploying this integration or enabling spend.
+Deployed from `feat/shared-invite-gallery`. The hosted systemd service is active
+and enabled, with guest generation enabled following Kyle's explicit live-test
+approval. The current host concurrency setting is **2** simultaneous films.
+The marketing homepage remains available and the owner dashboard remains
+tailnet-only at `https://mail.tailec998.ts.net:8456/admin/`.
+
+* An invite is reusable by multiple people. Each redemption issues a separate
+  guest login and records a durable visit. Everyone using that invite shares
+  its CU ceiling and film limit. Exhausted links still open the gallery;
+  expired or revoked links do not.
+* Redeeming opens `/hosted-demo/gallery/`, with all shared completed guest
+  films, including films made through the viewer's own invite. Cards show
+  the generation prompt, planning model, generation models and verified
+  workflow checkpoint names when available. Older records explicitly show
+  missing attribution instead of inventing it. A prominent link opens Super
+  Easy; Easy has a return link to the gallery. The gallery discloses that
+  finished films and prompts are shared with other invite holders.
+* `GET /api/demo/generations?offset=0&limit=24` lists paginated public metadata;
+  `GET /api/demo/generations/:id/video` issues an expiring video ticket. Source
+  packages and productions are not exposed. Source/viewer revocation or expiry
+  invalidates guest playback, including subsequent range requests.
+* The private dashboard shows per-link visits, last visit, CU usage, film
+  counts, generation states, prompts, planning/generation model information,
+  and a video player. Owner playback also works for revoked invites and uses
+  separate tickets accepted only by the private listener. Signing out removes
+  players and the in-memory owner credential.
+* Hosted execution permits `COMFYRIZZ_INVITE_MAX_CONCURRENT` simultaneous
+  pipelines (default **4**, accepted range **1–16**). Staging consumes capacity,
+  duplicate active packages are refused, and every package/run has an isolated
+  workspace and run-derived Colab media session name. Local production retains
+  its single-run operation coordinator. Colab account/provider allocation
+  limits still apply; the setting limits films, not the number of runtimes
+  inside a film. Capacity-full requests are refused rather than queued.
+* Whole-film guest plans are server-authored final actions covering every
+  scene's media estimate (with a 3-CU minimum for cold runtime startup) and,
+  when needed, the default remote Qwen narration
+  allowance. This prevents one whole-film worker per scene and preserves the
+  prohibition on client-authored guest action plans. Concurrent reserved films
+  count toward the invite's film limit transactionally in SQLite.
+
+### Host-configured planning
+
+Guest builds now use the host's active provider/model profile, optionally
+overridden with `COMFYRIZZ_INVITE_PLANNER_PROVIDER` and
+`COMFYRIZZ_INVITE_PLANNER_MODEL`. Without a configured provider the API returns
+`INVITE_PLANNER_UNAVAILABLE`. Provider credentials stay on the host; browser
+provider/model choices cannot override this configuration. Every build gets a
+fresh isolated staging directory and newly owned package/assets. Prompt and
+planning-model attribution are stored durably outside the package schema.
+
+The four integration-era invite failures have been resolved. No-spend HTTP
+tests use an injected model-result fixture, and concurrency tests hold two
+simulated workers open simultaneously. Tests cover distinct session names,
+multi-scene plans, reservation/film limits, gallery metadata, private owner
+playback, revocation and range requests. A local browser smoke with synthetic
+MP4s checks playback, mobile layout, Easy navigation, and dashboard sign-out.
+
+### Live validation — approved and completed October 30
+
+The host uses OpenCode Go `deepseek-v4.1-flash`. Its key is stored only in the
+host runtime's mode-0600 provider settings; it is absent from repository files
+and guest requests. The provider's tool-use probe passed.
+
+Two isolated browser contexts redeemed the same invite, entered the public
+gallery, opened Super Easy, selected Klein-only generation, submitted distinct
+eight-second silent-film prompts, and approved both proposals through the UI.
+The successful runs were:
+
+* `pipe_b258b55219974a50928e2100c91da16d`
+* `pipe_567f8897beb2437fa8cf79ae48822770`
+
+Two distinct G4 assignments were observed together from **04:04:01 through
+04:08:11 UTC**, and both films were ready by **04:09:55 UTC**. Both runtimes
+stopped. Public gallery playback passed. Private admin playback decoded both
+eight-second MP4s and both returned HTTP 206 range responses. Prompts,
+DeepSeek planning attribution, and the verified FLUX 3 Image Klein checkpoint
+are shown in the dashboard. Playback and attribution persisted after restart;
+admin sign-out removed the players without persisting the owner credential.
+
+Live testing uncovered and fixed guest UI access to owner settings, duplicated
+gallery links during progress updates, insufficient cold-start allowance,
+pre-submission CLI kernel disconnects, unused pending draft assets blocking
+export, and nested render-receipt model attribution. The CLI retry is bounded
+and applies only to its explicit initial-chdir failure before script submission;
+uncertain submitted work is never automatically replayed.
+
+There were two earlier pairs of test attempts: the first hit kernel/startup
+failures; the second rendered verified MP4s but failed archive completeness.
+Those outcomes remain recorded. Their artifacts were preserved. Across all
+test attempts, the observed account balance changed from **203.12 to 200.28 CU**
+(**2.84 CU**, an account-level reading). The invite ledger charged **15.442 CU**
+in conservative reservations, including failed/uncertain attempts, and had no
+outstanding reservations. These values are intentionally not presented as
+equivalent or as proof of a hard account-wide actual-usage cap.
+
+Final validation: 652 server/production/backend tests and 1,659 web tests passed
+(one web test skipped), plus typecheck, hosted build, and live browser checks.
+The deployed nginx guest API location uses a 600-second read timeout and
+unbuffered responses for long planning requests. Owner credentials and the
+public token-safe logging policy remain in place.
 
 ## Host integration update (2026-10-28)
 

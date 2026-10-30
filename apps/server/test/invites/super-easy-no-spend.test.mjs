@@ -9,6 +9,7 @@ import { createDurableInviteLedger } from '../../../../packages/backends/src/dur
 import { createEasyApi } from '../../../web/src/easy/api.ts';
 import { createEasyStore } from '../../../web/src/easy/store.ts';
 import { runSuperEasy } from '../../../web/src/easy/super-easy/run.ts';
+import { guestPlannerFixture } from './planner-fixture.mjs';
 
 test('hosted Super Easy reaches the disabled spend boundary using real HTTP and no backend', async () => {
   const keys = ['COMFYRIZZ_ALLOWED_HOSTS', 'COMFYRIZZ_HOSTED_INVITES', 'COMFYRIZZ_INVITE_SPEND_ENABLED'];
@@ -18,7 +19,7 @@ test('hosted Super Easy reaches the disabled spend boundary using real HTTP and 
   delete process.env.COMFYRIZZ_INVITE_SPEND_ENABLED;
   const dir = mkdtempSync(join(tmpdir(), 'hosted-super-easy-'));
   const ledger = createDurableInviteLedger({ path: join(dir, 'invites.sqlite') });
-  const app = createApp({ token: 'test-owner-token-not-a-secret', runtimeDir: join(dir, 'runtime'), inviteLedger: ledger, publicBaseUrl: 'https://comfy.rizz.click', render: async () => {}, renderScene: async () => {} });
+  const app = createApp({ guestRunnerFactory: guestPlannerFixture, token: 'test-owner-token-not-a-secret', runtimeDir: join(dir, 'runtime'), inviteLedger: ledger, publicBaseUrl: 'https://comfy.rizz.click', render: async () => {}, renderScene: async () => {} });
   const server = createServer(app.handler);
   await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
   try {

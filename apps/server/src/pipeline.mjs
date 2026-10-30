@@ -62,13 +62,15 @@ export function launchPipeline(spec, onMessage, onExit) {
   return { cancel: () => child.connected && child.send({ kind: 'cancel' }), kill: signal => { try { child.kill(signal); } catch { /* already gone */ } } };
 }
 
-export function createPipelineController({ runtimeDir, productionStore = createProductionStore({ runtimeDir }), events, stageInputs, launch = launchPipeline, env = process.env, operations = null, isBusy = () => false, reconcileTimeoutMs = Number(env.COMFYRIZZ_RECONCILE_TIMEOUT_MS) || RECONCILE_TIMEOUT_MS, reconcileStopGraceMs = Math.max(90000, Number(env.COMFYRIZZ_RECONCILE_STOP_GRACE_MS) || RECONCILE_STOP_GRACE_MS), takeOver = env.COMFYRIZZ_TAKE_OVER === '1' || process.argv.includes('--take-over'), ownerStaleMs = (Number(env.COMFYRIZZ_OWNER_STALE_MINUTES) || OWNER_STALE_MINUTES) * 60000, ownerHeartbeatMs = OWNER_HEARTBEAT_MS }) {
+export function createPipelineController({ runtimeDir, productionStore = createProductionStore({ runtimeDir }), events, stageInputs, launch = launchPipeline, env = process.env, operations = null, isBusy = () => false, maxConcurrent = 1, reconcileTimeoutMs = Number(env.COMFYRIZZ_RECONCILE_TIMEOUT_MS) || RECONCILE_TIMEOUT_MS, reconcileStopGraceMs = Math.max(90000, Number(env.COMFYRIZZ_RECONCILE_STOP_GRACE_MS) || RECONCILE_STOP_GRACE_MS), takeOver = env.COMFYRIZZ_TAKE_OVER === '1' || process.argv.includes('--take-over'), ownerStaleMs = (Number(env.COMFYRIZZ_OWNER_STALE_MINUTES) || OWNER_STALE_MINUTES) * 60000, ownerHeartbeatMs = OWNER_HEARTBEAT_MS }) {
+  if (!Number.isSafeInteger(maxConcurrent) || maxConcurrent < 1 || maxConcurrent > 16) throw new TypeError('maxConcurrent must be between 1 and 16');
   const dir = join(runtimeDir, 'pipelines');
   mkdirSync(dir, { recursive: true });
   const records = new Map(), workers = new Map(), journals = new Map();
   // UX01: a package bound to a production starts only from its dispatched action.
   const admission = createProductionAdmission({ store: productionStore });
-  let starting = false, lastPersist = 0, ownsLock = false;
+  const startingPackages = new Set();
+  let lastPersist = 0, ownsLock = false;
   /**
    * RL10c: a Google Colab generation run owns the shared operation slot (RL05's coordinator) for its
    * whole life. The lease is taken before the run is admitted, so an export or a render cannot
@@ -278,14 +280,15 @@ export function createPipelineController({ runtimeDir, productionStore = createP
     }
     const refusal = admission.pipelineRefusal(pkg, input, { origin });
     if (refusal) return refusal;
-    if (starting || active() || isBusy()) {
+    if (startingPackages.size + [...records.values()].filter(r => !TERMINAL.has(r.status)).length >= maxConcurrent
+        || startingPackages.has(pkg.id) || [...records.values()].some(r => r.packageId === pkg.id && !TERMINAL.has(r.status)) || isBusy()) {
       // RL10c: the run that already owns the machine is named, so the caller knows who holds it.
       const holder = slotHolder();
       return { status: 409, error: 'pipeline busy', runId: active()?.runId ?? null, ...(holder ? { busy: true, holder } : {}) };
     }
-    const unresolved = [...records.values()].find(unsettled);
+    const unresolved = [...records.values()].find(r => TERMINAL.has(r.status) && unsettled(r));
     if (unresolved) return { status: 409, error: 'runtime shutdown needs reconciliation', runId: unresolved.runId, action: `/api/pipeline/${unresolved.runId}/reconcile` };
-    starting = true;
+    startingPackages.add(pkg.id);
     const runId = `pipe_${randomUUID().replaceAll('-', '')}`;
     let live = false;
     try {
@@ -326,7 +329,7 @@ export function createPipelineController({ runtimeDir, productionStore = createP
       // The run never went live: the slot goes back to whoever wants it.
       if (!live) releaseSlot(runId);
       throw error;
-    } finally { starting = false; }
+    } finally { startingPackages.delete(pkg.id); }
   }
   function cancel(runId) {
     const record = records.get(runId);
@@ -347,7 +350,7 @@ export function createPipelineController({ runtimeDir, productionStore = createP
   function reconcile(runId) {
     const record = records.get(runId);
     if (!record) return null;
-    if (starting || active() || isBusy()) return { status: 409, error: 'pipeline busy' };
+    if (startingPackages.size || active() || isBusy()) return { status: 409, error: 'pipeline busy' };
     // RL10c: a reconcile stops a Google Colab runtime, so it takes the shared slot for its own life
     // and gives it back when it settles. It does not start while another operation owns the slot.
     const slot = takeSlot(runId);
@@ -423,7 +426,7 @@ export function createPipelineController({ runtimeDir, productionStore = createP
     get: runId => publicRecord(records.get(runId)),
     forAction,
     list: () => [...records.values()].map(publicRecord),
-    active: () => starting || Boolean(active()),
+    active: () => startingPackages.size > 0 || Boolean(active()),
     directory: runId => records.has(runId) ? join(dir, runId) : null,
     replay(runId, after = 0) {
       if (!records.has(runId)) return null;

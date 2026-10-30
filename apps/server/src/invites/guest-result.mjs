@@ -6,9 +6,9 @@ import { safeMediaPath } from '../media-range.mjs';
 // produce a guest result. The opaque media ticket is checked again on every
 // request, including byte-range requests, so revocation and file replacement
 // cannot turn an old ticket into access to another file.
-export function guestProductionResult({ inviteId, productionId, ledger, pipelines, tickets, runId = null, authorizeViewer = () => true }) {
+export function guestProductionResult({ inviteId, productionId, ledger, pipelines, tickets, runId = null, authorizeViewer = () => true, ownerView = false }) {
   const invite = ledger.get(inviteId);
-  if (!invite || ['expired', 'revoked'].includes(invite.status)
+  if (!invite || (!ownerView && ['expired', 'revoked'].includes(invite.status))
       || ledger.resourceOwner('production', productionId) !== inviteId) return null;
   const run = pipelines.list().filter(item => item.origin?.productionId === productionId && (!runId || item.runId === runId))
     .sort((a, b) => String(b.startedAt ?? '').localeCompare(String(a.startedAt ?? '')))[0];
@@ -24,7 +24,7 @@ export function guestProductionResult({ inviteId, productionId, ledger, pipeline
   const authorize = () => {
     const current = ledger.get(inviteId);
     const currentRun = pipelines.get(run.runId);
-    if (!authorizeViewer() || !current || ['expired', 'revoked'].includes(current.status)
+    if (!authorizeViewer() || !current || (!ownerView && ['expired', 'revoked'].includes(current.status))
         || ledger.resourceOwner('production', productionId) !== inviteId
         || currentRun?.status !== 'completed' || currentRun.origin?.productionId !== productionId
         || currentRun.packageId !== run.packageId

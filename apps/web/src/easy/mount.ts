@@ -71,7 +71,8 @@ export interface EasyStudioDeps {
 export function mountEasyStudio(root: HTMLElement, baseHost: EasyHost, deps: EasyStudioDeps = {}): () => void {
   const doc = root.ownerDocument;
   const view = doc.defaultView;
-  const stopCorrectionShutdown = mountCorrectionShutdown(root, baseHost.apiFetch);
+  const hostedInviteView = new URLSearchParams(view?.location?.search ?? '').get('demo') === '1';
+  const stopCorrectionShutdown = hostedInviteView ? () => {} : mountCorrectionShutdown(root, baseHost.apiFetch);
   let settings: ReturnType<typeof mountEasyAgentSettings> | null = null;
   const host: EasyHost = {
     ...baseHost,

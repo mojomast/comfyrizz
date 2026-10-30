@@ -558,8 +558,8 @@ export async function runSuperEasy(input: RunSuperEasyInput, deps: RunSuperEasyD
   }
 
   const write = (proposalOnly = false): Promise<void> => writePlan(deps.store.get(), {
-    api: deps.api as never,
-    host: deps.host,
+    api: (hosted ? { ...deps.api, getAgentProgress: undefined, cancelAgent: undefined } : deps.api) as never,
+    host: hosted ? { ...deps.host, aiSelection: async () => ({ provider: 'none' }) } : deps.host,
     store: deps.store,
   }, { stopAfterPackage: proposalOnly, deepSeekNoThinking: input.deepSeekNoThinking,
     ...(narrationOnly ? { narrationRevision: { packageId: priorPackage.id, baseRevision: priorPackage.revision, note: lastNote, ...(input.recoveryProductionId ? { recoveryProductionId: input.recoveryProductionId } : {}) } } : {}),
@@ -674,7 +674,9 @@ export async function runSuperEasy(input: RunSuperEasyInput, deps: RunSuperEasyD
   if (compute === 'colab') {
     const easyCard = readPlanCard(snapshot);
     hasPaidWork = easyCard.actions.some(isPaidAction);
-    if (easyCard.actions.length > 0) {
+    // Hosted plans are authored and priced by the server as a single complete
+    // film action. Guests cannot replace them with client-authored plans.
+    if (!hosted && easyCard.actions.length > 0) {
       let envelope: Record<string, unknown>;
       try {
         envelope = finalPlanEnvelope(easyCard, snapshot);

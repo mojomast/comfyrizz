@@ -923,6 +923,14 @@ export function mountSuperEasy(options: SuperEasyMountOptions): SuperEasyMountHa
       syncAttachments();
       loadAttachments();
     }
+    if (new URLSearchParams(currentSearch()).get('demo') === '1' && !root.querySelector('[data-guest-gallery]')) {
+      const gallery = root.ownerDocument.createElement('a');
+      gallery.dataset.guestGallery = '';
+      gallery.className = 'btn btn-secondary';
+      gallery.textContent = '← Film gallery';
+      gallery.href = new URL('./gallery/', root.ownerDocument.baseURI).pathname;
+      root.prepend(gallery);
+    }
     root.dataset.superEasyView = next;
   };
 

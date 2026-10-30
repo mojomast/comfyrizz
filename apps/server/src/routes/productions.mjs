@@ -441,14 +441,8 @@ export function createProductionRoutes(options = {}) {
     if (!pkg) throw new RouteError('NOT_FOUND', 'package does not exist', 404);
     requirePackageRevision(production.packageId, body.expectedPackageRevision);
 
-    if (inviteOwnership && context?.inviteId) {
-      // Each outbox action currently runs the entire package, not only its
-      // named scene. Refuse multi-action packages instead of reserving a
-      // single scene's cost for a whole-package pipeline.
-      const full = planFromPackage({ pkg, level: body.level, compute: 'colab' });
-      if (full.actions.length !== 1 || (body.onlyShotIds && !body.onlyShotIds.includes(full.actions[0].targetId))) {
-        throw new RouteError('INVITE_PLAN_UNSUPPORTED', 'this invite requires a single Google Colab scene', 422);
-      }
+    if (inviteOwnership && context?.inviteId && body.onlyShotIds) {
+      throw new RouteError('INVITE_PLAN_UNSUPPORTED', 'invite plans execute the complete film', 422);
     }
 
     const described = planFromPackage({
@@ -460,6 +454,18 @@ export function createProductionRoutes(options = {}) {
       onlyShotIds: body.onlyShotIds,
       chip: body.chip,
     });
+    if (inviteOwnership && context?.inviteId && described.actions.length > 0) {
+      // The executor runs the complete film, not a scoped shot. Author a final
+      // action on the server and reserve every scene's conservative media
+      // estimate plus the pipeline's maximum default remote-narration allowance.
+      const remoteVoice = !pkg.audio?.music?.trim && pkg.voice?.enabled
+        && pkg.voice.engine === 'qwen3-tts' && pkg.scenes.some(scene => scene.narration?.trim());
+      // A cold hosted runtime also needs kernel startup and serial uploads.
+      // The old one-still estimate left only five minutes before shutdown.
+      described.reservationCeiling = Math.ceil((Math.max(3, described.reservationCeiling) + (remoteVoice ? 2 : 0)) * 1000) / 1000;
+      described.actions = [{ id: 'act_invite_film', kind: 'final', backendId: 'colab',
+        upperBound: described.reservationCeiling }];
+    }
     // Plan identity is server-owned. A client planId is ignored.
     const planId = `plan_${randomUUID().replaceAll('-', '')}`;
     const commandId = `cmd_easy_${randomUUID().replaceAll('-', '')}`;

@@ -35,6 +35,8 @@ export function createDemoInvites({
 
   const inviteLedger = ledger ?? createInviteLedger({ now, publicBaseUrl });
   const guestSessions = guests ?? createGuestSessionStore({ now });
+  const galleryPath = `${appPath.replace(/\/$/, '')}/gallery/`;
+  const openPath = token => `${galleryPath}#token=${encodeURIComponent(token)}`;
   /** @type {Map<string, { inviteId: string, committed: number, packageId: string, prompt: string, title: string }>} */
   const pendingRuns = new Map();
 
@@ -229,9 +231,10 @@ export function createDemoInvites({
         inviteId: redeemed.invite.id,
         label: redeemed.invite.label,
       });
+      inviteLedger.recordVisit?.(redeemed.invite.id);
       const budgetUnits = budgetUnitsFromInvite(redeemed.invite);
       // Prefer SPA shell with fragment token (same contract as owner URL).
-      const loc = `${appPath}?demo=1&mode=super-easy#token=${encodeURIComponent(session.guestToken)}`;
+      const loc = openPath(session.guestToken);
       if (serveStatic && request.headers.accept && String(request.headers.accept).includes("text/html")) {
         response.writeHead(302, {
           location: loc,
@@ -249,7 +252,7 @@ export function createDemoInvites({
         invite: redeemed.invite,
         budgetUnits,
         openPath: loc,
-        mode: "super-easy",
+        mode: "gallery",
         backendId: "colab",
         urlShape: `${publicBaseUrl}${INVITE_PATH_PREFIX}/<token>`,
       });
@@ -269,14 +272,15 @@ export function createDemoInvites({
         });
       }
       const session = guestSessions.issue({ inviteId: redeemed.invite.id, label: redeemed.invite.label });
+      inviteLedger.recordVisit?.(redeemed.invite.id);
       return reply(200, {
         ok: true,
         guestToken: session.guestToken,
         expiresAt: session.expiresAt,
         invite: redeemed.invite,
         budgetUnits: budgetUnitsFromInvite(redeemed.invite),
-        openPath: `${appPath}?demo=1&mode=super-easy#token=${encodeURIComponent(session.guestToken)}`,
-        mode: "super-easy",
+        openPath: openPath(session.guestToken),
+        mode: "gallery",
         backendId: "colab",
       });
     }
@@ -379,6 +383,9 @@ export function createDemoInvites({
         budgetUnits: budgetUnitsFromInvite(invite),
         backendId: "colab",
         mode: "super-easy",
+        spendEnabled: process.env.COMFYRIZZ_INVITE_SPEND_ENABLED === '1',
+        easyPath: `${appPath}?demo=1&mode=super-easy`,
+        galleryPath,
       });
     }
 

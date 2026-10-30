@@ -50,6 +50,40 @@ test('concurrent starts cannot both enter staging or allocate', async t => {
   release(); await first; f.exit(1);
 });
 
+test('bounded concurrent pipelines isolate workspaces, cancellation and capacity including staging', async t => {
+  const releases = [], workers = [];
+  const f = fixture(t, { maxConcurrent: 2,
+    stageInputs: () => new Promise(resolve => releases.push(resolve)),
+    launch: (path, receive, done) => {
+      const worker = { spec: JSON.parse(readFileSync(path)), receive, done, cancelled: false };
+      workers.push(worker);
+      return { cancel() { worker.cancelled = true; }, kill() {} };
+    },
+  });
+  t.after(() => f.controller.close());
+  const secondPkg = { ...example, id: 'pkg_parallel_second' };
+  const first = f.controller.start(example, { backendId: 'cpu' }, '.');
+  assert.equal((await f.controller.start(example, { backendId: 'cpu' }, '.')).status, 409);
+  const second = f.controller.start(secondPkg, { backendId: 'cpu' }, '.');
+  assert.equal(releases.length, 2);
+  assert.equal((await f.controller.start({ ...example, id: 'pkg_over_capacity' }, { backendId: 'cpu' }, '.')).status, 409);
+  releases.forEach(release => release());
+  const [a, b] = await Promise.all([first, second]);
+  assert.equal(workers.length, 2);
+  assert.notEqual(workers[0].spec.workDir, workers[1].spec.workDir);
+  assert.notEqual(workers[0].spec.runDir, workers[1].spec.runDir);
+  f.controller.cancel(a.run.runId);
+  assert.equal(workers[0].cancelled, true);
+  assert.equal(workers[1].cancelled, false);
+  workers[0].receive({ kind: 'cancelled' }); workers[0].done(1);
+  assert.equal(f.controller.active(), true);
+  for (const stage of b.run.stages) workers[1].receive({ kind: 'stage', stageId: stage.id, status: 'completed' });
+  workers[1].receive({ kind: 'result', result: { files: [] } }); workers[1].done(0);
+  assert.equal(f.controller.get(a.run.runId).status, 'cancelled');
+  assert.equal(f.controller.get(b.run.runId).status, 'completed');
+  assert.equal(f.controller.active(), false);
+});
+
 test('cancellation remains cancelling until cleanup returns; never completes with a late result', async t => {
   const f = fixture(t), { run } = await f.controller.start(example, { backendId: 'cpu' }, '.');
   f.controller.cancel(run.runId);

@@ -71,6 +71,7 @@ export function initialProjectTarget(search: string, hasToken: boolean): Initial
   if (!hasToken) return { source: 'bundled', packageId: null };
   const requested = requestedId(search);
   if (requested) return { source: 'requested', packageId: requested };
+  if (new URLSearchParams(search).get('demo') === '1') return { source: 'bundled', packageId: null };
   return { source: 'seeded', packageId: DEFAULT_PACKAGE_ID };
 }
 

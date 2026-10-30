@@ -259,6 +259,7 @@ function harness(options = {}) {
 
 test('hosted Super Easy uses the invite budget and dispatches only through the production outbox', async () => {
   const { api, host, calls, store } = harness({ hosted: true });
+  host.aiSelection = async () => { throw new Error('Guests cannot read owner provider settings'); };
   const result = await runSuperEasy({ prompt: PROMPT, hostedInvite: true }, { api, host, store, go: () => {} });
   assert.equal(result.ok, true, JSON.stringify(result));
   assert.equal(store.get().compute, 'colab');

@@ -86,6 +86,7 @@ import { reconcileInvitePipeline } from './invites/production-reconcile.mjs';
 import { createGuestPackageBuilder } from './invites/guest-package-builder.mjs';
 import { guestProductionResult } from './invites/guest-result.mjs';
 import { createGuestShowcase } from './invites/guest-showcase.mjs';
+import { createGenerationGallery } from './invites/generation-gallery.mjs';
 import { createCorrectionAdapter } from './productions/correction-adapter.mjs';
 import { correctionShutdownStatus, hasUnresolvedCorrectionShutdown, reconcileCorrectionShutdown } from './productions/correction-shutdown.mjs';
 import { createOutboxExecutor } from './productions/outbox-execution.mjs';
@@ -288,6 +289,7 @@ export function createApp({
   // uses succeeds; a failed probe keeps the route at 503.
   auditionSynth = null,
   inviteLedger = null,
+  guestRunnerFactory,
   publicBaseUrl = process.env.COMFYRIZZ_PUBLIC_BASE_URL || undefined,
   localNarrationPrepare,
 } = {}) {
@@ -312,6 +314,7 @@ export function createApp({
   const hfTokenSettings = providedHfTokenSettings ?? createHfTokenSettings({ runtimeDir });
   const mediaTickets = createMediaTickets();
   const guestMediaTickets = createMediaTickets();
+  const adminMediaTickets = createMediaTickets();
   const rendersDir = join(runtimeDir, 'renders');
   const qa = createQaRegistry();
   mkdirSync(rendersDir, { recursive: true });
@@ -800,7 +803,8 @@ export function createApp({
   pipelines = createPipelineController({
     runtimeDir, events, stageInputs: stagePipelineInputs,
     ...(pipelineLaunch ? { launch: pipelineLaunch } : {}),
-    operations,
+    operations: process.env.COMFYRIZZ_HOSTED_INVITES === '1' ? null : operations,
+    maxConcurrent: process.env.COMFYRIZZ_HOSTED_INVITES === '1' ? Number(process.env.COMFYRIZZ_INVITE_MAX_CONCURRENT ?? 4) : 1,
     isBusy: () => Boolean(runs.status().activeRunId || recoveries?.active()) || hasUnresolvedCorrectionShutdown(productionStore, runtimeDir),
   });
   if (process.env.COMFYRIZZ_HOSTED_INVITES === '1') {
@@ -1618,10 +1622,25 @@ export function createApp({
     return { role: 'none', guest: null };
   }
 
+  const generationGallery = inviteLedger ? createGenerationGallery({ ledger: inviteLedger, pipelines,
+    tickets: guestMediaTickets, adminTickets: adminMediaTickets }) : null;
+
   async function handler(request, response, privateAdmin = false) {
     const host = request.headers.host ?? '127.0.0.1';
     if (!hostAllowed(host)) return sendJson(response, 403, { error: 'host not allowed' });
     const url = new URL(request.url ?? '/', `http://${host}`);
+    const galleryRoot = `${(process.env.COMFYRIZZ_DEMO_APP_PATH || '/').replace(/\/$/, '')}/gallery`;
+    if (process.env.COMFYRIZZ_HOSTED_INVITES === '1' && (url.pathname === galleryRoot || url.pathname.startsWith(galleryRoot + '/'))) {
+      if (url.pathname === galleryRoot) { response.writeHead(302, { location: galleryRoot + '/', 'cache-control': 'no-store' }); response.end(); return; }
+      const files = { '': 'index.html', '/': 'index.html', '/gallery.js': 'gallery.js', '/gallery.css': 'gallery.css' };
+      const name = files[url.pathname.slice(galleryRoot.length)];
+      if (!name || !['GET', 'HEAD'].includes(request.method)) return sendJson(response, 404, { error: 'not found' });
+      return serveStaticFile(request, response, fileURLToPath(new URL(`./invites/gallery/${name}`, import.meta.url)), {
+        'content-type': MIME[extname(name)], 'cache-control': 'no-store', 'referrer-policy': 'no-referrer',
+        'x-robots-tag': 'noindex, nofollow, noarchive', 'x-content-type-options': 'nosniff',
+        'content-security-policy': "default-src 'none'; script-src 'self'; style-src 'self'; connect-src 'self'; media-src 'self'; base-uri 'none'; frame-ancestors 'none'",
+      });
+    }
 
     // The owner dashboard is served only from the private listener and its
     // configured tailnet host. API credentials are entered in the page and
@@ -1638,7 +1657,7 @@ export function createApp({
       const file = fileURLToPath(new URL(`./invites/admin-dashboard/${name}`, import.meta.url));
       return serveStaticFile(request, response, file, {
         'content-type': MIME[extname(file)], 'cache-control': 'no-store',
-        'content-security-policy': "default-src 'none'; script-src 'self'; style-src 'self'; connect-src 'self'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'",
+        'content-security-policy': "default-src 'none'; script-src 'self'; style-src 'self'; connect-src 'self'; media-src 'self'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'",
         'referrer-policy': 'no-referrer', 'x-content-type-options': 'nosniff',
         'x-robots-tag': 'noindex, nofollow, noarchive',
       });
@@ -1668,7 +1687,8 @@ export function createApp({
     // the API header. The ticket is not the API token and is not written to exports.
     const mediaGet = /^\/api\/media\/([a-f0-9]{32})$/.exec(url.pathname);
     if (mediaGet && (request.method === 'GET' || request.method === 'HEAD')) {
-      const file = mediaTickets.resolve(mediaGet[1]) ?? guestMediaTickets.resolve(mediaGet[1]);
+      const file = mediaTickets.resolve(mediaGet[1]) ?? guestMediaTickets.resolve(mediaGet[1])
+        ?? (privateAdmin ? adminMediaTickets.resolve(mediaGet[1]) : null);
       if (!file) return sendJson(response, 401, { error: 'media ticket expired' });
       return serveTicket(request, response, file);
     }
@@ -1701,6 +1721,18 @@ export function createApp({
     }
     const ownerOk = actor.role === 'owner';
     const guest = actor.guest;
+    if (generationGallery && request.method === 'GET') {
+      if (guest && url.pathname === '/api/demo/generations') {
+        return sendJson(response, 200, generationGallery.list(guest.inviteId, Object.fromEntries(url.searchParams)));
+      }
+      const video = /^\/api\/(demo|invites)\/generations\/([A-Za-z0-9_-]+)\/video$/.exec(url.pathname);
+      if (video) {
+        const owner = video[1] === 'invites' && ownerOk && privateAdmin;
+        if (!owner && (video[1] !== 'demo' || !guest)) return sendJson(response, 403, { error: 'forbidden' });
+        const result = generationGallery.video(video[2], guest?.inviteId, owner);
+        return result ? sendJson(response, 200, result) : sendJson(response, 404, { error: 'video unavailable' });
+      }
+    }
 
     if (guest && guestShowcase) {
       if (url.pathname === '/api/demo/showcase' && request.method === 'GET') {
@@ -2193,18 +2225,28 @@ export function createApp({
       if (guest && process.env.COMFYRIZZ_HOSTED_INVITES === '1') {
         const body = await readJson(request);
         try {
-          const build = createGuestPackageBuilder({ runtimeDir, store, ledger: inviteLedger });
-          const result = await build({ inviteId: guest.inviteId, brief: body.brief });
+          const active = providerSettings?.snapshot?.().active;
+          const provider = process.env.COMFYRIZZ_INVITE_PLANNER_PROVIDER || active?.provider;
+          const model = process.env.COMFYRIZZ_INVITE_PLANNER_MODEL || active?.model;
+          if ((!provider || provider === 'none') && !guestRunnerFactory) return sendJson(response, 503, { error: 'The host has not configured a planning model.', code: 'INVITE_PLANNER_UNAVAILABLE' });
+          if (typeof body.brief !== 'string' || !body.brief.trim() || body.brief.length > 12000) return sendJson(response, 400, { error: 'A brief of at most 12000 characters is required.' });
+          const build = createGuestPackageBuilder({ runtimeDir, store, ledger: inviteLedger,
+            ...(guestRunnerFactory ? { runnerFactory: guestRunnerFactory } : {}),
+            provider, model, resolveProviderConfig: providerSettings?.resolve });
+          const result = await build({ inviteId: guest.inviteId, brief: body.brief,
+            motionModel: ['auto', 'h3', 'ltx', 'klein'].includes(body.motionModel) ? body.motionModel : 'auto',
+            signal: AbortSignal.timeout(300000) });
           const timeline = compilePackage(result.package, dirname(store.path(result.package.id)));
           return sendJson(response, 200, {
             package: result.package, revision: result.package.revision, timeline,
             generatedAssets: result.generatedAssets ?? {}, routes: result.routes ?? [],
             pendingGpu: result.pendingGpu ?? [], svgAssets: result.svgAssets ?? [],
-            live: false, fallback: false, provider: 'scripted', model: 'scripted',
+            live: result.live === true, fallback: false, provider: result.provider, model: result.model,
           });
         } catch (error) {
-          if (error instanceof TypeError) return sendJson(response, 400, { error: error.message });
-          console.error('[invite-package-build]', error.message);
+          // Provider failures can include request headers or host configuration.
+          // Never reflect them to guests or copy them into public-service logs.
+          console.error('[invite-package-build] planning failed');
           return sendJson(response, 500, { error: 'guest package could not be built' });
         }
       }
@@ -2829,6 +2871,6 @@ export function createApp({
     exportsDir,
     sceneCacheDir,
     webDist,
-    close: () => { guestMediaTickets.close(); pipelines.close(); events.closeAll(); },
+    close: () => { adminMediaTickets.close(); guestMediaTickets.close(); pipelines.close(); events.closeAll(); },
   };
 }
