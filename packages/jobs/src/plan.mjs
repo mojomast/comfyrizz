@@ -190,11 +190,20 @@ const GENERATOR_KIND = {
   "procedural-audio": null, // deterministic PCM finishing stem: already synthesized on CPU
 };
 
+/**
+ * Planner-only ref-watch metadata that is written to jobs.json but is not part of a cache key.
+ *
+ * SPW01's `shot` and `chainFromPreviousOverride` are derived from the package for the ref-watch
+ * controller; they do not change what a job renders. Keeping them out of `canonical` also keeps the
+ * recorded jobs.json hash stable for plans made before the fields existed.
+ */
+const PLAN_HASH_OMITTED_KEYS = new Set(["shot", "chainFromPreviousOverride"]);
+
 /** Stable JSON: object keys sorted, so a hash never depends on key order. */
 export function canonical(value) {
   if (Array.isArray(value)) return `[${value.map(canonical).join(",")}]`;
   if (value && typeof value === "object") {
-    const keys = Object.keys(value).sort();
+    const keys = Object.keys(value).sort().filter((k) => !PLAN_HASH_OMITTED_KEYS.has(k));
     return `{${keys.map((k) => `${JSON.stringify(k)}:${canonical(value[k])}`).join(",")}}`;
   }
   return JSON.stringify(value ?? null);
@@ -263,6 +272,28 @@ function sceneIndexOf(pkg, assetId) {
     if (sceneAssetIds(scenes[i]).includes(assetId)) return i;
   }
   return -1;
+}
+
+/**
+ * SPW01: each plate's 0-based position among the plates of its owning scene, in scene asset order.
+ *
+ * Every plate asset counts, including one that is already ready and gets no job: a skipped plate is
+ * still a shot in the scene, and chaining an earlier job straight onto a later shot would cross it.
+ * The first scene that names the asset owns it, matching `sceneIndexOf`.
+ */
+function platePositionsByScene(pkg) {
+  const scenes = Array.isArray(pkg.scenes) ? pkg.scenes : [];
+  const assets = pkg.assets && typeof pkg.assets === "object" ? pkg.assets : {};
+  const positions = new Map();
+  for (const scene of scenes) {
+    let index = 0;
+    for (const id of sceneAssetIds(scene)) {
+      if (GENERATOR_KIND[assets[id]?.gen?.generator] !== "plate") continue;
+      if (!positions.has(id)) positions.set(id, index);
+      index += 1;
+    }
+  }
+  return positions;
 }
 
 /**
@@ -795,6 +826,7 @@ export function planJobs(pkg, opts = {}) {
   const latticeFor = (assetId) => sourceLattice.get(assetId) ?? DIM_MULTIPLE_BY_KIND.still;
 
   // Pass 2: build jobs.
+  const platePositions = platePositionsByScene(pkg);
   const jobs = [];
   const add = (job) => {
     if (jobs.some((j) => j.id === job.id)) {
@@ -947,6 +979,16 @@ export function planJobs(pkg, opts = {}) {
       cacheKey: null,
     };
     if (textAllowed) job.allowText = true;
+    // SPW01: ref-watch chaining needs the shot's place in its scene. A plate with no owning scene
+    // gets no shot, so it is never chained. None of this enters `params` or the cache key.
+    if (kind === "plate") {
+      const position = platePositions.get(assetId);
+      if (sceneIndex >= 0 && position !== undefined) {
+        job.shot = { sceneId: scene, index: position };
+        if (gen.cut === true || gen.transition === "hard") job.shot.cut = true;
+      }
+      if (typeof gen.chainFromPrevious === "boolean") job.chainFromPreviousOverride = gen.chainFromPrevious;
+    }
 
     if (kind === "still") {
       const requested = {
