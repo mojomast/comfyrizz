@@ -65,7 +65,7 @@ def test_duration_must_stay_inside_the_words_per_second_window():
     spoken = "the quick brown fox"
     expected = expected_seconds(spoken)
     too_fast = select_take(spoken, [{"path": "fast.wav", "transcript": spoken, "seconds": expected * 0.5}])
-    too_slow = select_take(spoken, [{"path": "slow.wav", "transcript": spoken, "seconds": expected * 2.0}])
+    too_slow = select_take(spoken, [{"path": "slow.wav", "transcript": spoken, "seconds": expected * 1.8 + 1.5}])
     edge = select_take(spoken, [{"path": "edge.wav", "transcript": spoken, "seconds": expected * 1.8}])
     assert too_fast["take"] is None
     assert too_slow["take"] is None

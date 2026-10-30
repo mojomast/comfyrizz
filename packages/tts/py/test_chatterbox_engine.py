@@ -91,16 +91,17 @@ def test_a_bad_take_regenerates_with_a_new_seed_then_selects_the_good_one(tmp_pa
     assert report["scenes"]["l1"]["qa"]["transcript"] == "the quick brown fox"
 
 
-def test_all_failed_takes_stop_at_three_and_flag_the_line(tmp_path):
+def test_all_failed_takes_stop_after_three_rounds_and_flag_the_line(tmp_path):
     report, submit, asr, out = run(
         tmp_path,
         [line("the quick brown fox")],
-        ["completely wrong", "still completely wrong", "wrong again entirely"],
+        ["completely wrong", "still completely wrong", "wrong again entirely"] * 3,
     )
-    assert len(submit.calls) == 3
-    assert len(asr.paths) == 3
+    # three takes, then two more rounds of three (SP05: "retries up to 2 more")
+    assert len(submit.calls) == 9
+    assert len(asr.paths) == 9
     qa = report["scenes"]["l1"]["qa"]
-    assert qa["attempts"] == 3
+    assert qa["attempts"] == 9
     assert qa["flagged"] is True
     assert qa["reasons"]
     assert report["scenes"]["l1"]["chunks"][0]["seconds"] == 1.6
@@ -110,11 +111,11 @@ def test_takes_per_line_bounds_the_retries(tmp_path):
     report, submit, _, _ = run(
         tmp_path,
         [line("the quick brown fox")],
-        ["wrong one", "wrong two", "wrong three"],
+        ["wrong one", "wrong two", "wrong three"] * 2,
         takes_per_line=2,
     )
-    assert len(submit.calls) == 2
-    assert report["scenes"]["l1"]["qa"]["attempts"] == 2
+    assert len(submit.calls) == 6
+    assert report["scenes"]["l1"]["qa"]["attempts"] == 6
 
 
 def test_one_call_per_line_for_two_lines(tmp_path):
@@ -129,7 +130,7 @@ def test_one_call_per_line_for_two_lines(tmp_path):
         "a second spoken line",
     ]
     assert submit.calls[0]["1"]["inputs"]["seed"] == 100
-    assert submit.calls[1]["1"]["inputs"]["seed"] == 103
+    assert submit.calls[1]["1"]["inputs"]["seed"] == 109
     assert list(report["scenes"]) == ["l1", "l2"]
 
 

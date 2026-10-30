@@ -21,6 +21,9 @@ WER_LIMIT = 0.1
 WORDS_PER_SECOND = 2.5
 MIN_DURATION_SCALE = 0.6
 MAX_DURATION_SCALE = 1.8
+# Chatterbox takes carry lead-in/tail silence; on a three-word line that alone breaks the 1.8x
+# bound (GPU e2e 2026-10-30: "His never was." 2.4 s vs 2.16 s). Allow it once per take.
+SILENCE_ALLOWANCE_SECONDS = 1.0
 REASON_ORDER = ("truncated", "extra-words", "repeated-word", "wer", "duration")
 
 
@@ -104,7 +107,7 @@ def _classify(spoken: str, take: Mapping, expected: float, words: list[str]) -> 
         seconds = float(take.get("seconds"))
     except (TypeError, ValueError):
         seconds = float("nan")
-    if not (expected * MIN_DURATION_SCALE <= seconds <= expected * MAX_DURATION_SCALE):
+    if not (expected * MIN_DURATION_SCALE <= seconds <= expected * MAX_DURATION_SCALE + SILENCE_ALLOWANCE_SECONDS):
         reasons.append("duration")
     return reasons
 

@@ -200,7 +200,7 @@ def test_a_line_with_no_usable_take_flags_the_run_but_still_writes_audio(tmp_pat
     out = tmp_path / "run"
 
     submit = FakeComfy(tmp_path)
-    asr = ScriptedAsr(["completely wrong words"] * 3)
+    asr = ScriptedAsr(["completely wrong words"] * 9)
     result = narrate.run(
         package_path,
         out,
@@ -208,11 +208,11 @@ def test_a_line_with_no_usable_take_flags_the_run_but_still_writes_audio(tmp_pat
         transcribe_fn=asr,
     )
 
-    assert len(submit.calls) == 3
+    assert len(submit.calls) == 9
     take_report = json.loads((out / "audio" / "take_report.json").read_text())
     assert take_report["lines"][line["id"]]["flagged"] is True
     assert take_report["lines"][line["id"]]["selected"] is None
-    assert [take["status"] for take in take_report["takes"]] == ["rejected", "rejected", "rejected"]
+    assert [take["status"] for take in take_report["takes"]] == ["rejected"] * 9
     assert result["exitCode"] == 1
     assert (out / "audio" / "s_only.wav").is_file()
 

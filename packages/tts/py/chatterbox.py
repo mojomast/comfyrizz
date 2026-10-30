@@ -243,7 +243,9 @@ def synth_lines(lines: list, options: dict | None = None, **dependencies) -> dic
     seed_base = int(config.get("seed_base", 0))
     voice_reference = config.get("voice_reference")
     requested = max(1, int(config.get("takes_per_line", DEFAULT_TAKES_PER_LINE)))
-    max_takes = min(requested, 1 + MAX_REGENERATIONS)
+    # takes_per_line takes, then up to MAX_REGENERATIONS more rounds of the same size (SP05 brief);
+    # the loop stops at the first accepted take, so a clean line still costs one graph call.
+    max_takes = requested * (1 + MAX_REGENERATIONS)
     template = _graph_template(config)
 
     report: dict = {
