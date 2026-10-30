@@ -2182,7 +2182,19 @@ export function createApp({
         let editor = null;
         try { editor = readEditor(runtimeDir, id); } catch { editor = null; }
         const runDefaults = store.runDefaults(id);
+        // Owner-only binding so a reopened project can resume its plan/gallery
+        // instead of presenting an empty prompt. Guest copies never receive
+        // another viewer's production identity.
+        let productionId = null;
+        if (ownerOk) {
+          try {
+            productionId = productionStore.list()
+              .filter(item => item?.packageId === id && typeof item.id === 'string')
+              .sort((a, b) => (b.revision ?? 0) - (a.revision ?? 0))[0]?.id ?? null;
+          } catch { productionId = null; }
+        }
         return sendJson(response, 200, { package: pkg, revision: pkg.revision,
+          ...(productionId ? { productionId } : {}),
           ...(editor ? { editor } : {}), ...(runDefaults ? { runDefaults } : {}) });
       }
       if (request.method === 'PATCH') {
