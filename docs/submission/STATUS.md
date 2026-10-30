@@ -4,6 +4,33 @@
 
 Updated 2026-10-27 on `feat/hackathon-submission` / draft PR #53.
 
+## 2026-10-30 Super Easy landing refresh
+
+- UI commit `51fbc33` adds the new responsive prompt-first landing, quieter
+  optional references and fine-tuning, and a native video-type disclosure that
+  starts collapsed and displays the selected type. Keyboard selection preserves
+  the typed prompt and continues to reveal music-video controls normally.
+- An HTML-level launch screen prevents the editor from flashing before startup.
+  Bare visits open the landing even after an editor session; explicit editor
+  links still open the editor. Startup failure keeps an accessible reload action.
+- The UI is served at the existing Tailscale instance `http://100.72.41.9:4404/`.
+  Entry requires its authenticated `#token=` launch link, which was supplied
+  privately to the user. A plain URL does not create a session. Tokens are not
+  recorded here. Existing hashed web assets were retained and the new index
+  published atomically; the server and production runtime were not restarted or
+  modified.
+- Verification: **61 focused tests, 9 Chromium browser tests, TypeScript check
+  and production build passed**. Real-instance desktop/mobile checks verified
+  collapsed types, updated selection summary, hidden editor, no horizontal
+  overflow and an authenticated read returning HTTP 200. Generate sent the
+  correct session header; that POST was intercepted before model/generation
+  work. This does not constitute a new paid-film run.
+- Evidence: `/tmp/opencode/super-easy-ui-deployment-51fbc33/`, including deployment
+  hashes, previous index, live screenshots and `live-browser-verification.json`.
+- **Review and repair is not yet wired into Super Easy.** Its backend and genuine
+  live-Pi evidence remain on the separate self-review branch. This UI change does
+  not add automatic repair or represent ordinary studio Review as Pi inspection.
+
 ## 2026-10-30 speaking teaser — production closed, delivery failed review
 
 - **Terminal production:** `run_80f94fc29fbf`, production
