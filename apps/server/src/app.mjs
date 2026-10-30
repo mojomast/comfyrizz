@@ -33,6 +33,7 @@ import { preflightBrief } from './brief-preflight.mjs';
 import { prepareBrand } from './brand.mjs';
 import { handleProviderSettings } from './provider-settings.mjs';
 import { createProjectChat } from './agent-chat.mjs';
+import { createLocalSpeechInspector } from './local-speech-inspector.mjs';
 import { createAgentProgress } from './agent-progress.mjs';
 import { createReferenceRoutes } from './references/routes.mjs';
 import { createContextAttachmentRoutes } from './context-attachments.mjs';
@@ -96,6 +97,7 @@ import { createProductionCoordinator } from './productions/coordinator.mjs';
 import { createProductionRoutes } from './routes/productions.mjs';
 import { createPreferencesStore } from './productions/preferences.mjs';
 import { createIterationRoutes } from './productions/iteration-routes.mjs';
+import { createSelfRepairIntegration } from './self-repair-integration.mjs';
 
 const MAX_BODY = 5 * 1024 * 1024;
 // IP11: a completion save races with edits. Re-read the latest package and reapply the
@@ -290,6 +292,7 @@ export function createApp({
   inviteLedger = null,
   publicBaseUrl = process.env.COMFYRIZZ_PUBLIC_BASE_URL || undefined,
   localNarrationPrepare,
+  speechInspector = createLocalSpeechInspector(),
 } = {}) {
   if (!token || token.length < 16) throw new Error('createApp requires a token of at least 16 characters');
   // Local Remotion renders run on a worker. Callers that pass their own render
@@ -698,6 +701,7 @@ export function createApp({
   // so a confirmed clip correction reaches the same coordinator as the routes.
   const projectChat = createProjectChat({
     runtimeDir,
+    speechInspector,
     store,
     providerSettings,
     prepareBrand,
@@ -1487,6 +1491,12 @@ export function createApp({
     readJson,
   });
 
+  const selfRepairs = createSelfRepairIntegration({ runtimeDir, store, projectChat, renderRoutes,
+    findBoundProduction, speechInspector, providerSettings,
+    // Fixed final intent, no caller body/override: this path only reads the
+    // existing gate and emits its refusal. Rendering still admits independently.
+    renderGate: pkg => finalDeliveryGate(pkg, { intent: 'final' }, '/api/self-repairs') });
+
   /**
    * Resolve a render target the same way for every render route: an in-memory draft is written to
    * a throwaway file (C1 compatibility, never mutating the stored package); otherwise the stored
@@ -1763,6 +1773,25 @@ export function createApp({
       if (request.method === 'POST' && /^\/api\/productions\/[^/]+\/actions$/.test(url.pathname)
           && process.env.COMFYRIZZ_INVITE_SPEND_ENABLED !== '1') {
         return sendJson(response, 403, { error: 'Google Colab spend is not enabled', code: 'INVITE_SPEND_DISABLED' });
+      }
+    }
+
+    if (url.pathname === '/api/self-repairs' && request.method === 'POST') {
+      try {
+        const record = await selfRepairs.start(await readJson(request));
+        return sendJson(response, record.status === 'running' ? 202 : 200, record,
+          { location: `/api/self-repairs/${record.repairId}` });
+      } catch (error) {
+        return sendJson(response, error.status ?? 500, { error: error.message, code: error.code });
+      }
+    }
+    const selfRepair = /^\/api\/self-repairs\/([^/]+)$/.exec(url.pathname);
+    if (selfRepair && request.method === 'GET') {
+      try {
+        const record = selfRepairs.get(selfRepair[1]);
+        return sendJson(response, record ? 200 : 404, record ?? { error: 'self repair not found' });
+      } catch (error) {
+        return sendJson(response, error.status ?? 500, { error: error.message, code: error.code });
       }
     }
 
@@ -2829,6 +2858,6 @@ export function createApp({
     exportsDir,
     sceneCacheDir,
     webDist,
-    close: () => { guestMediaTickets.close(); pipelines.close(); events.closeAll(); },
+    close: () => { const repairsClosed = selfRepairs.close(); guestMediaTickets.close(); pipelines.close(); events.closeAll(); return repairsClosed; },
   };
 }
