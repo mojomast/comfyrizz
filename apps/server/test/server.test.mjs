@@ -130,6 +130,33 @@ test('PATCH requires same-origin and a live base revision', async () => {
   assert.equal(stale.json.currentRevision, 1);
 });
 
+test('the private owner demo accepts a same-host HTTP origin, while hosted requires HTTPS', async () => {
+  const savedHosts = process.env.COMFYRIZZ_ALLOWED_HOSTS;
+  const savedHosted = process.env.COMFYRIZZ_HOSTED_INVITES;
+  process.env.COMFYRIZZ_ALLOWED_HOSTS = 'demo.example:4404';
+  try {
+    delete process.env.COMFYRIZZ_HOSTED_INVITES;
+    // Same host:port over the private Tailscale/LAN origin passes CSRF; the
+    // missing token is then a 401, not an origin refusal.
+    const owner = await request({
+      method: 'PATCH', path: '/api/package/pkg_launchdemo0001', token: null,
+      host: 'demo.example:4404', origin: 'http://demo.example:4404',
+      body: { baseRevision: 1, package: seed },
+    });
+    assert.equal(owner.status, 401, owner.text);
+    process.env.COMFYRIZZ_HOSTED_INVITES = '1';
+    const hosted = await request({
+      method: 'PATCH', path: '/api/package/pkg_launchdemo0001',
+      host: 'demo.example:4404', origin: 'http://demo.example:4404',
+      body: { baseRevision: 1, package: seed },
+    });
+    assert.equal(hosted.status, 403, hosted.text);
+  } finally {
+    if (savedHosts === undefined) delete process.env.COMFYRIZZ_ALLOWED_HOSTS; else process.env.COMFYRIZZ_ALLOWED_HOSTS = savedHosts;
+    if (savedHosted === undefined) delete process.env.COMFYRIZZ_HOSTED_INVITES; else process.env.COMFYRIZZ_HOSTED_INVITES = savedHosted;
+  }
+});
+
 test('PATCH saves, bumps revision and persists', async () => {
   const edited = app.store.read(seed.id);
   edited.scenes[0].copy.headline = 'Edited in C2';

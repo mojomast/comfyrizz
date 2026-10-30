@@ -177,8 +177,12 @@ function sameOrigin(origin, host) {
   if (!origin) return false;
   try {
     const parsed = new URL(origin);
-    const loopback = /^(127\.0\.0\.1|localhost|\[::1\])(:\d+)?$/.test(host);
-    return (parsed.protocol === 'https:' || (loopback && parsed.protocol === 'http:')) && parsed.host === host;
+    if (parsed.host !== host) return false;
+    if (parsed.protocol === 'https:') return true;
+    // The private owner demo is served over Tailscale/LAN without TLS
+    // termination. Tailscale encrypts transport; exact host:port remains the
+    // CSRF boundary. The hosted public profile still requires HTTPS.
+    return parsed.protocol === 'http:' && process.env.COMFYRIZZ_HOSTED_INVITES !== '1';
   } catch {
     return false;
   }
