@@ -14,6 +14,8 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { loadExamplePackage, startQaApp } from '../lib/app-fixture.mjs';
+import { plannedContribution } from '../../apps/server/test/helpers/comfy-contribution.mjs';
+import { verifyModelContribution } from '../../packages/jobs/src/model-contribution.mjs';
 
 function onePackage() {
   const pkg = loadExamplePackage('launch-demo');
@@ -35,12 +37,44 @@ async function boundApp(t, intent = 'active') {
   return { qa, pkg, productionId, body: { packageId: pkg.id, baseRevision: pkg.revision, backendId: 'cpu' } };
 }
 
-test('CONTROL: an explicitly unbound package still starts through /api/pipeline (compatibility preserved)', async t => {
+test('CONTROL: unbound pipeline rejects native-only input but admits a planned contribution through the fake launcher', async t => {
   const pkg = onePackage();
-  const qa = await startQaApp(t, { packages: [pkg] });
-  const started = await qa.json('/api/pipeline', { packageId: pkg.id, baseRevision: pkg.revision, backendId: 'cpu' });
+  const planned = onePackage();
+  planned.id = 'pkg_qa_planned0001';
+  // Planning permits pending generation. Do not manufacture completed media or
+  // receipts: this fixture only reaches the counting launcher, never a backend.
+  const assetId = plannedContribution(planned);
+  const qa = await startQaApp(t, { packages: [pkg, planned] });
+  const refused = await qa.json('/api/pipeline', { packageId: pkg.id, baseRevision: pkg.revision, backendId: 'cpu' });
+  assert.equal(refused.status, 422, refused.text);
+  assert.equal(refused.body.ready, false);
+  assert.deepEqual(refused.body.issues.map(issue => issue.code), ['COMFY_MODEL_CONTRIBUTION_REQUIRED']);
+  assert.equal(qa.fake.totalDispatches(), 0);
+  assert.equal(qa.app.pipelines.list().length, 0, 'refusal creates no run record');
+  assert.deepEqual(qa.readPackage(pkg.id), pkg, 'refusal leaves the package unchanged');
+
+  assert.equal(planned.assets[assetId].status, 'pending');
+  assert.equal(verifyModelContribution({ pkg: planned, packageDir: qa.app.store.dir }).ok, false, 'pending media is not final-delivery evidence');
+  const body = { packageId: planned.id, baseRevision: planned.revision, backendId: 'byo-comfyui' };
+  const needsReview = await qa.json('/api/pipeline', body);
+  assert.equal(needsReview.status, 409, needsReview.text);
+  assert.equal(needsReview.body.code, 'RENDER_GATE_BLOCKED');
+  assert.equal(qa.fake.totalDispatches(), 0);
+  assert.equal(qa.app.pipelines.list().length, 0);
+  // The existing explicit clip-review override permits pipeline admission. It
+  // does not create generation/render receipts or satisfy final model evidence.
+  const reason = 'QA admission control: pending plate, counting launcher only';
+  const started = await qa.json('/api/pipeline', { ...body, override: { reason } });
   assert.equal(started.status, 202, started.text);
   assert.equal(qa.fake.launches(), 1);
+  assert.equal(qa.app.pipelines.list().length, 1);
+  assert.equal(started.body.run.packageId, planned.id);
+  assert.equal(started.body.run.status, 'running');
+  assert.equal(qa.fake.totalDispatches(), 1);
+  assert.deepEqual(qa.fake.counters.backendRequests, [], 'only the fake launcher runs; no backend is contacted');
+  assert.equal(qa.app.takeStore.read(planned.id).overrides.at(-1).reason, reason);
+  assert.equal(verifyModelContribution({ pkg: planned, packageDir: qa.app.store.dir }).ok, false, 'admission override cannot create final-delivery evidence');
+  qa.fake.assertNoPaidDispatch();
 });
 
 test('CONTROL: /api/run refuses the same bound package and dispatches nothing (guard exists on the legacy route)', async t => {

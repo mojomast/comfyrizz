@@ -10,8 +10,9 @@ import { createEasyApi } from '../../../web/src/easy/api.ts';
 import { createEasyStore } from '../../../web/src/easy/store.ts';
 import { runSuperEasy } from '../../../web/src/easy/super-easy/run.ts';
 import { openInitialProject } from '../../../web/src/default-project.ts';
+import { guestPlannerFixture } from './planner-fixture.mjs';
 
-for (const outcome of ['completed', 'failed']) test(`hosted fake pipeline ${outcome} settles once and survives restart`, async () => {
+for (const outcome of ['completed', 'failed']) test(`hosted fake pipeline ${outcome} preserves unresolved accounting across restart`, async () => {
   const keys = ['COMFYRIZZ_ALLOWED_HOSTS', 'COMFYRIZZ_HOSTED_INVITES', 'COMFYRIZZ_INVITE_SPEND_ENABLED', 'COMFYRIZZ_HF_TOKEN_FILE'];
   const saved = Object.fromEntries(keys.map(key => [key, process.env[key]]));
   const dir = mkdtempSync(join(tmpdir(), 'hosted-fake-pipeline-'));
@@ -42,7 +43,7 @@ for (const outcome of ['completed', 'failed']) test(`hosted fake pipeline ${outc
     }, 10);
     return { cancel() {}, kill() {} };
   };
-  const options = { token: 'test-owner-token-not-a-secret', runtimeDir: join(dir, 'runtime'), inviteLedger: ledger, pipelineLaunch: fakeLaunch, backendFactory: () => { throw new Error('real backend must never be created'); }, render: async () => {}, renderScene: async () => {} };
+  const options = { guestRunnerFactory: guestPlannerFixture, token: 'test-owner-token-not-a-secret', runtimeDir: join(dir, 'runtime'), inviteLedger: ledger, pipelineLaunch: fakeLaunch, backendFactory: () => { throw new Error('real backend must never be created'); }, render: async () => {}, renderScene: async () => {} };
   let app = createApp(options);
   let server = createServer(app.handler);
   await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
@@ -111,8 +112,10 @@ for (const outcome of ['completed', 'failed']) test(`hosted fake pipeline ${outc
       writeFileSync(assetPath, bytes);
     }
     const spent = ledger.get(invite.invite.id).spentEstimateCu;
-    assert.ok(spent > 0);
-    assert.equal(ledger.get(invite.invite.id).committedEstimateCu, 0);
+    const held = ledger.get(invite.invite.id).committedEstimateCu;
+    assert.equal(spent, 0);
+    assert.ok(held > 0);
+    assert.equal(ledger.listGenerations(invite.invite.id)[0].details.accounting.actualSpendCu, null);
     app.close(); server.closeAllConnections();
     await new Promise(resolve => server.close(resolve));
     app = createApp(options);
@@ -140,6 +143,7 @@ for (const outcome of ['completed', 'failed']) test(`hosted fake pipeline ${outc
       assert.equal((await fetch(base + newShare.videoUrl)).status, 401);
     }
     assert.equal(ledger.get(invite.invite.id).spentEstimateCu, spent);
+    assert.equal(ledger.get(invite.invite.id).committedEstimateCu, held);
     assert.equal(ledger.listGenerations(invite.invite.id).length, 1);
     assert.equal(launches, 1);
   } finally {

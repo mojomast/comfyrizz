@@ -177,6 +177,9 @@ test('RL10c: the slot is released when the run fails', async t => {
   const failed = await request(h, `/api/pipeline/${run.runId}`);
   assert.equal(failed.json.run.status, 'failed', failed.text);
 
+  // The slot is returned when the worker has actually exited, not merely when
+  // its failure message arrives before teardown.
+  h.launcher.last().onExit(1);
   const exported = await request(h, '/api/export', { packageId: PACKAGE_ID });
   assert.equal(exported.status, 200, exported.text);
 });
@@ -198,6 +201,7 @@ test('RL10c: the slot is released when the run is cancelled', async t => {
   const stopped = await request(h, `/api/pipeline/${run.runId}`);
   assert.equal(stopped.json.run.status, 'cancelled', stopped.text);
 
+  h.launcher.last().onExit(0);
   const exported = await request(h, '/api/export', { packageId: PACKAGE_ID });
   assert.equal(exported.status, 200, exported.text);
 });

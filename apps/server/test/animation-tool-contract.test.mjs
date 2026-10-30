@@ -52,7 +52,7 @@ test('actual drafting and revision model requests receive current recipe capabil
     assert.match(request.system, /no shared-object continuity/);
     assert.match(request.system, /future work, not available tools/);
     assert.equal(result.trace.promptVersion, '2.2.0');
-    assert.ok(result.trace.skills.some(skill => skill.id === 'storyboard-direction' && skill.version === '1.4.1'));
+    assert.ok(result.trace.skills.some(skill => skill.id === 'storyboard-direction' && skill.version === '1.4.2'));
     if (existing) {
       assert.match(request.system, /cue_seconds:null,cue_phrases/);
       assert.match(request.system, /motion:\{recipe:null\}/);

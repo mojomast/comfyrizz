@@ -192,10 +192,10 @@ export function MediaPanel({ asset, assetId, item, pkg, sceneFrames }: { asset: 
 }
 
 /** Lower-third/kicker overlay for full-bleed and media-only scenes. */
-export function LowerThird({ kicker, text, pkg }: { kicker?: string; text: string; pkg: PackageV1 }) {
+export function LowerThird({ kicker, text, pkg, start_frame = 8, position = 'top' }: { kicker?: string; text: string; pkg: PackageV1; start_frame?: number; position?: 'top' | 'bottom' }) {
   const family = useFontFamily();
   const frame = useCurrentFrame();
-  const t = interpolate(frame, [8, 28], [0, 1], { extrapolateLeft: 'clamp', extrapolateRight: 'clamp' });
+  const t = interpolate(frame, [start_frame, start_frame + 20], [0, 1], { extrapolateLeft: 'clamp', extrapolateRight: 'clamp' });
   const colors = textColors(pkg);
   return (
     <div
@@ -203,7 +203,7 @@ export function LowerThird({ kicker, text, pkg }: { kicker?: string; text: strin
         position: 'absolute',
         left: 144,
         right: 144,
-        top: 200,
+        ...(position === 'bottom' ? { bottom: 144 } : { top: 200 }),
         display: 'flex',
         flexDirection: 'column',
         gap: 10,

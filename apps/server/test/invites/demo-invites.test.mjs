@@ -125,7 +125,8 @@ test('redeem / expire / overspend + owner summary + showcase open', async () => 
   assert.equal(guestBody.ok, true);
   assert.ok(guestBody.guestToken.length >= 32);
   assert.equal(guestBody.budgetUnits, 1);
-  assert.equal(guestBody.mode, 'super-easy');
+  assert.equal(guestBody.mode, 'gallery');
+  assert.match(guestBody.openPath, /\/gallery\/#token=/);
   assert.equal(guestBody.backendId, 'colab');
 
   const guest = demo.resolveGuest(guestBody.guestToken);

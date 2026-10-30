@@ -88,6 +88,8 @@ test('G6-11: two-pass linear loudnorm keeps the ducked tail quiet and resamples 
     assert.equal(result.applied, true);
     const afterGap = meanVolume(mix, 0, 1) - meanVolume(mix, 2.5, 1);
     assert.ok(afterGap > beforeGap - 3, `the ducked tail must stay ~${beforeGap} dB down, got ${afterGap}`);
+    const after = measureLoudness(mix);
+    assert.ok(Math.abs(after.integratedLufs - MIX_LOUDNESS_TARGET.integratedLufs) < 2, `duck preservation must also hit the master target: ${JSON.stringify(after)}`);
     assert.equal(sampleRate(mix), 48000, 'loudnorm must not leave the AAC at 96 kHz');
   } finally {
     rmSync(dir, { recursive: true, force: true });

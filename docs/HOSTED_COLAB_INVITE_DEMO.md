@@ -1,15 +1,200 @@
 # Hosted Google Colab invite demo — state, design, next steps
 
-## Main integration: known planning gap
+## Accounting reconciliation integration (2026-10-30)
 
-After integration with the Pi production changes, the isolated hosted guest
-builder still invokes its offline runner. Generated-film planning now requires
-a live model, so hosted guest planning currently fails before dispatch. The
-offline guest-builder test and the three hosted Super Easy pipeline/no-spend
-tests fail as a result. The earlier no-spend smoke below describes the prior
-host deployment, not a successful test of this integrated version. Reconnect
-guest planning to a host-configured live model with isolated guest storage and
-verify the hosted flow before deploying this integration or enabling spend.
+Hosted pipelines now keep invite CU **reserved and unresolved** after a
+completed/failed run when its usage is only an account-wide balance delta.
+Concurrent account deltas overlap; they are neither apportioned nor charged
+as actual per-film usage. Verified shutdown is necessary but does not itself
+prove the cost. The current CLI usage/status parser supplies no final,
+session-attributable CU receipt, so real allocated hosted runs retain their
+holds pending explicit reconciliation. No actual-usage measurement is invented.
+
+The durable action reservation and generation `details.accounting` expose
+`status`, `actualSpendCu` (null when unknown), `shutdownVerified`, `costSource`,
+and the unresolved reason. The hosted gallery (own-invite films only) and admin
+dashboard show **Usage indeterminate; CU reserved** with the held amount, not
+interpret the legacy numeric `spentEstimateCu: 0` as free work. Verified
+settlements show actual usage, zero held CU and the unused amount released;
+CPU renders and historical estimates have distinct labels. The shared gallery
+does not disclose other invites' billing or private runtime/receipt identities.
+A finished film counts once toward its film quota even while its CU hold is
+unresolved. Restart and repeated observations do not charge or count it again.
+
+An operation proven never to have attempted allocation releases its reservation
+at zero. An attempted allocation followed by a clean session listing is not
+proof that no transient usage occurred. An unconfirmed stop retains the hold.
+CPU edits have zero CU and do not consume another paid-film slot. Existing
+historical full-reservation charges (including the 15.442-CU test estimate
+reported below) remain explicitly **legacy estimates**, not retroactive actual
+usage measurements.
+
+The worker accepts server-owned `spec.accountingMode: 'invite-reserved'`; the
+hosted environment also selects it. Per-run admission, estimated budgets and
+watchdog/wall-clock limits remain enforced. An overlapping account delta no
+longer trips the media worker's or Qwen narration runner's per-run actual-spend
+comparison in this mode. Qwen receives the mode and run identity from the worker;
+its standalone CLI defaults to owner accounting. Qwen still refuses insufficient
+or unreadable pre-allocation credit, requires execution/shutdown budget headroom,
+and refuses success when teardown is unconfirmed.
+Owner sequential pipelines retain their existing account-balance comparison.
+The optional internal final-session receipt contract is documented in
+`packages/backends/src/session-accounting.mjs`; the current Colab backend does
+not produce those receipts. No guest-supplied receipt or new settlement HTTP
+endpoint is accepted.
+
+## Shared-link gallery update (2026-10-30)
+
+Deployed from `feat/shared-invite-gallery`. The hosted systemd service is active
+and enabled, with guest generation enabled following Kyle's explicit live-test
+approval. The current host concurrency setting is **2** simultaneous films.
+The marketing homepage remains available and the owner dashboard remains
+tailnet-only at `https://<PRIVATE_ADMIN_HOST>:8456/admin/` (host shared separately).
+
+* An invite is reusable by multiple people. Each redemption issues a separate
+  guest login and records a durable visit. Everyone using that invite shares
+  its CU ceiling and film limit. Exhausted links still open the gallery;
+  expired or revoked links do not.
+* Redeeming opens `/hosted-demo/gallery/`, with all shared completed guest
+  films, including films made through the viewer's own invite. Cards show
+  the generation prompt, planning model, generation models and verified
+  workflow checkpoint names when available. Older records explicitly show
+  missing attribution instead of inventing it. A prominent link opens Super
+  Easy; Easy has a return link to the gallery. The gallery discloses that
+  finished films and prompts are shared with other invite holders.
+* `GET /api/demo/generations?offset=0&limit=24` lists paginated public metadata;
+  `GET /api/demo/generations/:id/video` issues an expiring video ticket. Source
+  packages and productions are not exposed. Source/viewer revocation or expiry
+  invalidates guest playback, including subsequent range requests.
+* The private dashboard shows per-link visits, last visit, CU usage, film
+  counts, generation states, prompts, planning/generation model information,
+  and a video player. Owner playback also works for revoked invites and uses
+  separate tickets accepted only by the private listener. Signing out removes
+  players and the in-memory owner credential.
+* Hosted execution permits `COMFYRIZZ_INVITE_MAX_CONCURRENT` simultaneous
+  pipelines (default **4**, accepted range **1–16**). Staging consumes capacity,
+  duplicate active packages are refused, and every package/run has an isolated
+  workspace and run-derived Colab media session name. Local production retains
+  its single-run operation coordinator. Colab account/provider allocation
+  limits still apply; the setting limits films, not the number of runtimes
+  inside a film. Capacity-full requests are refused rather than queued.
+* Whole-film guest plans are server-authored final actions covering every
+  scene's media estimate (with a 3-CU minimum for cold runtime startup) and,
+  when needed, the default remote Qwen narration
+  allowance. This prevents one whole-film worker per scene and preserves the
+  prohibition on client-authored guest action plans. Concurrent reserved films
+  count toward the invite's film limit transactionally in SQLite.
+
+### Host-configured planning
+
+Guest builds now use the host's active provider/model profile, optionally
+overridden with `COMFYRIZZ_INVITE_PLANNER_PROVIDER` and
+`COMFYRIZZ_INVITE_PLANNER_MODEL`. Without a configured provider the API returns
+`INVITE_PLANNER_UNAVAILABLE`. Provider credentials stay on the host; browser
+provider/model choices cannot override this configuration. Every build gets a
+fresh isolated staging directory and newly owned package/assets. Prompt and
+planning-model attribution are stored durably outside the package schema.
+
+The four integration-era invite failures have been resolved. No-spend HTTP
+tests use an injected model-result fixture, and concurrency tests hold two
+simulated workers open simultaneously. Tests cover distinct session names,
+multi-scene plans, reservation/film limits, gallery metadata, private owner
+playback, revocation and range requests. A local browser smoke with synthetic
+MP4s checks playback, mobile layout, Easy navigation, and dashboard sign-out.
+
+### Live validation — approved and completed October 30
+
+The host uses OpenCode Go `deepseek-v4.1-flash`. Its key is stored only in the
+host runtime's mode-0600 provider settings; it is absent from repository files
+and guest requests. The provider's tool-use probe passed.
+
+Invite Super Easy pages automatically use the host planner and Colab. They
+omit API/provider and Colab setup controls and owner Studio navigation. The
+guest's saved local compute choice, setup confirmation, and per-video cap do
+not override the invite: planning reads the current server-reported available
+credits and uses that allowance as its cap. The home shows available shared
+credits, refreshes them every 15 seconds without replacing the prompt draft,
+and keeps CPU work and agent edits available when the shared credits or paid
+film quota are exhausted, or when the host pauses Google Colab spending.
+Guests still approve the creative proposal with “Make this film”; there is no
+separate connection or spending-setup step. Durable server admission checks
+remain authoritative when simultaneous guests consume the shared allowance.
+
+The automatic-setup UI was verified on the deployed desktop/mobile pages with
+a temporary 7.5-CU invite (revoked afterward) and an exhausted invite. No GPU
+generation was started by those checks. Typecheck, hosted build, and 91 focused
+Super Easy tests passed, including overriding stale local setup and blocking
+unavailable invites before planning (subsequently expanded for exhausted-invite
+CPU work below).
+
+### CPU work and agent edits after exhaustion
+
+Exhaustion blocks new paid allocations, not planning or editing. Expired and
+revoked invites remain inaccessible. Guests can keep planning and revising
+proposals with the host's DeepSeek model. In the gallery, **Edit with agent**
+opens an independent, viewer-owned copy of a completed film, including ready
+media and verified generation receipts. The focused agent revision supports
+existing scene text, proposal loglines and scene ordering; the existing
+revision validator remains authoritative. Originals and other guests' projects
+cannot be mutated. The finished-film **Ask the agent** action uses the same
+private-copy flow and carries the guest's requested edit into it.
+
+**Render on CPU** uses a server-authored zero-CU action through the production
+outbox, forces local rendering/narration, and requires ready media. It neither
+reserves invite CU nor consumes another paid-film slot. Pending generated
+media and remote compute options are refused; guests may continue editing
+such drafts or reuse a finished gallery film's media. Final delivery still
+verifies model contribution and media provenance. CPU results appear in the
+gallery and admin reporting, with their agent-edit prompt and zero-CU cost
+source. Model API usage remains on the host's OpenCode Go account.
+
+Live validation on October 30 used the already-exhausted two-film test invite:
+DeepSeek edited a private copy and pipeline
+`pipe_8bee6d8f207f478ca6dfafbe270f9167` completed an eight-second local CPU
+render. Its runtime-allocation map was empty and its CU ceiling was zero;
+the resulting MP4 served HTTP 206. The invite stayed exhausted with two paid
+films, 15.442 estimated CU spent, and zero outstanding reservations. No
+additional Colab allocation was made by this test. Integration coverage also
+checks cross-invite edit denial, local-only admission, unchanged CU/film quota,
+and access revocation.
+
+Two isolated browser contexts redeemed the same invite, entered the public
+gallery, opened Super Easy, selected Klein-only generation, submitted distinct
+eight-second silent-film prompts, and approved both proposals through the UI.
+The successful runs were:
+
+* `pipe_b258b55219974a50928e2100c91da16d`
+* `pipe_567f8897beb2437fa8cf79ae48822770`
+
+Two distinct G4 assignments were observed together from **04:04:01 through
+04:08:11 UTC**, and both films were ready by **04:09:55 UTC**. Both runtimes
+stopped. Public gallery playback passed. Private admin playback decoded both
+eight-second MP4s and both returned HTTP 206 range responses. Prompts,
+DeepSeek planning attribution, and the verified FLUX 3 Image Klein checkpoint
+are shown in the dashboard. Playback and attribution persisted after restart;
+admin sign-out removed the players without persisting the owner credential.
+
+Live testing uncovered and fixed guest UI access to owner settings, duplicated
+gallery links during progress updates, insufficient cold-start allowance,
+pre-submission CLI kernel disconnects, unused pending draft assets blocking
+export, and nested render-receipt model attribution. The CLI retry is bounded
+and applies only to its explicit initial-chdir failure before script submission;
+uncertain submitted work is never automatically replayed.
+
+There were two earlier pairs of test attempts: the first hit kernel/startup
+failures; the second rendered verified MP4s but failed archive completeness.
+Those outcomes remain recorded. Their artifacts were preserved. Across all
+test attempts, the observed account balance changed from **203.12 to 200.28 CU**
+(**2.84 CU**, an account-level reading). The invite ledger charged **15.442 CU**
+in conservative reservations, including failed/uncertain attempts, and had no
+outstanding reservations. These values are intentionally not presented as
+equivalent or as proof of a hard account-wide actual-usage cap.
+
+Final validation: 652 server/production/backend tests and 1,659 web tests passed
+(one web test skipped), plus typecheck, hosted build, and live browser checks.
+The deployed nginx guest API location uses a 600-second read timeout and
+unbuffered responses for long planning requests. Owner credentials and the
+public token-safe logging policy remain in place.
 
 ## Host integration update (2026-10-28)
 
@@ -56,7 +241,7 @@ complete live nginx configuration before reloading. Build the guest web app with
 **Comfy Cloud / API Phase 1:** deferred. Prefer the **Google Colab** path.  
 **Ops note:** COLAB ORCHESTRATOR stopped film GPU (assignments 0) — do not restart film sessions from this track.  
 **Date:** 2026-10-28 (America/Toronto)  
-**Branch:** `feat/hosted-colab-invite` @ `/home/box/wt/hosted-colab-invite`  
+**Branch:** `feat/hosted-colab-invite` in the operator's `hosted-colab-invite` worktree.
 **Scope:** Ledger + mint/redeem HTTP + guest Super Easy session + spend wire + owner observability + showcase. No Google Colab spend, no Orbit/launcher, no main merge/tag, no deploy to public host yet.
 
 **Related:**

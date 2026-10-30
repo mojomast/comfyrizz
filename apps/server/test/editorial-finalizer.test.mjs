@@ -2,12 +2,13 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
+import { tmpdir } from 'node:os';
 import { classifyProductionIntent } from '../../../packages/agent/dist/src/index.js';
 import { finalizeGeneratedFilmEditorial } from '../src/editorial-finalizer.mjs';
 import { generatedFilmCompletionProblems } from '../src/agent-runner.mjs';
 
 function fixture(t) {
-  const assetsDir = mkdtempSync(join(new URL('../../../.tmp/', import.meta.url).pathname, 'editorial-finalizer-'));
+  const assetsDir = mkdtempSync(join(tmpdir(), 'editorial-finalizer-'));
   t.after(() => rmSync(assetsDir, { recursive: true, force: true }));
   return {
     assetsDir,

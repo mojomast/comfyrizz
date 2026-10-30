@@ -77,7 +77,8 @@ async function setup(t) {
     // Client consumption and the server's finish/close cleanup are independent
     // event-loop callbacks. Assert eventual cleanup, not their scheduling order.
     const deadline = Date.now() + 2000;
-    while (calls.some(call => existsSync(call.path)) && Date.now() < deadline) {
+    while ((calls.some(call => existsSync(call.path)) || readdirSync(dir).some(name => name.startsWith('.draft-')))
+      && Date.now() < deadline) {
       await new Promise(resolve => setTimeout(resolve, 5));
     }
     return { status: response.status, headers: response.headers, text };
@@ -98,7 +99,10 @@ test('draft full, scene and edited renders preserve project sources and clean te
     assert.equal(result.status, 200, result.text);
     assert.equal(result.text, 'test video');
     const call = h.calls.at(-1);
-    assert.equal(call.dir, h.dir);
+    if (route === '/api/render') {
+      assert.notEqual(call.dir, h.dir, 'full renders use an isolated delivery snapshot');
+      assert.equal(existsSync(call.dir), false, 'staged source tree is cleaned up');
+    } else assert.equal(call.dir, h.dir);
     assert.equal(call.draft.title, 'Unsaved title');
     assert.equal(call.manifest.scenes.length, 3);
     assert.equal(existsSync(call.path), false, 'temporary JSON is removed after response');
@@ -158,7 +162,8 @@ test('draft IDs cannot escape the store; new unsaved IDs do not inherit stored s
   assert.equal(h.calls.length, 0);
   const result = await h.request('/api/render', { package: { ...h.pkg, id: 'pkg_unsaved_composition_draft' } });
   assert.equal(result.status, 200, result.text);
-  assert.equal(h.calls.at(-1).dir, join(h.runtimeDir, 'renders'));
+  assert.ok(h.calls.at(-1).dir.startsWith(join(h.runtimeDir, 'renders') + '/'));
+  assert.equal(existsSync(h.calls.at(-1).dir), false);
   assert.equal(h.calls.at(-1).manifest, null);
   assert.equal(existsSync(h.calls.at(-1).path), false);
   h.assertClean();

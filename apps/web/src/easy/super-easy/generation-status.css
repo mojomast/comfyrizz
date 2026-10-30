@@ -1,0 +1,6 @@
+.super-easy-generation-status { margin: 1rem 0; padding: 1rem; border: 1px solid var(--border, #394052); border-radius: 12px; background: var(--bg-1, #141822); }
+.super-easy-generation-status h2 { font-size: 1.1rem; }
+.super-easy-generation-status dl { display: grid; grid-template-columns: minmax(8rem, 1fr) minmax(0, 2fr); gap: .5rem 1rem; }
+.super-easy-generation-status dd { margin: 0; overflow-wrap: anywhere; }
+.super-easy-generation-status code { overflow-wrap: anywhere; }
+@media (max-width: 480px) { .super-easy-generation-status dl { grid-template-columns: 1fr; } }

@@ -5,7 +5,7 @@ import { collectMockContribution } from './helpers/comfy-contribution.mjs';
 import { execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { createServer, request as httpRequest } from 'node:http';
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { cpSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { createApp } from '../src/app.mjs';
@@ -112,6 +112,7 @@ before(async () => {
   collectMockContribution(pkg, app.store.dir);
   app.store.write(pkg);
   const packageDir = dirname(app.store.path(pkg.id));
+  cpSync(join(repo, 'examples/launch-demo/assets'), join(packageDir, 'assets'), { recursive: true });
   mkdirSync(join(packageDir, 'assets'), { recursive: true });
   writeFileSync(join(packageDir, 'assets', 'a_w1still.png'), bytes);
   writeFileSync(join(packageDir, 'assets', 'a_w1still@2x.png'), upBytes);

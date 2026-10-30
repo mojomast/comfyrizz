@@ -241,7 +241,7 @@ function collectPageErrors(page: Page): string[] {
 test('one prompt shows progress, fills the gallery and ends on the final ready fixture', async ({ page }) => {
   const external = await openHarness(page);
 
-  await expect(page.getByRole('heading', { name: 'Make a video' })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Imagine it. Make it.' })).toBeVisible();
   await expect(page.locator('#super-easy-prompt')).toBeVisible();
   const generate = page.getByRole('button', { name: 'Generate', exact: true });
   await expect(generate).toBeVisible();
@@ -384,6 +384,7 @@ function fullAppBackend() {
       calls.push('agent');
       return send({
         package: { ...FULL_APP_PACKAGE, id: FULL_APP_PACKAGE_ID },
+        revision: FULL_APP_PACKAGE.revision,
         timeline: FULL_APP_TIMELINE,
         live: true,
         generatedAssets: {},
@@ -456,7 +457,7 @@ test('the full app starts at the bare visit and fills the progress view from the
   const pageErrors = collectPageErrors(page);
   const backend = fullAppBackend();
   await page.route('**/api/**', (route) => backend.handle(route));
-  await page.goto('/', { waitUntil: 'domcontentloaded' });
+  await page.goto(`/#token=${loadEnv().token}`, { waitUntil: 'domcontentloaded' });
 
   await expect(page.locator('[data-super-easy-home]')).toBeVisible();
   expect(pageErrors).toEqual([]);
@@ -497,7 +498,7 @@ test('the home coaches a first-time visitor and an idea chip is enough to Genera
   await expect(page.locator('[data-super-easy-progress]')).toBeVisible();
 });
 
-test('the preview card leads with Download MP4 above the gauges', async ({ page }) => {
+test('the preview card leads with Download preview MP4 above the gauges', async ({ page }) => {
   await page.route('**/__super_easy_preview_e2e__', (route) => route.fulfill({
     status: 200,
     contentType: 'text/html',
@@ -512,7 +513,7 @@ document.getElementById('root').innerHTML = renderSuperEasyProgress({ plan: { st
   }));
   await page.goto('/__super_easy_preview_e2e__');
 
-  const download = page.getByRole('button', { name: 'Download MP4' });
+  const download = page.getByRole('button', { name: 'Download preview MP4' });
   await expect(download).toBeVisible();
   await expect(page.getByRole('button', { name: 'Watch and review' })).toBeVisible();
   const card = await page.locator('[data-super-easy-preview-ready]').boundingBox();

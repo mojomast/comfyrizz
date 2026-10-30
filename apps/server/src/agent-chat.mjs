@@ -27,9 +27,23 @@ import { IterationScopeError, normalizeTargetSet, scopeIdKind, toPromptHint, val
 import { PACKAGE_EDIT_TOOL, applyChatPackageEdit } from './chat-package-edit.mjs';
 import { guardOrdinaryMutation, runProductionTool } from '../../../packages/agent/dist/src/production-tools.js';
 import { compilePackage } from './compile-package.mjs';
+import { createSourceReviewer, SOURCE_INSPECT_TOOL, SOURCE_REVIEW_GUIDANCE } from './source-review.mjs';
+import { createRenderReviewer, RENDER_INSPECT_TOOL } from './render-review.mjs';
 
 function fail(status, message, extra) { throw Object.assign(new Error(message), { status }, extra); }
 const clone = value => (value === undefined ? value : JSON.parse(JSON.stringify(value)));
+const SOURCE_REPAIR_EDIT_TOOL = {
+  ...PACKAGE_EDIT_TOOL,
+  description: 'Stage only evidence-backed background source-in trims for the authorized failed scenes. Inspect each source first. Every call replaces the batch; include all intended trims. Preserve exact dialogue, source end, speed, media and all authored timing. Call project_build to save the authorized correction.',
+  parameters: { ...PACKAGE_EDIT_TOOL.parameters, properties: {
+    packageId: PACKAGE_EDIT_TOOL.parameters.properties.packageId,
+    expectedRevision: PACKAGE_EDIT_TOOL.parameters.properties.expectedRevision,
+    edits: { type: 'array', minItems: 1, maxItems: 4, items: {
+      type: 'object', additionalProperties: false, required: ['sceneId', 'backgroundSourceIn'],
+      properties: { sceneId: { type: 'string' }, backgroundSourceIn: PACKAGE_EDIT_TOOL.parameters.properties.edits.items.properties.backgroundSourceIn },
+    } },
+  } },
+};
 
 function correctionSceneId(pkg, proposal) {
   const scene = (pkg?.scenes ?? []).find(item => item?.id === proposal?.clipId
@@ -387,11 +401,14 @@ export function createProjectChat({
   hooks = null,
   modelFactory = null,
   production = null,
+  speechInspector = null,
 }) {
   const dir = join(runtimeDir, 'conversations');
   mkdirSync(dir, { recursive: true });
   const takes = takeStore ?? createTakeStore({ runtimeDir, packageDir: store.dir });
   const active = new Set();
+  const sourceReviewer = createSourceReviewer({ runtimeDir, packageDir: store.dir, transcribe: speechInspector });
+  const renderReviewer = createRenderReviewer({ runtimeDir, packageDir: store.dir, transcribe: speechInspector });
   let characterStoreCache = null;
   let characterStoreProbed = false;
   const charactersFor = () => {
@@ -1033,6 +1050,8 @@ export function createProjectChat({
 
   async function send(input, turnHooks = {}) {
     if (!input || typeof input !== 'object' || Array.isArray(input)) fail(400, 'A chat message is required');
+    let repairContext = turnHooks.repairContext ?? null;
+    if (repairContext && (input.action || input.confirmAssignments?.length || input.confirmClipProposals?.length || input.confirmCastProposals?.length)) fail(400, 'Self-repair cannot apply unrelated pending decisions');
     const id = input.conversationId ?? `chat_${randomUUID()}`;
     if (!validId(id)) fail(400, 'Invalid conversation ID');
     if (input.action !== undefined && !['build', 'authorizeClipProposals'].includes(input.action)) fail(400, 'Unknown conversation action');
@@ -1649,9 +1668,43 @@ export function createProjectChat({
       const scopeMessage = iterationScope
         ? { role: 'user', content: iterationScopeBlock(iterationScope) }
         : null;
-      const signal = AbortSignal.timeout(120000);
+      const signal = turnHooks.signal ? AbortSignal.any([turnHooks.signal, AbortSignal.timeout(120000)]) : AbortSignal.timeout(120000);
+      if (repairContext) {
+        if (!simCurrent || simCurrent.id !== repairContext.packageId || simCurrent.revision !== repairContext.expectedRevision) fail(409, 'Self-repair package changed');
+        if (session.packageEdit) fail(409, 'Review existing staged edits before self-repair');
+        const report = await renderReviewer.read(simCurrent, { packageId: simCurrent.id, expectedRevision: simCurrent.revision, renderId: repairContext.report?.artifact?.renderId, reviewId: repairContext.report?.reviewId }, { signal });
+        repairContext = { packageId: simCurrent.id, expectedRevision: simCurrent.revision,
+          attempt: repairContext.attempt, sceneIds: repairContext.sceneIds,
+          priorAttempts: repairContext.priorAttempts ?? [],
+          report: { reviewId: report.reviewId, packageHash: report.packageHash, artifact: report.artifact,
+            findings: report.findings, capabilities: report.capabilities, acceptance: report.acceptance,
+            windows: report.windows?.filter(window => repairContext.sceneIds.includes(window.sceneId)) },
+          requirements: repairContext.sceneIds.map(sceneId => {
+            const scene = simCurrent.scenes.find(item => item.id === sceneId);
+            return { sceneId, dialogue: simCurrent.assets?.[scene?.background?.asset]?.gen?.direction?.dialogue?.text,
+              preferredFrames: scene?.preferredFrames, background: scene?.background };
+          }),
+          authority: 'Only evidence-backed background source-in trims in these scenes, followed by project_build. Preserve all other fields. No approvals or generation.',
+        };
+      }
       let packageEdit = session.packageEdit ?? null;
       let packageEditApplied = false;
+      let sourceInspections = 0;
+      const hasSourceRepair = request => request?.edits?.some(edit => edit?.backgroundSourceIn !== undefined);
+      const preparePackageEdit = async request => {
+        if (repairContext && (!Array.isArray(request?.edits) || request.edits.length === 0 || request.edits.length > 4
+          || Object.keys(request).some(key => !['packageId', 'expectedRevision', 'edits'].includes(key))
+          || request.edits.some(edit => !repairContext.sceneIds.includes(edit?.sceneId) || !edit.backgroundSourceIn
+            || Object.keys(edit).some(key => !['sceneId', 'backgroundSourceIn'].includes(key))))) {
+          throw Object.assign(new Error('Self-repair allows only inspected source-in trims in the failed scenes.'), { code: 'REPAIR_SCOPE', policyRefusal: true });
+        }
+        const sourceTrims = new Map();
+        if (hasSourceRepair(request)) {
+          if ((session.sourceRepairBatches?.[simCurrent.id] ?? 0) >= 2) throw Object.assign(new Error('Two source-repair batches have been applied in this conversation/project. Stop and review the output before further corrections.'), { code: 'SOURCE_REPAIR_LIMIT', policyRefusal: true });
+          for (const edit of request.edits) if (edit.backgroundSourceIn !== undefined) sourceTrims.set(edit.sceneId, await sourceReviewer.validateTrim(simCurrent, edit.sceneId, edit.backgroundSourceIn, { signal }));
+        }
+        return applyChatPackageEdit(simCurrent, request, { sourceTrims });
+      };
       const validatePackageEditTiming = candidate => {
         const timing = pkg => {
           const timeline = compilePackage(pkg, join(runtimeDir, 'packages'));
@@ -1679,11 +1732,21 @@ export function createProjectChat({
         }
       };
       const packageEditor = simCurrent ? {
-        tool: PACKAGE_EDIT_TOOL,
+        tool: repairContext ? SOURCE_REPAIR_EDIT_TOOL : PACKAGE_EDIT_TOOL,
+        inspectTool: SOURCE_INSPECT_TOOL,
+        inspect: async args => {
+          if (++sourceInspections > 4) throw new Error('At most four source inspections per turn. Review the existing findings before continuing.');
+          return sourceReviewer.inspect(simCurrent, args, { signal });
+        },
+        renderInspectTool: RENDER_INSPECT_TOOL,
+        inspectRender: async args => {
+          if (++sourceInspections > 4) throw new Error('At most four media inspections per turn.');
+          return renderReviewer.inspect(simCurrent, args, { signal });
+        },
         pending: Boolean(packageEdit),
         build: () => build(null),
         stage: async args => {
-          const edited = applyChatPackageEdit(simCurrent, args);
+          const edited = await preparePackageEdit(args);
           await guardPackageEdit(edited.package, 'project_patch_plan');
           validatePackageEditTiming(edited.package);
           packageEdit = { request: clone(args), diff: edited.diff };
@@ -1692,7 +1755,7 @@ export function createProjectChat({
       } : null;
       const build = async plan => {
         if (packageEdit) {
-          const edited = applyChatPackageEdit(simCurrent, packageEdit.request);
+          const edited = await preparePackageEdit(packageEdit.request);
           if (input.action === 'build' && productionContext) {
             const read = await runProductionTool({ id: 'reviewed_package_read', name: 'production_read', args: { production_id: productionContext.productionId } }, productionContext);
             if (!read.ok) throw new Error(read.error);
@@ -1756,7 +1819,7 @@ export function createProjectChat({
         await build(rebased.plan);
         return { plan: rebased.plan, built: true, reply: packageEditApplied ? 'Applied the reviewed package edits. Existing media and timing were preserved.' : `Built “${rebased.plan.title}” into the project. You can preview it or keep chatting to revise it. Narration is a script; audio, GPU generation and export are separate steps.`, trace: { promptVersion: CONVERSATION_PROMPT_VERSION, skills: [], steps: 0, repairs: 0, usage: { input: 0, output: 0 }, tools: [{ name: 'project_build', ok: true }], omittedMessages: 0, elapsedMs: 0, stop: 'explicit-build' } };
       })() : await runConversationTurn({
-        systemSuffix: MODEL_CONTRIBUTION_PROMPT + (simCurrent ? ' The current saved package is authoritative, including when draft is null. For native source audio, disabling detached voiceover, removing narration, exact copy/kicker/lower-third edits or removing foreground placements use project_edit_package, then project_build when asked to save/apply. Never create a fresh draft to repair missing chat context. Preserve existing timing/fps and all generated media/conditioning. Unsupported edits must be reported rather than silently omitted. Production-bound edits still require production_read before build. Show the changed fields in your summary.' : ' In project_update_plan/project_patch_plan, use mediaType:image with a relevant visual direction for at least one visible scene/plate.') + ' A draft/build is not approved GPU generation or a final export.',
+        systemSuffix: MODEL_CONTRIBUTION_PROMPT + (simCurrent ? ' The current saved package is authoritative, including when draft is null. For native source audio, disabling detached voiceover, removing narration, exact copy/kicker/lower-third edits or removing foreground placements use project_edit_package, then project_build when asked to save/apply. Never create a fresh draft to repair missing chat context. Preserve existing timing/fps and all generated media/conditioning. Unsupported edits must be reported rather than silently omitted. Production-bound edits still require production_read before build. Show the changed fields in your summary. ' + SOURCE_REVIEW_GUIDANCE : ' In project_update_plan/project_patch_plan, use mediaType:image with a relevant visual direction for at least one visible scene/plate.') + ' A draft/build is not approved GPU generation or a final export.',
         model, sessionId: id, signal, skillsEnabled,
         mode: input.mode, messages: [...session.messages, ...(scopeMessage ? [scopeMessage] : []), user], plan: rebased.plan,
         brandContext: brand?.kit,
@@ -1767,6 +1830,8 @@ export function createProjectChat({
         characters,
         drawing,
         packageEditor,
+        repairOnly: Boolean(repairContext),
+        reviewContext: repairContext,
         ...(productionContext ? { production: productionContext } : {}),
         projectContext: simCurrent ? {
           id: simCurrent.id, revision: simCurrent.revision, title: simCurrent.title, format: simCurrent.format,
@@ -1787,6 +1852,12 @@ export function createProjectChat({
         build,
         onEvent: event => turnHooks.onEvent?.(event),
       });
+      if (repairContext) {
+        signal.throwIfAborted();
+        if (result.trace?.tools?.some(tool => tool.ok === false)) {
+          throw Object.assign(new Error('Self-repair stopped after a failed tool; no pending correction was committed.'), { code: 'SELF_REPAIR_TOOL', status: 422 });
+        }
+      }
       const draftChanged = JSON.stringify(result.plan) !== JSON.stringify(rebased.plan);
       const finalPackage = pendingBuild ?? (packageChanged ? simCurrent : null);
       const nextSession = {
@@ -1794,6 +1865,7 @@ export function createProjectChat({
         messages: [...session.messages, user, { role: 'assistant', content: providerSettings.redact(result.reply) }],
         plan: result.plan, phase: result.built ? 'built' : packageEdit || (draftChanged && result.plan) ? 'draft' : session.phase,
         packageEdit: packageEditApplied ? null : packageEdit,
+        ...(packageEditApplied && hasSourceRepair(packageEdit.request) ? { sourceRepairBatches: { ...session.sourceRepairBatches, [simCurrent.id]: (session.sourceRepairBatches?.[simCurrent.id] ?? 0) + 1 } } : {}),
         ...(packageEditApplied ? { lastPackageEdit: { ...packageEdit, appliedRevision: predictedRevision() } } : {}),
         provider: input.provider, model: config.model,
         brand, trace: JSON.parse(providerSettings.redact(JSON.stringify(result.trace))),

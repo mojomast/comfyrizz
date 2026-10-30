@@ -228,13 +228,14 @@ test('gallery slots render characters, shots, voices and the final video', () =>
   const finalSlot = slots.at(-1);
   assert.equal(finalSlot.id, 'final');
   assert.match(finalSlot.tag, /data-gallery-highlighted="true"/u);
-  assert.match(html, new RegExp(`>${COPY.stages.video}</p>`, 'u'));
+  assert.match(html, new RegExp(`>${COPY.stages.video} · Details</button>`, 'u'));
 
-  assert.match(html, /src="\/media\/mira\.png"/u);
-  assert.match(html, /src="\/media\/shot-1\.png"/u);
-  assert.match(html, /src="https:\/\/cdn\.example\/shot-2\.mp4"/u);
-  assert.match(html, /src="\/media\/voice-1\.mp3"/u);
-  assert.match(html, /src="\/media\/final\.mp4"/u);
+  assert.match(html, /data-gallery-media="character:char_mira"/u);
+  assert.match(html, /data-gallery-media="shot:shot_1"/u);
+  assert.match(html, /data-gallery-media="shot:shot_2"/u);
+  assert.doesNotMatch(html, /src="(?:\/media|https:)/u);
+  assert.match(html, /data-gallery-media="voice:art_v1"/u);
+  assert.match(html, /data-gallery-media="final"/u);
 });
 
 test('failed gallery slots show the shared gallery error copy', () => {
@@ -316,7 +317,7 @@ test('reduced motion adds the class hook and the stylesheet honours the OS prefe
   }
   assert.match(css, /@media \(prefers-reduced-motion: reduce\)/u);
   assert.match(css, /\.super-easy-progress-reduced-motion[^{]*\{[^}]*transition:\s*none/u);
-  assert.doesNotMatch(css, /@import/u);
+  assert.match(css, /@import '\.\/gallery\.css';/u);
   assert.doesNotMatch(css, /url\(\s*['"]?https?:/iu);
 });
 

@@ -56,8 +56,7 @@ function fixturePackage() {
   return pkg;
 }
 
-function seedPackage(app, pkg) {
-  const dir = dirname(app.store.path(pkg.id));
+function seedDeclaredMedia(pkg, dir) {
   for (const asset of Object.values(pkg.assets ?? {})) {
     const files = [asset?.file, ...Object.values(asset?.variants ?? {}).map(variant => variant?.file)]
       .filter(file => typeof file === 'string' && file);
@@ -71,6 +70,11 @@ function seedPackage(app, pkg) {
       if (variant) variant.sha256 = createHash('sha256').update(bytes).digest('hex');
     }
   }
+}
+
+function seedPackage(app, pkg) {
+  const dir = dirname(app.store.path(pkg.id));
+  seedDeclaredMedia(pkg, dir);
   seedMockContribution(app.store, pkg);
   approveMockContribution(app.takeStore, pkg, dir);
   return dir;
@@ -201,6 +205,7 @@ test('IP54: a written override opens every enumerated route through the same gat
   const store = new PackageStore(join(runtimeDir, 'packages'));
   mkdirSync(join(runtimeDir, 'renders'), { recursive: true });
   const pkg = fixturePackage();
+  seedDeclaredMedia(pkg, store.dir);
   seedMockContribution(store, pkg);
   const events = { entries: [], publish(event) { this.entries.push(event); } };
   const gates = [];

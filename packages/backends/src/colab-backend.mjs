@@ -447,6 +447,8 @@ export function createColabBackend({
     session,
     productionId: productionId || null,
     createdByUs: false,
+    allocationAttempted: false,
+    allocationCleanup: null,
     startedAtMs: null,
     usageBefore: null,
     spentEstimate: 0,
@@ -685,7 +687,10 @@ export function createColabBackend({
    * last (`COMFYRIZZ_OK <step>`), never the exit code.
    */
   async function execScript(script, { step: stepName, timeout = 900, wallMs = null, onEvent = null, silenceMs = null, onLog = null, signal = null } = {}) {
-    const result = await step(argvExec({ session, file: script, timeout }), {
+    let result;
+    for (let attempt = 0; attempt < 3; attempt++) {
+      signal?.throwIfAborted();
+      result = await step(argvExec({ session, file: script, timeout }), {
       label: stepName,
       wallMs: wallMs ?? (timeout + 60) * 1000,
       cwd: dirname(script),
@@ -694,7 +699,13 @@ export function createColabBackend({
       // G5-9: the CLI can stream a step's output as it arrives; the backend's run() turns the runner's
       // JSON progress lines into events, so a batch shows its jobs while it runs instead of at the end
       ...(onLog ? { onLog } : {}),
-    });
+      });
+      // CLI 0.7.4/0.7.5 can lose a new kernel connection in its initial
+      // chdir, BEFORE it reads/submits our file. Only that explicit traceback
+      // is safe to retry; an uncertain user-script execution is never replayed.
+      if (!isPreExecutionConnectionFailure(result)) break;
+      emit(onEvent, { type: 'kernel_connect_retry', step: stepName, attempt: attempt + 1 });
+    }
     emit(onEvent, {
       type: "exec",
       step: stepName,
@@ -932,6 +943,7 @@ export function createColabBackend({
           forgetSession();
           state.createdByUs = false;
           const cleanup = { confirmedGone: true, listedEver, note: check.note };
+          state.allocationCleanup = cleanup;
           emit(onEvent, { type: "allocation_cleanup", ...cleanup });
           return cleanup;
         }
@@ -1049,7 +1061,9 @@ export function createColabBackend({
       // PO-4 review: a cancel can land after the assign POST has already provisioned the VM. Write a
       // provisional registry entry *before* `colab new`, so a teardown always owns what the allocation
       // may have created, and on abort or failure ask `colab sessions` and stop anything listed.
+      signal?.throwIfAborted();
       rememberSession({ provisional: true });
+      state.allocationAttempted = true;
       let result = null;
       try {
         for (let attempt = 1; attempt <= newAttempts; attempt += 1) {
@@ -1101,7 +1115,7 @@ export function createColabBackend({
       // `${REMOTE_ROOT}/.hf-token`, so on a real VM the bootstrap would have found no token at all.
       // The directory has to exist *before* the upload: `colab upload` does not create parents and
       // the CLI has no mkdir, so a one-purpose script makes /content/.hf as 0700 first.
-      const dir = await execScript(tokenDirScript, { step: "hf-token-dir", timeout: 120, wallMs: 240000, onEvent });
+      const dir = await execScript(tokenDirScript, { step: "hf-token-dir", timeout: 120, wallMs: 240000, onEvent, signal });
       emit(onEvent, { type: "hf_token_dir", code: dir.code, dir: HF_TOKEN_REMOTE_PATH.replace(/\/token$/, "") });
       const dirOutcome = execOutcome(dir, "hf-token-dir");
       if (dirOutcome.lost) return { lost: true, note: dirOutcome.note };
@@ -1450,7 +1464,9 @@ export function createColabBackend({
      */
     async teardown(reason) {
       if (!owns() && !state.createdByUs) {
-        return { state: "not_owned", evidence: `no session registry entry for ${session}; nothing was stopped` };
+        return { state: "not_owned", evidence: `no session registry entry for ${session}; nothing was stopped`,
+          allocation: state.allocationAttempted || state.startedAtMs !== null ? 'attempted' : 'not_attempted',
+          shutdownVerified: (!state.allocationAttempted && state.startedAtMs === null) || state.allocationCleanup?.confirmedGone === true };
       }
       const dropped = await execScript(dropTokenScript, { step: "drop-token", timeout: 120, wallMs: 180000 });
       const droppedOutcome = execOutcome(dropped, "drop-token");
@@ -1468,6 +1484,7 @@ export function createColabBackend({
           const watchdog = await disarmWatchdog();
           return {
             state: "stopped",
+            shutdownVerified: true,
             evidence: `colab sessions no longer lists ${session} (reason: ${reason})`,
             attempts: attempt,
             watchdog,
@@ -2157,6 +2174,14 @@ export function isLost(result) {
   if (result.spawnError) return true;
   // exit 0 with no output at all is also not evidence that the VM ran anything
   return result.code !== 0 && !String(result.output || result.log || "").trim();
+}
+
+export function isPreExecutionConnectionFailure(result) {
+  const output = String(result?.output ?? '');
+  return result?.code !== 0 && output.includes('Connection was lost.')
+    && output.includes('execution.py:217 in exec_command')
+    && /os\.makedirs\(['"]\/content['"]/.test(output)
+    && !output.includes('COMFYRIZZ_OK');
 }
 
 export function redactTail(result, chars = 300) {

@@ -20,9 +20,10 @@ import { levelForState } from './steps/level.ts';
 import { iterationBlocksPaidGeneration } from '../productions/cards/iteration-advanced.ts';
 import { mountSuperEasy } from './super-easy/mount.ts';
 import { setPreferStudio } from './super-easy/prefs.ts';
-import { escapeToHome } from './super-easy/escape.ts';
+import { escapeToHome, escapeToSuperEasy } from './super-easy/escape.ts';
 import { createSuperEasySession, type SuperEasySession } from './super-easy/session.ts';
 import type { SuperEasyHost } from './super-easy/run.ts';
+import { hasPendingGeneratedShots } from './super-easy/run.ts';
 import { localStageReadings, mergeLocalStages } from './super-easy/local-stages.ts';
 import { readStages, type StagesProgress } from './super-easy/stages.ts';
 import { buildGalleryModel, type GalleryItem } from './super-easy/gallery-model.ts';
@@ -41,8 +42,12 @@ import { PROCEDURE_COPY } from './procedure/copy.ts';
 import { createSuperEasyContextAttachments } from './super-easy/context-attachments.ts';
 import { mountCorrectionShutdown } from './correction-shutdown.ts';
 import { readPlanCard } from '../productions/cards/plan-card.ts';
+import { syncGenerationStatus } from './super-easy/generation-status-view.ts';
+import { readFilmRepair } from './super-easy/film-review.ts';
+import { openFilmReview } from './super-easy/film-review-view.ts';
 
 import './easy.css';
+import './super-easy/creative-home.css';
 
 const easyStyles = import.meta.glob('./**/*.css', { eager: true });
 void easyStyles;
@@ -71,7 +76,8 @@ export interface EasyStudioDeps {
 export function mountEasyStudio(root: HTMLElement, baseHost: EasyHost, deps: EasyStudioDeps = {}): () => void {
   const doc = root.ownerDocument;
   const view = doc.defaultView;
-  const stopCorrectionShutdown = mountCorrectionShutdown(root, baseHost.apiFetch);
+  const hostedInviteView = new URLSearchParams(view?.location?.search ?? '').get('demo') === '1';
+  const stopCorrectionShutdown = hostedInviteView ? () => {} : mountCorrectionShutdown(root, baseHost.apiFetch);
   let settings: ReturnType<typeof mountEasyAgentSettings> | null = null;
   const host: EasyHost = {
     ...baseHost,
@@ -84,8 +90,15 @@ export function mountEasyStudio(root: HTMLElement, baseHost: EasyHost, deps: Eas
   const requestedPackage = packageIdFrom(search());
   const store = createEasyStore({ key: storageKey(requestedPackage) });
   const loaded = host.getPackage();
-  if (requestedPackage && loaded && loaded.id === requestedPackage && store.get().packageId !== requestedPackage) {
-    store.patch({ packageId: requestedPackage });
+  if (requestedPackage && loaded && loaded.id === requestedPackage) {
+    const current = store.get();
+    const patch: Partial<EasyState> = {};
+    if (current.packageId !== requestedPackage) patch.packageId = requestedPackage;
+    // A fresh browser has no Easy state for a saved project. The server-bound
+    // production lets Super Easy resume its plan, media gallery and status
+    // instead of showing an empty "new video" prompt.
+    if (!current.productionId && host.initialProductionId) patch.productionId = host.initialProductionId;
+    if (Object.keys(patch).length) store.patch(patch);
   }
 
   const api = createEasyApi(host.apiFetch);
@@ -98,13 +111,20 @@ export function mountEasyStudio(root: HTMLElement, baseHost: EasyHost, deps: Eas
   let homeTicket = 0;
   let superEasy: ReturnType<typeof mountSuperEasy> | null = null;
   let superEasySnapshot: unknown = null;
+  let generationClock: ReturnType<typeof setInterval> | null = null;
+  const paintGenerationStatus = () => { if (superEasy) syncGenerationStatus(root, superEasySnapshot); };
   let superEasyTicket = 0;
   let superEasySession: SuperEasySession | null = null;
   let proposalReturnWaiting = false;
   let proposalSaveNoticeOpen = false;
+  let filmReview: ReturnType<typeof openFilmReview> | null = null;
+  const repairStorage = (() => { try { return doc.defaultView?.localStorage; } catch { return undefined; } })();
+  const repairOwner = () => host.hasToken() && new URLSearchParams(search()).get('demo') !== '1';
+  const savedFilmRepair = () => repairOwner() && store.get().packageId
+    ? readFilmRepair(repairStorage, store.get().packageId!) : null;
   let narrationRecoveryChecked = false;
   let narrationRecoveryReady = false;
-  let primaryAction: () => void = () => host.openEditor();
+  let primaryAction: () => void = () => host.openEditor(store.get().packageId);
   let cpuFlight: Promise<unknown> | null = null;
   let projectName: ProjectNameController | null = null;
   let shellSave: ShellSaveController | null = null;
@@ -113,9 +133,11 @@ export function mountEasyStudio(root: HTMLElement, baseHost: EasyHost, deps: Eas
   let liveGalleryItems: GalleryItem[] = [];
   const liveGallery = createLiveAssetGallery({
     api: createTakesApi({ apiFetch: host.apiFetch }),
+    package: () => host.getPackage(),
     onUpdate: (items) => {
       liveGalleryItems = items;
       superEasy?.render();
+      paintGenerationStatus();
     },
   });
   let facts: StepFacts = {
@@ -186,7 +208,7 @@ export function mountEasyStudio(root: HTMLElement, baseHost: EasyHost, deps: Eas
     onStatus: () => superEasy?.syncAttachments(),
   });
 
-  settings = mountEasyAgentSettings({ apiFetch: (input, init) => host.apiFetch(input, init) });
+  if (!hostedInviteView) settings = mountEasyAgentSettings({ apiFetch: (input, init) => host.apiFetch(input, init) });
   ask = createAskDrawer({
     root,
     state: () => store.get(),
@@ -310,6 +332,9 @@ export function mountEasyStudio(root: HTMLElement, baseHost: EasyHost, deps: Eas
   }
 
   function destroySuperEasy(stopSession = false): void {
+    if (generationClock !== null) { clearInterval(generationClock); generationClock = null; }
+    superEasySession?.detachGeneration?.();
+    filmReview?.close();
     superEasyTicket += 1;
     proposalReturnWaiting = false;
     liveGallery.stop();
@@ -342,6 +367,7 @@ export function mountEasyStudio(root: HTMLElement, baseHost: EasyHost, deps: Eas
     const create = deps.createSession ?? createSuperEasySession;
     superEasySession = create({
       api: api as never,
+      hostedInvite: new URLSearchParams(search()).get('demo') === '1',
       fetchImpl: (input, init) => host.apiFetch(input, init),
       host: superEasyRunHost(),
       store: {
@@ -350,14 +376,25 @@ export function mountEasyStudio(root: HTMLElement, baseHost: EasyHost, deps: Eas
         generation: () => store.generation(),
       },
       go: () => {},
+      onProposal: (proposal) => {
+        // A cold restore adopts its saved package after initial resume facts.
+        // Refresh existence here so Review & edit full plan reaches Plan.
+        if (proposal.packageId && proposal.packageId === store.get().packageId
+          && host.getPackage()?.id === proposal.packageId) {
+          facts = { hasPackage: true, planApproved: false, actionsActive: false, allShotsKept: false, exportCurrent: false };
+        }
+        superEasy?.render();
+      },
       onProgress: (_html, snapshot) => {
         superEasySnapshot = snapshot;
         superEasy?.render();
+        paintGenerationStatus();
         procedure.observe(snapshot);
       },
       onDone: (snapshot) => {
         superEasySnapshot = snapshot;
         superEasy?.render();
+        paintGenerationStatus();
         procedure.observe(snapshot);
       },
       onPreviewReady: (_result, snapshot) => {
@@ -370,6 +407,7 @@ export function mountEasyStudio(root: HTMLElement, baseHost: EasyHost, deps: Eas
         // The progress screen owns the message, Retry and the escapes now.
         // The Studio shell is intentionally destroyed while Super Easy runs.
         superEasy?.render();
+        paintGenerationStatus();
         procedure.fail(failure.message);
       },
     });
@@ -382,11 +420,18 @@ export function mountEasyStudio(root: HTMLElement, baseHost: EasyHost, deps: Eas
     await procedure.start({ title });
   }
 
-  async function openSuperEasySetup(): Promise<void> {
+  async function openSuperEasySetup(preferredCompute?: 'colab'): Promise<boolean> {
+    if (hostedInviteView) {
+      const { openDialog } = await import('./dialog.ts');
+      await openDialog({ title: 'Hosted generation is unavailable here',
+        bodyHtml: '<p>This shared-film editing session reuses existing media on CPU. It cannot enable Google Colab or change the host’s compute settings. This plan still needs generated media; ask the host to finish those assets, or edit the plan to reuse completed media. No GPU work was started.</p>',
+        actions: [{ label: 'Back to film', value: 'close', kind: 'secondary' }], opener: root });
+      return false;
+    }
     const { openDialog, confirmDialog } = await import('./dialog.ts');
     const { renderCompute, mountCompute, computeBlockReason } = await import('./compute-choice.ts');
     const saved = readSuperEasySetup();
-    let draft: SuperEasySetup = { ...saved, confirmed: false };
+    let draft: SuperEasySetup = { ...saved, ...(preferredCompute ? { compute: preferredCompute } : {}), confirmed: false };
     let status: any = null;
     const hostId = `super-easy-setup-${Date.now()}`;
     const opener = root.querySelector<HTMLElement>('[data-super-easy-setup]');
@@ -415,7 +460,7 @@ export function mountEasyStudio(root: HTMLElement, baseHost: EasyHost, deps: Eas
       onStatus: next => { status = next; paint(); },
       idPrefix: hostId,
     }) : () => {};
-    void (async () => {
+    const statusFlight = (async () => {
       try {
         const response = await host.apiFetch('/api/colab/status');
         status = response.ok ? await response.json() : null;
@@ -425,37 +470,46 @@ export function mountEasyStudio(root: HTMLElement, baseHost: EasyHost, deps: Eas
     opener?.ownerDocument.querySelector('[data-super-easy-ai-setup]')?.addEventListener('click', () => { void settings?.open(); }, { once: true });
     const choice = await pending;
     unmount();
-    if (choice !== 'save') return;
+    if (choice !== 'save') return false;
     if (draft.compute === 'colab') {
+      // Save can be clicked before the CLI/account check finishes. Await that
+      // existing request instead of treating an in-flight check as disconnected.
+      await statusFlight;
       try {
         const selection = await settings?.selection();
         if (!selection || selection.provider === 'none') throw new Error('Connect an AI agent first.');
       } catch {
         await settings?.open();
-        return;
+        return false;
       }
       const reason = computeBlockReason(draft, status);
       if (reason) {
         const retry = await confirmDialog({ title: 'Finish the connection checks', text: reason, confirmLabel: 'Back to setup', cancelLabel: 'Close', opener });
-        if (retry) await openSuperEasySetup();
-        return;
+        if (retry) return openSuperEasySetup(preferredCompute);
+        return false;
       }
       const approved = await confirmDialog({
         title: 'Use Google Colab automatically?',
         text: `Each new video can use up to ${draft.spendCap} Google Colab credits. You will not be asked again for each run. You can change this limit in setup.`,
         confirmLabel: 'Save and use Google Colab', cancelLabel: 'Cancel', opener,
       });
-      if (!approved) return;
+      if (!approved) return false;
     }
     const setup = { ...draft, spendCap: Number.isFinite(draft.spendCap) ? draft.spendCap : saved.spendCap, confirmed: true };
+    const keepPlan = superEasySession?.proposal() || ['GENERATED_MEDIA_REQUIRES_COLAB', 'GOOGLE_COLAB_CONFIRM_REQUIRED'].includes(superEasySession?.failure()?.code ?? '');
+    if (keepPlan && !superEasySession?.configureCompute?.(setup)) {
+      await openDialog({ title: 'Review the saved plan first', bodyHtml: '<p>The project or its inputs changed. Your plan is preserved. Return to review and save it before switching compute.</p>', actions: [{ label: 'Back to review', value: 'close', kind: 'secondary' }], opener });
+      return false;
+    }
     saveSuperEasySetup(setup);
-    store.patch({ compute: setup.compute, spendCap: setup.spendCap });
+    if (!keepPlan) store.patch({ compute: setup.compute, spendCap: setup.spendCap });
     superEasy?.render({ forceHome: true });
+    return true;
   }
 
   async function onSuperEasyGenerate(input: SuperEasyGenerateInput): Promise<void> {
     const setup = readSuperEasySetup();
-    store.patch({ compute: input.compute, spendCap: setup.spendCap });
+    if (!hostedInviteView) store.patch({ compute: input.compute, spendCap: setup.spendCap });
     const session = ensureSuperEasySession();
     const status = session.status();
     if (status === 'running' || status === 'stopping') return;
@@ -493,10 +547,18 @@ export function mountEasyStudio(root: HTMLElement, baseHost: EasyHost, deps: Eas
     if (!productionId) return;
     if (packageId) liveGallery.start(packageId);
     const ticket = ++superEasyTicket;
+    if (savedFilmRepair()) {
+      void ensureSuperEasySession().syncRepairedFilm?.(undefined, () => ticket === superEasyTicket).catch(() => { superEasy?.render(); });
+      return;
+    }
     void api.getProduction(productionId).then((snapshot) => {
       if (ticket !== superEasyTicket) return;
       superEasySnapshot = snapshot;
       superEasy?.render();
+      if (superEasy && !hostedInviteView) void ensureSuperEasySession().restoreFinalVideo?.(snapshot);
+      if (superEasy) void ensureSuperEasySession().restoreComputeProposal?.(snapshot);
+      if (superEasy) ensureSuperEasySession().resumeGeneration?.(snapshot);
+      paintGenerationStatus();
     }).catch(() => {
       /* keep the last snapshot; the gauges stay at their last known state */
     });
@@ -516,6 +578,9 @@ export function mountEasyStudio(root: HTMLElement, baseHost: EasyHost, deps: Eas
 
   async function approveSuperEasyProposal(): Promise<void> {
     if (proposalSaveNoticeOpen) return;
+    if (store.get().compute === 'cpu' && hasPendingGeneratedShots(host.getPackage())) {
+      if (!await openSuperEasySetup('colab')) return;
+    }
     const session = superEasySession;
     const ticket = superEasyTicket;
     const result = await session?.approveProposal();
@@ -555,6 +620,9 @@ export function mountEasyStudio(root: HTMLElement, baseHost: EasyHost, deps: Eas
     // Rebuild the review only on return. Later edits must still fail the normal
     // approval revision guard, rather than silently updating what was reviewed.
     proposalReturnWaiting = superEasySession?.refreshProposal?.() === 'waiting';
+    if (hostedInviteView && new URLSearchParams(search()).get('edit') === '1' && !superEasySession && !store.get().proposalCheckpoint) {
+      ensureSuperEasySession().reviewExisting();
+    }
     superEasy = mountSuperEasy({
       root,
       state: () => store.get(),
@@ -574,7 +642,9 @@ export function mountEasyStudio(root: HTMLElement, baseHost: EasyHost, deps: Eas
         requestFullPlanReview(current.productionId ?? 'new');
         openStudioFromSuperEasy('plan', packageId);
       },
-      setup: () => readSuperEasySetup(),
+      setup: () => hostedInviteView
+        ? { ...readSuperEasySetup(), compute: 'colab', confirmed: true, spendCap: store.get().spendCap ?? 0 }
+        : readSuperEasySetup(),
       onMotionModelChange: (motionModel) => {
         saveSuperEasySetup({ ...readSuperEasySetup(), motionModel });
         superEasy?.render({ forceHome: true });
@@ -617,6 +687,17 @@ export function mountEasyStudio(root: HTMLElement, baseHost: EasyHost, deps: Eas
       },
       onSetup: () => { void openSuperEasySetup(); },
       onChangeAnything: (change = '') => {
+        if (hostedInviteView) {
+          void (async () => {
+            const productionId = store.get().productionId;
+            const opened = await host.apiFetch(`/api/invites/productions/${encodeURIComponent(productionId ?? '')}/edit`, { method: 'POST' });
+            if (!opened.ok) throw new Error('Film could not be opened for editing.');
+            const data = await opened.json();
+            if (change.trim()) view?.sessionStorage.setItem(`guest-edit-note-${data.packageId}`, change.trim());
+            if (view) view.location.href = data.openPath;
+          })().catch(() => { shell?.setStatus('Open the film gallery and choose Edit with agent.'); });
+          return;
+        }
         openStudioFromSuperEasy('review');
         void ask?.openAsk(change);
       },
@@ -626,10 +707,33 @@ export function mountEasyStudio(root: HTMLElement, baseHost: EasyHost, deps: Eas
       previewReady: () => superEasySession?.previewReady() === true,
       failure: () => superEasySession?.failure() ?? null,
       onRetry: () => {
-        void superEasySession?.retry();
+        void (async () => {
+          if (['GENERATED_MEDIA_REQUIRES_COLAB', 'GOOGLE_COLAB_CONFIRM_REQUIRED'].includes(superEasySession?.failure()?.code ?? '')) {
+            if (!await openSuperEasySetup('colab')) return;
+          }
+          await superEasySession?.retry();
+        })();
       },
       onRecoverDownloadedOutputs: () => { void superEasySession?.recoverDownloadedOutputs?.(); },
       onReview: (packageId) => openStudioFromSuperEasy('review', packageId),
+      reviewRepair: () => !repairOwner() ? 'hidden'
+        : savedFilmRepair() || superEasySession?.finalTarget?.() ? 'ready' : 'unavailable',
+      onReviewRepair: () => {
+        if (filmReview || !repairOwner()) return;
+        const packageId = store.get().packageId;
+        if (!packageId) return;
+        const session = ensureSuperEasySession(), generation = store.generation(), ticket = superEasyTicket;
+        let open = true;
+        const current = () => open && ticket === superEasyTicket && store.generation() === generation
+          && store.get().packageId === packageId && superEasySession === session;
+        filmReview = openFilmReview({ doc, packageId, storage: repairStorage, owner: true,
+          fetch: (path, init) => host.apiFetch(path, init), current,
+          target: () => session.finalTarget?.() ?? null, chatId: () => store.get().chatId,
+          previousUrl: () => session.previousVideo?.() ?? null,
+          sync: record => session.syncRepairedFilm!(record, current),
+          onClose: () => { open = false; filmReview = null; },
+        });
+      },
       onExport: (packageId) => openStudioFromSuperEasy('export', packageId),
       stages: (snapshot) => superEasyStages(snapshot),
       gallery: (snapshot) => mergeLiveGallery(buildGalleryModel(snapshot), liveGalleryItems),
@@ -637,10 +741,23 @@ export function mountEasyStudio(root: HTMLElement, baseHost: EasyHost, deps: Eas
         superEasySession?.stop();
         superEasySession = null;
         resetPlanDecisionAnswers();
+        const url = escapeToHome(search());
+        view?.history?.pushState({}, '', url === '' ? './' : url);
         store.startNew();
       },
     });
+    generationClock = setInterval(paintGenerationStatus, 15000);
     if (store.get().productionId) refreshSuperEasySnapshot();
+    else if (savedFilmRepair()) void ensureSuperEasySession().syncRepairedFilm?.().catch(() => { superEasy?.render(); });
+    else if (store.get().proposalCheckpoint) void ensureSuperEasySession().restoreProposal?.();
+    if (hostedInviteView && requestedPackage) {
+      const key = `guest-edit-note-${requestedPackage}`;
+      const note = view?.sessionStorage.getItem(key);
+      if (note) {
+        view?.sessionStorage.removeItem(key);
+        void superEasySession?.reviseProposal(note);
+      }
+    }
   }
 
   /** More control lands on the existing studio; Review is the preview handoff. */
@@ -815,7 +932,10 @@ export function mountEasyStudio(root: HTMLElement, baseHost: EasyHost, deps: Eas
       const body = root.querySelector<HTMLElement>('[data-easy-body]');
       stopStep = body ? mod.bind(body, ctx) ?? (() => {}) : () => {};
     } else {
-      primaryAction = () => host.openEditor();
+      // The Easy shell may have advanced to a new saved package after its URL
+      // was opened. Hand that exact package to the editor rather than letting
+      // boot resolve a stale URL project.
+      primaryAction = () => host.openEditor(state.packageId);
       shell.setPrimary({ label: COPY.shell.openEditor });
       stopStep = () => {};
     }
@@ -842,7 +962,7 @@ export function mountEasyStudio(root: HTMLElement, baseHost: EasyHost, deps: Eas
   function makeItSimple(event?: Event): void {
     event?.preventDefault();
     setPreferStudio(false);
-    const url = escapeToHome(search());
+    const url = escapeToSuperEasy(search(), store.get().packageId);
     view?.history?.pushState({}, '', url === '' ? './' : url);
     showSuperEasy();
   }
@@ -859,7 +979,15 @@ export function mountEasyStudio(root: HTMLElement, baseHost: EasyHost, deps: Eas
     contextAttachments.reset();
     store.startNew();
     refreshVideoName();
-    go('idea');
+    // A home screen has no shell yet, and showStep() intentionally no-ops
+    // without one: clicking New video there used to do nothing. Clear the old
+    // project from the address and mount the new film's first step.
+    const params = new URLSearchParams(search().replace(/^\?/, ''));
+    for (const key of ['package', 'chat', 'production', 'edit', 'view', 'step']) params.delete(key);
+    params.set('step', 'idea');
+    view?.history?.replaceState?.({}, '', `?${params.toString()}`);
+    if (!shellReady) ensureShell();
+    else showStep('idea');
   }
 
   function bindNewVideo(): void {
@@ -938,7 +1066,7 @@ export function mountEasyStudio(root: HTMLElement, baseHost: EasyHost, deps: Eas
       },
       onPrimary: () => primaryAction(),
       onSettings: () => { void settings?.open(); },
-      onOpenEditor: () => host.openEditor(),
+      onOpenEditor: () => host.openEditor(store.get().packageId),
     });
     bindMakeItSimple();
     const nameHost = root.querySelector<HTMLElement>('[data-easy-name]');
@@ -963,7 +1091,7 @@ export function mountEasyStudio(root: HTMLElement, baseHost: EasyHost, deps: Eas
 
   function clearEditorViewForEasy(): void {
     const params = new URLSearchParams(search().replace(/^\?/, ''));
-    if (!params.has('view')) return;
+    if (params.get('view') !== 'editor') return;
     params.delete('view');
     const query = params.toString();
     const url = query ? `?${query}` : (view?.location?.pathname ?? './');
@@ -1011,7 +1139,26 @@ export function mountEasyStudio(root: HTMLElement, baseHost: EasyHost, deps: Eas
     });
     stopStepper = mountStepper(stepperHost, { onSelect: (next) => go(next) });
   });
-  const stopMode = subscribeMode((mode) => applyShell(mode));
+  // A deep link can boot straight into the editor, leaving the Easy shell
+  // unrendered. Entering Easy later must open the routed step instead of a
+  // blank panel; a live Easy step is left exactly as the user left it.
+  let factsLoaded = false;
+  function showLanding(): void {
+    const boot = initialRoute(search(), store.get(), factsFor());
+    if (boot.view === 'editor') {
+      if (getMode() !== 'advanced') setMode('advanced');
+      return;
+    }
+    if (getMode() !== 'easy') return;
+    const params = new URLSearchParams(search());
+    if (narrationRecoveryReady && !params.has('step')) { showSuperEasy(); return; }
+    if (boot.view === 'superEasy') { if (!superEasy) showSuperEasy(); return; }
+    showStep(boot.step);
+  }
+  const stopMode = subscribeMode((mode) => {
+    applyShell(mode);
+    if (mode === 'easy' && factsLoaded && !shellReady && !superEasy) showLanding();
+  });
   const stopProposalSave = host.editorStore?.subscribeSaveState?.(() => {
     if (!superEasy || !proposalReturnWaiting) return;
     const ticket = superEasyTicket;
@@ -1029,25 +1176,16 @@ export function mountEasyStudio(root: HTMLElement, baseHost: EasyHost, deps: Eas
   root.addEventListener('change', onCaptureToggle);
   view?.addEventListener('popstate', onPopState);
   // Show the studio before resume facts return. A busy server must not leave the editor in front.
+  // A landing URL opens its landing surface even after a previous editor visit.
+  // Explicit editor deep links and saved-package editor sessions still resume.
+  const landing = initialRoute(search(), store.get(), factsFor());
+  if (landing.view === 'editor') setMode('advanced');
+  else if (landing.home || landing.view === 'superEasy') setMode('easy');
   applyShell(getMode());
   void loadFacts().then(() => {
-    const boot = initialRoute(search(), store.get(), factsFor());
-    if (boot.view === 'editor') {
-      if (getMode() !== 'advanced') setMode('advanced');
-      return;
-    }
+    factsLoaded = true;
     // A saved editor session stays in the editor. Easy still resumes its step.
-    if (getMode() !== 'easy') return;
-    const params = new URLSearchParams(search());
-    if (narrationRecoveryReady && !params.has('step')) {
-      showSuperEasy();
-      return;
-    }
-    if (boot.view === 'superEasy') {
-      if (!superEasy) showSuperEasy();
-      return;
-    }
-    showStep(boot.step);
+    showLanding();
   });
 
   return () => {

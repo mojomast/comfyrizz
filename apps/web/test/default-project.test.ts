@@ -54,9 +54,9 @@ test('PN07: the bundled example matches the default ids and has a compiled timel
   assert.equal(timelineJson.scenes.length, packageJson.scenes.length);
 });
 
-test('PN07: without a token the bundled package stays, whatever the query', async () => {
+test('without a token only an unqualified visit can open the bundled package', async () => {
   assert.deepEqual(initialProjectTarget('', false), { source: 'bundled', packageId: null });
-  assert.deepEqual(initialProjectTarget('?package=pkg_custom', false), { source: 'bundled', packageId: null });
+  assert.deepEqual(initialProjectTarget('?package=pkg_custom', false), { source: 'requested', packageId: 'pkg_custom' });
 
   const standalone = opener(() => json({ package: { id: 'unexpected' } }));
   const result = await standalone.open('', false);
@@ -70,10 +70,36 @@ test('PN07: without a token the bundled package stays, whatever the query', asyn
   assert.equal(standalone.calls.length, 0);
   assert.equal(standalone.adopted.length, 0);
 
-  const requestedWithoutToken = await standalone.open('?package=pkg_custom', false);
-  assert.equal(requestedWithoutToken.source, 'bundled');
-  assert.equal(requestedWithoutToken.packageId, null);
+  await assert.rejects(standalone.open('?package=pkg_custom', false), /session.*required/i);
   assert.equal(standalone.calls.length, 0);
+});
+
+test('an explicit project never falls back to Pip on HTTP, network, malformed or identity failures', async () => {
+  for (const response of [
+    () => json({ error: 'missing' }, 404),
+    () => json({ error: 'forbidden' }, 403),
+    () => json({ error: 'unavailable' }, 503),
+    () => { throw new Error('offline'); },
+    () => new Response('invalid json'),
+    () => json({ revision: 2 }),
+    () => json({ package: { id: DEFAULT_PACKAGE_ID } }),
+  ]) {
+    const requested = opener(response);
+    await assert.rejects(requested.open('?package=pkg_custom&view=editor', true));
+    assert.equal(requested.adopted.length, 0);
+    assert.equal(requested.errors.length, 1);
+    assert.deepEqual(requested.calls.map(call => call.url), ['/api/package/pkg_custom']);
+  }
+});
+
+test('hosted guest explicit project loads stay scoped to that project', async () => {
+  const requested = opener(() => json({ package: { id: 'pkg_guest_copy', revision: 7 }, editor: { version: 1 } }));
+  const result = await requested.open('?demo=1&package=pkg_guest_copy&view=editor', true);
+  assert.equal(result.packageId, 'pkg_guest_copy');
+  assert.equal(result.source, 'requested');
+  assert.equal(result.chatId, undefined);
+  assert.deepEqual(requested.calls.map(call => call.url), ['/api/package/pkg_guest_copy']);
+  assert.deepEqual(requested.adopted[0].editor, { version: 1 });
 });
 
 test('PN07: a token and no query opens the seeded project from the API', async () => {

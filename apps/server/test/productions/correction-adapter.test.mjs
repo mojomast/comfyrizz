@@ -21,3 +21,37 @@ test('a changed project cannot redeem a correction slot or invoke a backend', as
   await assert.rejects(adapter.admit({ productionId: 'prod_1', actionId: 'act_1', pkg: changed }), { code: 'SHOT_PLAN_CHANGED' });
   assert.equal(starts, 0);
 });
+
+test('correction lookup, observation and cancellation require the run to match its journal authority', async () => {
+  const action = { id: 'act_1', planId: 'plan_1', planHash: 'hash_1', state: 'running', runId: 'run_1' };
+  const slot = { id: action.id, executor: 'chat-correction-take' };
+  const own = { runId: 'run_1', productionId: 'prod_1', actionId: action.id, packageId: 'pkg_1',
+    actionPlanHash: action.planHash, planHash: 'backend_hash', status: 'running' };
+  let record = own;
+  const cancellations = [];
+  const adapter = createCorrectionAdapter({
+    store: { readEvents: () => [{ type: 'plan.proposed', data: { id: action.planId, planHash: action.planHash, actions: [slot] } },
+      { type: 'action.state_changed', data: action }], read: () => ({ packageId: 'pkg_1' }) },
+    runs: { get: id => { assert.equal(id, action.runId); return record; }, cancel: id => cancellations.push(id) },
+    pipeline: { runForAction() { assert.fail('correction lookup must not fall back to a pipeline run'); }, cancel() {} },
+  });
+  const args = { productionId: 'prod_1', actionId: action.id };
+  assert.equal(adapter.runForAction(args.productionId, args.actionId), own);
+  assert.equal((await adapter.observe(args)).run, own);
+  adapter.cancel(args);
+  assert.deepEqual(cancellations, ['run_1']);
+
+  for (const patch of [{ runId: 'run_foreign' }, { productionId: 'prod_foreign' }, { actionId: 'act_foreign' },
+    { packageId: 'pkg_foreign' }, { actionPlanHash: 'foreign_hash' },
+    { productionId: undefined }, { actionId: undefined }, { actionPlanHash: undefined }]) {
+    record = { ...own, ...patch };
+    assert.equal(adapter.runForAction(args.productionId, args.actionId), null, JSON.stringify(patch));
+    assert.equal((await adapter.observe(args)).observed, false);
+    adapter.cancel(args);
+  }
+  record = null;
+  assert.equal(adapter.runForAction(args.productionId, args.actionId), null);
+  action.runId = null;
+  assert.equal(adapter.runForAction(args.productionId, args.actionId), null);
+  assert.deepEqual(cancellations, ['run_1'], 'foreign or missing runs must never be cancelled');
+});

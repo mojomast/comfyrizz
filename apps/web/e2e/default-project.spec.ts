@@ -230,17 +230,19 @@ async function ensureLookName(page: Page, look: { id: string; label: string }): 
  * Activity pane. It is a read-only render: nothing polls or re-runs.
  */
 async function showSeededHistory(page: Page, history: unknown): Promise<Locator> {
-  const existing = page.locator('.colab-history[data-readonly="true"]').first();
-  if (await existing.count() === 0) {
-    const markup = colabHistoryHtml(history);
-    await page.evaluate((html) => {
-      const host = document.createElement('div');
-      host.id = 'seeded-colab-history';
-      host.innerHTML = html;
-      document.querySelector('#activity-pane')?.append(host);
-    }, markup);
-  }
-  return page.locator('#seeded-colab-history .colab-history, .colab-history[data-readonly="true"]').first();
+  const markup = colabHistoryHtml(history);
+  await page.evaluate((html) => {
+    document.getElementById('seeded-colab-history')?.remove();
+    const host = document.createElement('div');
+    host.id = 'seeded-colab-history';
+    host.innerHTML = html;
+    // Put the replay inside the selected Activity panel, not after the rail's
+    // other (hidden) panels, and scope the locator to this injected host so an
+    // unrelated hidden history node cannot satisfy the visibility assertion.
+    const panel = document.querySelector('#rail-panel-activity') ?? document.querySelector('#activity-pane');
+    panel?.append(host);
+  }, markup);
+  return page.locator('#seeded-colab-history .colab-history').first();
 }
 
 test.describe.configure({ mode: 'serial' });
@@ -294,7 +296,9 @@ test('s3 shows two takes for A/B review and approving take 2 unlocks the render 
 
   const s3Chip = page.locator('[data-testid="scene"][data-scene-id="s3_juno"] [data-testid="clip-chip"]');
   await expect(s3Chip).toHaveAttribute('data-state', 'review');
-  await bar.locator('[data-review-open]').click();
+  // UR42 moved the review pill out of the topbar. The gate drawer now opens
+  // from the single Export MP4 action when clips still need review.
+  await page.locator('#render').click();
   await expect(drawer).toBeVisible();
   const s3Blocker = drawer.locator('[data-render-blocker]');
   await expect(s3Blocker).toHaveCount(1);
@@ -332,14 +336,9 @@ test('s3 shows two takes for A/B review and approving take 2 unlocks the render 
   await expect(panel.locator('[data-take-state]')).toHaveText('approved');
   await expect(bar).toHaveAttribute('data-gate-ok', 'true');
   await expect(bar.locator('[data-render-ready]')).toHaveText('All clips approved');
-  await bar.locator('[data-review-open]').click();
-  await expect(drawer).toBeVisible();
-  await expect(drawer.locator('[data-render-blocker]')).toHaveCount(0);
-  await expect(drawer.locator('[data-render-open-override]')).toHaveCount(0);
-  await expect(drawer.locator('[data-render-run]')).toBeVisible();
-  await expect(drawer.locator('[data-render-run]')).toBeEnabled();
-  await drawer.locator('[data-review-close]').click();
-  await expect(drawer).toBeHidden();
+  // With every clip approved Export MP4 is the ready action; the blocked-gate
+  // drawer (asserted above) is no longer the entry point.
+  await expect(page.locator('#render')).toBeEnabled();
 
   const clips = await (await api(env, `/api/package/${PIP_PACKAGE_ID}/clips`)).json() as {
     clips: Array<{ clipId: string; state: string }>;

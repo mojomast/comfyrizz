@@ -133,6 +133,16 @@ export function escapeToHome(search: string): string {
   return searchOf(params);
 }
 
+/** Returning to the simple view keeps project identity across a cold reload. */
+export function escapeToSuperEasy(search: string, packageId?: string | null): string {
+  const params = paramsOf(search);
+  applyPackage(params, packageId);
+  if (!params.has(PACKAGE_PARAM)) return escapeToHome(search);
+  params.delete(STEP_PARAM);
+  params.set(VIEW_PARAM, 'super-easy');
+  return searchOf(params);
+}
+
 /**
  * A fresh local video state for Make another.
  *

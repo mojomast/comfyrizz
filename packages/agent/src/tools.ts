@@ -7,6 +7,7 @@ import { z } from 'zod';
 import { routeAsset, type AssetNeed, type RouteDecision } from './router.js';
 import { foregroundFor } from './package.js';
 import { expandFluxCaption, expandReferenceEditCaption, aspectFromSize, sourceDims } from './caption.js';
+import { KLEIN_CAPTION_GUIDANCE, KLEIN_EDIT_GUIDANCE, LTX_SHOT_GUIDANCE } from './prompts/model-quality.js';
 import { WORKFLOW_SHA256 } from './workflow-manifest.js';
 import { brandStyleBlock, brandTheme, type BrandKit } from './brand.js';
 import type { StylePreset } from './brief.js';
@@ -209,7 +210,7 @@ function resolveFormat(brief: string): PackageFormat {
 
 const plateFitSchema = z.enum(['cover', 'contain']);
 const sceneMediaSchema = z.array(z.object({ fit: plateFitSchema.optional() }).passthrough()).length(2);
-const lowerThirdSchema = z.object({ text: z.string().min(1).max(120), kicker: z.string().min(1).max(40).optional() }).strict();
+const lowerThirdSchema = z.object({ text: z.string().min(1).max(120), kicker: z.string().min(1).max(40).optional(), start_frame: z.number().int().min(0).max(7200).optional(), position: z.enum(['top', 'bottom']).optional() }).strict();
 
 const sceneSchema = z.object({
   id: z.string().min(1),
@@ -307,7 +308,7 @@ export const generateImageSchema = z.object({
   placement: z.enum(['conditioning', 'foreground']).optional(),
   intent: z.string().min(1),
   seed: z.number().int().optional(),
-  refs: z.array(z.string()).max(4).optional(),
+  refs: z.array(z.string()).max(2).optional(),
   cutout: z.boolean().optional(),
   /** panel explicitly targets one split/compare panel instead of the whole canvas. */
   aspect: z.enum(['16:9', '1:1', '4:5', '9:16', 'panel']).optional(),
@@ -515,7 +516,7 @@ const copyParameters = { type: 'object', additionalProperties: false, descriptio
 const nativeTextParameters = {
   copy: copyParameters,
   headline_size: headlineSizeParameters,
-  lower_third: { type: 'object', additionalProperties: false, required: ['text'], properties: { text: { type: 'string', minLength: 1, maxLength: 120 }, kicker: { type: 'string', minLength: 1, maxLength: 40 } } },
+  lower_third: { type: 'object', additionalProperties: false, required: ['text'], properties: { text: { type: 'string', minLength: 1, maxLength: 120 }, kicker: { type: 'string', minLength: 1, maxLength: 40 }, start_frame: { type: 'integer', minimum: 0, maximum: 7200, description: 'Scene-local overlay entrance frame. For after-dialogue copy use measured speech duration plus pause, converted at package fps.' }, position: { type: 'string', enum: ['top', 'bottom'] } } },
   media: {
     type: 'array', minItems: 2, maxItems: 2, description: PANEL_GUIDANCE + ' ' + PANEL_FRAMING_GUIDANCE,
     items: { type: 'object', properties: {
@@ -1185,7 +1186,7 @@ function storyboardModelResult(result: any) {
 
 /** Acceptance phrase for CAST1. Fictional mascot only; never a real person or a user photo. */
 const SHARED_MASCOT_RE = /use the same mascot in every scene/i;
-const KLEIN_REF_CAP = 10;
+const KLEIN_REF_CAP = 2;
 
 /** The shared mascot follows the package theme palette so packaging never rejects it. */
 function sharedMascotSvg(palette?: readonly string[]): string {
@@ -1252,11 +1253,12 @@ function castRefsForScene(pkg: Record<string, any> | undefined, sceneId: string)
   return { ids: chosen.map((member: any) => member.id), refs: chosen.map((member: any) => member.ref_asset) };
 }
 
-/** Existing refs first, then cast refs, capped at Klein's 10 reference images. */
+/** Existing refs first, then cast refs; never drop a source beyond graph capacity. */
 function mergeRefs(userRefs: string[], castRefs: string[]): string[] {
   const out: string[] = [];
   for (const ref of [...userRefs, ...castRefs]) {
-    if (!ref || out.includes(ref) || out.length >= KLEIN_REF_CAP) continue;
+    if (!ref || out.includes(ref)) continue;
+    if (out.length >= KLEIN_REF_CAP) throw new Error('PLAN_KLEIN_REFERENCE_UNSUPPORTED: local Klein workflows support at most two connected references, including implicit cast references; choose the intended pair instead of dropping a source');
     out.push(ref);
   }
   return out;
@@ -1582,6 +1584,9 @@ export function createToolset(options: ToolsetOptions = {}): Record<string, Agen
     const panel = args.aspect === 'panel' ? comparisonPanel(state.package, args.scene_id) : undefined;
     if (args.aspect === 'panel' && !panel) throw new Error('aspect:panel requires a split or compare scene; use a supported whole-image aspect for other layouts');
     const planned = options.planImage?.(args) ?? {};
+    if (planned.inputs && Object.keys(planned.inputs).some(key => key === 'images' || /^_?reference_/.test(key) && !['reference_2', '_reference_2'].includes(key))) {
+      throw new Error('PLAN_KLEIN_REFERENCE_UNSUPPORTED: local Klein workflows support at most two connected references; images lists and higher reference slots are unsupported');
+    }
     const format = state.package?.format ?? {};
     const outputAspect = aspectFromSize(format.width, format.height);
     const formatWidth = Number(format.width);
@@ -1638,8 +1643,8 @@ export function createToolset(options: ToolsetOptions = {}): Record<string, Agen
     const workflow = planned.workflow ?? defaultWorkflow;
     const workflowSha256 = planned.workflowSha256 ?? WORKFLOW_SHA256[workflow];
     // The package schema only allows scalar gen.inputs values. ReferenceMultiLatent wires
-    // image0 from the first ref; further refs are reference_2 … (Klein's cap is 10). The
-    // planner turns those into uploaded `_reference_N` file inputs.
+    // image0 from the first ref; reference_2 selects the connected image1 graph.
+    // The planner turns the second reference into uploaded `_reference_2`.
     const extraRefs = isRefEdit && refs.length > 1
       ? Object.fromEntries(refs.slice(1).map((ref, index) => [`reference_${index + 2}`, ref]))
       : {};
@@ -1900,11 +1905,18 @@ export function createToolset(options: ToolsetOptions = {}): Record<string, Agen
         });
         const startId = start.asset.id;
         const startAsset = state.package.assets[startId];
+        const startInputs = startAsset.gen.inputs;
+        const hasVerifiedPair = ['workflows/flux3_klein_ref_edit.api.json', 'workflows/flux3_klein_ref2_edit.api.json'].includes(startAsset.gen.workflow)
+          && startInputs.reference === reference && startInputs.reference_2 === image
+          && !Object.keys(startInputs).some(key => /^_?reference_(?:[3-9]|10)$/.test(key));
         startAsset.gen.inputs.prompt = [
-          'Create the first frame of one continuous cinematic shot.',
-          `Identity and subject: ${args.subject}.`,
-          `Composition and art direction: ${args.composition}.`,
-          'Preserve the shared subject identity from Picture 2 and the composition from Picture 1.',
+          `${args.composition}. ${args.subject}.`,
+          'The opening frame of one continuous shot.',
+          // The planner selects ref2 only for exactly two resolved references.
+          // Larger legacy lists do not prove that image1 is connected.
+          hasVerifiedPair
+            ? 'The composition follows <ref_image_0>; the subject retains the identity and materials of <ref_image_1>.'
+            : 'Preserve the described composition, subject identity and materials.',
           intent.generatedFilm && intent.noCaptions ? 'Every surface, garment and prop is plain and unmarked.' : 'Background surfaces are clean and unmarked.',
         ].join(' ');
         delete startAsset.gen.inputs.text;
@@ -1925,9 +1937,10 @@ export function createToolset(options: ToolsetOptions = {}): Record<string, Agen
       const width = Number(startAsset?.gen?.inputs?.width ?? startAsset?.media?.width ?? fallbackDims.width);
       const height = Number(startAsset?.gen?.inputs?.height ?? startAsset?.media?.height ?? fallbackDims.height);
       const prompt = [
-        'Use the provided start image as the first frame.',
+        `${args.camera.trim()}.`,
+        'The shot continues from the provided start image.',
         `${args.subject.trim()}. ${args.composition.trim()}.`,
-        `${args.action.trim()}. ${args.camera.trim()}.`,
+        `${args.action.trim()}.`,
         'One continuous shot, no cuts.',
         intent.generatedFilm && intent.noCaptions ? 'Every surface, garment and prop is plain and unmarked.' : 'Background surfaces are clean and unmarked.',
       ].join(' ');
@@ -2468,7 +2481,7 @@ export function createToolset(options: ToolsetOptions = {}): Record<string, Agen
     'assets.generate_image': tool(
       'assets.generate_image',
       'Plan a FLUX 3 Image Klein still with an expanded caption (with refs: a Klein reference edit). Generated-film stills default to non-visible conditioning inputs; pass the returned asset id to assets.generate_video. Use placement:foreground only for an explicitly requested visible still overlay, or author placement with storyboard.edit. ' + PANEL_FRAMING_GUIDANCE + ' This never runs a GPU job; spend needs approval.',
-      baseParameters({ scene_id: { type: 'string' }, kind: { type: 'string' }, placement: { type: 'string', enum: ['conditioning', 'foreground'], description: 'Conditioning keeps the image available as a dependency without a visible overlay (default for generated film and aspect:panel). Foreground explicitly authors a visible still.' }, intent: { type: 'string', description: 'Klein prose, subject first: pose or action, setting, light and mood in one or two specific sentences. Describe what is visible, not what is absent. Style, palette, framing and the text guard are appended. With text:true, quote the exact words and their placement. With refs, say what changes and what stays. For panel labels use native media[].label, not image lettering.' }, seed: { type: 'number' }, refs: { type: 'array', description: options.adoptReferenceImage ? 'Existing package asset IDs or authorized image reference-library IDs from the manifest; never scene IDs.' : 'Existing package asset IDs returned by generation tools, never scene IDs or reference-library IDs.', items: { type: 'string' } }, cutout: { type: 'boolean' }, aspect: { type: 'string', enum: ['16:9', '1:1', '4:5', '9:16', 'panel'], description: 'Explicit panel uses the current split/compare panel dimensions: 960x1080 for a 1920x1080 side-by-side scene; 1080x960 for a 1080x1920 stacked scene. Omit to retain the existing output-aspect default. Panel source sizes may be rounded to the model lattice by the jobs planner.' }, text: { type: 'boolean' }, labelled: { type: 'boolean' }, style: { type: 'string', maxLength: 80, description: 'Optional short reference-edit style, at most 80 characters.' } }, ['scene_id', 'intent']),
+      baseParameters({ scene_id: { type: 'string' }, kind: { type: 'string' }, placement: { type: 'string', enum: ['conditioning', 'foreground'], description: 'Conditioning keeps the image available as a dependency without a visible overlay (default for generated film and aspect:panel). Foreground explicitly authors a visible still.' }, intent: { type: 'string', description: KLEIN_CAPTION_GUIDANCE + ' ' + KLEIN_EDIT_GUIDANCE + ' With text:true, quote the exact words and their placement. For panel labels use native media[].label, not image lettering.' }, seed: { type: 'number' }, refs: { type: 'array', maxItems: 2, description: 'At most two connected references total, including implicit cast references. ' + (options.adoptReferenceImage ? 'Existing package asset IDs or authorized image reference-library IDs from the manifest; never scene IDs.' : 'Existing package asset IDs returned by generation tools, never scene IDs or reference-library IDs.'), items: { type: 'string' } }, cutout: { type: 'boolean' }, aspect: { type: 'string', enum: ['16:9', '1:1', '4:5', '9:16', 'panel'], description: 'Explicit panel uses the current split/compare panel dimensions: 960x1080 for a 1920x1080 side-by-side scene; 1080x960 for a 1080x1920 stacked scene. Omit to retain the existing output-aspect default. Panel source sizes may be rounded to the model lattice by the jobs planner.' }, text: { type: 'boolean' }, labelled: { type: 'boolean' }, style: { type: 'string', maxLength: 80, description: 'Optional short reference-edit style, at most 80 characters.' } }, ['scene_id', 'intent']),
       generateImageSchema,
       planImage,
     ),
@@ -2481,7 +2494,7 @@ export function createToolset(options: ToolsetOptions = {}): Record<string, Agen
         subject: { type: 'string', description: 'Visible subject and stable identity, not a prompt tag. For a recurring character, the same verbatim identity sentence in every shot.' },
         composition: { type: 'string', description: 'Framing, setting, spatial contacts and art direction, phrased as what is visible.' },
         action: { type: 'string', description: 'One observable action in the present tense, in order and sized to the shot (for LTX: the motion that follows the start frame); auto uses character action to select H3.' },
-        camera: { type: 'string', description: 'Shot size and one camera move relative to the subject, or a static camera; auto uses camera-led scenery to select LTX.' },
+        camera: { type: 'string', description: 'Shot size and one camera move relative to the subject, or a static camera; auto uses camera-led scenery to select LTX. ' + LTX_SHOT_GUIDANCE },
         soundscape: { type: 'string', description: 'Physical/native diegetic audio direction for H3 (ambience, contact sounds); score belongs in finishing. Wordless never means silent.' },
         characterCount: { type: 'integer', minimum: 0 },
         image: { type: 'string', description: 'Picture 1 subject/identity image asset id; LTX start art when reference is absent.' },

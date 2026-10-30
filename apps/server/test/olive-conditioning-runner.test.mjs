@@ -2,13 +2,14 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
+import { tmpdir } from 'node:os';
 import { createCpuAgentRunner } from '../src/agent-runner.mjs';
 import { compilePackage } from '../src/compile-package.mjs';
 import { replayProvider } from './fake-provider.mjs';
 import { OLIVE_BRIEF, OLIVE_IMAGE, OLIVE_VIDEO, OLIVE_PROPOSE } from '../../../packages/agent/dist/test/fixtures/olive-action.js';
 
 test('offline olive Action replay stays subject-neutral through server enforcement and compilation', async t => {
-  const runtimeDir = mkdtempSync(join(new URL('../../../.tmp/', import.meta.url).pathname, 'olive-conditioning-'));
+  const runtimeDir = mkdtempSync(join(tmpdir(), 'olive-conditioning-'));
   let conditioningId;
   const provider = await replayProvider([
     { name: 'storyboard.propose', args: OLIVE_PROPOSE },

@@ -12,6 +12,8 @@ import { COPY as EASY_COPY } from '../copy.ts';
 import { renderSuperEasyDoneActions } from './escape.ts';
 import { escapeHtml, renderProgressBar } from '../components.ts';
 import { agentConsoleMarkup } from '../agent-console.ts';
+import { readGalleryAssetDetails, safeGalleryUrl } from './gallery-asset.ts';
+import { renderProjectNavigation } from '../../project-gallery-navigation.ts';
 import {
   readStages,
   STAGE_STATUS_TEXT,
@@ -33,6 +35,7 @@ export interface SuperEasyProgressFailure {
 }
 
 export interface SuperEasyProgressViewOptions {
+  reviewRepair?: 'ready' | 'unavailable' | 'hidden';
   /** Precomputed stage model, so frequent updates do not read the snapshot twice. */
   stages?: StagesProgress;
   /** Precomputed gallery model, built from the same snapshot by the caller. */
@@ -182,22 +185,25 @@ ${error}
 }
 
 function mediaMarkup(item: GalleryItem): string {
-  if (item.state !== 'ready' || item.url === null) {
+  const url = safeGalleryUrl(item.url);
+  if (url === null) {
     return `<span class="super-easy-progress-slot-placeholder" data-slot-state="${item.state}" aria-hidden="true"></span>`;
   }
-  const src = escapeHtml(item.url);
+  // Authenticated endpoints are loaded by the mount into scoped blob URLs.
+  const src = /^(?:blob:|data:)/u.test(url) ? ` src="${escapeHtml(url)}"` : '';
+  const binding = `data-gallery-media="${escapeHtml(item.id)}"`;
   const label = escapeHtml(item.label);
-  if (item.kind === 'voice') {
-    return `<audio class="super-easy-progress-slot-audio" controls preload="none" src="${src}" aria-label="${label}"></audio>`;
+  if (item.details?.mediaType === 'audio' || item.kind === 'voice') {
+    return `<audio class="super-easy-progress-slot-audio" controls preload="none" ${binding}${src} aria-label="${label}"></audio>`;
   }
-  if (item.kind === 'final' || VIDEO_URL.test(item.url)) {
-    return `<video class="super-easy-progress-slot-video" controls preload="none" playsinline src="${src}" aria-label="${label}"></video>`;
+  if (item.details?.mediaType === 'video' || item.kind === 'final' || VIDEO_URL.test(url)) {
+    return `<video class="super-easy-progress-slot-video" ${item.kind === 'final' ? 'controls' : 'muted'} preload="metadata" playsinline ${binding}${src} aria-label="${label}"></video>`;
   }
-  return `<img class="super-easy-progress-slot-image" src="${src}" alt="${label}" loading="lazy" decoding="async" />`;
+  return `<img class="super-easy-progress-slot-image" ${binding}${src} alt="${label}" loading="lazy" decoding="async" />`;
 }
 
 function slotKey(item: GalleryItem): string {
-  return `${item.id}|${item.kind}|${item.state}|${item.url ?? ''}|${item.label}|${item.highlighted ? 1 : 0}|${item.reason ?? ''}`;
+  return `${item.id}|${item.kind}|${item.state}|${safeGalleryUrl(item.url) ?? ''}|${item.label}|${item.highlighted ? 1 : 0}|${item.reason ?? ''}|${JSON.stringify(readGalleryAssetDetails(item.details) ?? {})}`;
 }
 
 function slotMarkup(item: GalleryItem): string {
@@ -209,7 +215,8 @@ function slotMarkup(item: GalleryItem): string {
     : `<p class="super-easy-progress-slot-reason">${escapeHtml(item.reason)}</p>`;
   return `<li class="${classes.join(' ')}" data-super-easy-gallery-item="${escapeHtml(item.id)}" data-gallery-item-key="${escapeHtml(slotKey(item))}" data-gallery-kind="${item.kind}" data-gallery-state="${item.state}"${highlighted}>
 <div class="super-easy-progress-slot-media">${mediaMarkup(item)}</div>
-<p class="super-easy-progress-slot-label">${escapeHtml(item.label)}</p>
+<p class="super-easy-progress-slot-label"><button type="button" class="super-easy-gallery-inspect" data-super-easy-inspect="${escapeHtml(item.id)}" aria-haspopup="dialog" aria-label="Inspect ${escapeHtml(item.label)}">${escapeHtml(item.label)} · Details</button></p>
+${item.details?.role === 'reference' ? '<p class="super-easy-gallery-role">Conditioning reference · not a generated clip</p>' : ''}
 ${reason}
 </li>`;
 }
@@ -391,7 +398,11 @@ ${gallerySlots.map((slot) => slot.html).join('\n')}
 </div>`;
   const studioHtml = finalReady ? '' : `<div class="super-easy-progress-mode-actions"><button type="button" class="btn btn-secondary" data-super-easy-more-control>${escapeHtml(COPY.done.openStudio)}</button><span class="hint">Switch views without stopping your work.</span></div>`;
   const recoveryHtml = recoveryText ? `<p data-super-easy-recovery-status>${escapeHtml(recoveryText)}</p>${!finalReady && !failure ? '<button type="button" class="btn btn-primary" disabled>Recovering downloaded outputs…</button><p>Uses downloaded files; no new generation credits.</p>' : ''}` : '';
-  const actionsHtml = `${studioHtml}${recoveryHtml}${primaryActionsHtml}${startOverHtml}`;
+  const reviewRepairHtml = options.reviewRepair === 'ready'
+    ? '<button type="button" class="btn btn-secondary" data-super-easy-review-repair>Review &amp; repair</button>'
+    : finalReady && options.reviewRepair === 'unavailable'
+      ? '<p>Review &amp; repair needs a verified final export matching the current saved project.</p>' : '';
+  const actionsHtml = `${studioHtml}${recoveryHtml}${primaryActionsHtml}${reviewRepairHtml}${startOverHtml}`;
 
   const keys: SuperEasyProgressKeys = {
     live: recoveryText + progressLiveKey(stages, gallery, {
@@ -400,11 +411,12 @@ ${gallerySlots.map((slot) => slot.html).join('\n')}
     }),
     chrome: chromeKeyOf(stages, finalReady),
     gallery: galleryKeyOf(gallery),
-    actions: recoveryText + actionsKeyOf(finalReady, gallery, previewReady, failure, options),
+    actions: (options.reviewRepair ?? 'hidden') + recoveryText + actionsKeyOf(finalReady, gallery, previewReady, failure, options),
   };
 
   const html = `<section class="${rootClasses.join(' ')}"${reducedAttribute} data-super-easy-progress data-super-easy-live-key="${escapeHtml(keys.live)}" data-super-easy-chrome-key="${escapeHtml(keys.chrome)}" data-super-easy-gallery-key="${escapeHtml(keys.gallery)}" data-super-easy-actions-key="${escapeHtml(keys.actions)}" aria-labelledby="super-easy-progress-title">
 ${superEasyBrandMarkup()}
+<nav class="super-easy-project-navigation" aria-label="Projects and gallery">${renderProjectNavigation({ search: options.search })}</nav>
 <h1 class="super-easy-progress-title" id="super-easy-progress-title">${escapeHtml(COPY.making.title)}</h1>
 <p class="super-easy-progress-subtitle">${escapeHtml(COPY.making.subtitle)}</p>
 ${agentConsoleMarkup()}

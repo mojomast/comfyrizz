@@ -75,7 +75,7 @@ test('six product views keep materials/native-only text; final clip replacement 
     }));
     const image = images[i];
     assert.doesNotMatch(image.caption, /as clay|editorial 3D|all labels exactly|exact layout/);
-    assert.match(image.caption, /no text, no letters/);
+    assert.match(image.caption, /plain, unmarked surfaces/);
     assert.notEqual(image.asset.gen.inputs.text, true);
     videos.push(await call('assets.generate_video', direction(image.asset.id, { scene_id: `s${i + 1}` })));
   }
@@ -103,8 +103,8 @@ test('explicit styled label references and labelled sketches still opt into gene
   assert.match(base.caption, /glass/);
   for (const flag of [{ text: true }, { labelled: true }]) {
     const edit = await call('assets.generate_image', { scene_id: 's1', placement: 'foreground', refs: [base.asset.id], intent: 'A diagram labelled "INPUT".', style: 'clay', ...flag });
-    assert.match(edit.caption, /as clay/);
-    assert.match(edit.caption, /all labels exactly as written/);
+    assert.match(edit.caption, /Requested rendering style: clay/);
+    assert.match(edit.caption, /Preserve supplied lettering verbatim/);
     assert.equal(edit.asset.gen.inputs.text, true);
     const { plan } = await inspect(get());
     assert.equal(plan.jobs.find((job: any) => job.asset === edit.asset.id).allowText, true);

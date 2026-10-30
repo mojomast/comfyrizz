@@ -219,10 +219,11 @@ works. A few properties worth keeping:
 ## Two-stage LTX geometry
 
 The LTX graph (`workflows/ltx25_*_2stage.api.json`) renders stage 1 at *half* the finished size and a
-latent upsampler doubles it back, so a planned 960x544 must reach the graph's stage-1 latent (node 8)
-and its i2v image scale (node 31) as 480x272. The plan states both numbers — `job.dims` is the frame
-the package asked for, `job.stage1Dims` is the lattice the graph renders — and every LTX params map
+latent upsampler doubles it back. Final dimensions must be divisible by 64, so the stage-1 latent
+(node 8) and i2v image scale (node 31) are divisible by 32. The default is 512x288 -> 1024x576
+(exact 16:9); a requested 960x544 resolves to 960x576, with a 480x288 base. A 480x272 base is invalid.
+The plan states both numbers — `job.dims` is the generated raster before delivery framing,
+`job.stage1Dims` is the lattice the graph renders — and every LTX params map
 derives the stage-1 value from the planned one with a `{mul: 0.5}` target, so the map cannot disagree
 with the plan. A planned size sent whole to node 8 came back at 2x on the GPU test 2 run (issue 3),
 and an unmapped node 31 kept the graph's own 960x544 whatever the plan said (issue 4).
-

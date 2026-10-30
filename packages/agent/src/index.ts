@@ -38,6 +38,7 @@ export type { VideoType, VideoTypeDefinition } from './video-types.js';
 export { MOTION_MODELS, parseMotionModel, autoMotionModel, resolveShotMotionModel } from './motion-model.js';
 export type { MotionModel, ResolvedMotionModel, AutoResolvedMotionModel, ShotMotionDirection } from './motion-model.js';
 export { runAgent } from './agent.js';
+export { MODEL_QUALITY_GUIDANCE } from './prompts/model-quality.js';
 export { RENDER_LOCATIONS, DEFAULT_RENDER_LOCATION } from './render-location.js';
 export type { RenderLocation } from './render-location.js';
 export { runCpuSlice, defaultCpuScript } from './cpu-slice.js';

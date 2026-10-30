@@ -36,9 +36,10 @@
       <section class="stats" aria-label="Invite totals">
         <div class="stat"><div class="stat-label">TOTAL INVITES <span>↗</span></div><strong id="total-invites">—</strong><small>Links created</small></div>
         <div class="stat"><div class="stat-label">CU ALLOCATED <span>◈</span></div><strong id="total-budget">—</strong><small>Across all invites</small></div>
-        <div class="stat"><div class="stat-label">CU USED <span>◌</span></div><strong id="total-spent">—</strong><small>Estimated usage</small></div>
+        <div class="stat"><div class="stat-label">CU CHARGED <span>◌</span></div><strong id="total-spent">—</strong><small>Recorded charges; may include estimates</small></div>
         <div class="stat"><div class="stat-label">CU RESERVED <span>◷</span></div><strong id="total-reserved">—</strong><small>Committed to runs</small></div>
       </section>
+      <p id="activity-stats" role="status"></p>
       <div class="layout">
         <section class="panel invites-panel">
           <div class="section-heading"><div><div class="eyebrow">YOUR LINKS</div><h2>Invites <span id="invite-count" class="count">0</span></h2></div><span class="muted">Most recent first</span></div>
@@ -57,7 +58,7 @@
             </form>
             <div id="minted" class="minted" hidden><div class="eyebrow">LINK CREATED</div><p>Copy it now — this link is only shown once.</p><input id="minted-url" readonly aria-label="New invite link"><button class="button secondary wide" id="copy" type="button">Copy invite link</button></div>
           </section>
-          <div class="footnote"><span>✳</span><p>CU values are estimates. A reservation is held for work in progress; actual Colab account usage may differ.</p></div>
+          <div class="footnote"><span>✳</span><p>Reservations remain held when usage is indeterminate, including after a film finishes. Only verified session usage is labeled actual; historical charges may be estimates.</p></div>
         </aside>
       </div>
     </div>

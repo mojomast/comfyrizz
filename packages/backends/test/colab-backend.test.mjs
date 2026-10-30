@@ -147,6 +147,7 @@ test("happy path: preflight, allocate, bootstrap, health, run, verified stop", a
 
   const teardown = await backend.teardown("done");
   assert.equal(teardown.state, "stopped");
+  assert.equal(teardown.shutdownVerified, true);
   assert.match(teardown.evidence, /colab sessions no longer lists/);
 
   const commands = readLog(fake.logPath).map((entry) => entry.argv.join(" "));
@@ -283,6 +284,8 @@ test("teardown of a session we do not own is not_owned, and stops nothing", asyn
   const backend = backendFor(fake, { workspace: ws });
   const teardown = await backend.teardown("user");
   assert.equal(teardown.state, "not_owned");
+  assert.equal(teardown.allocation, 'not_attempted');
+  assert.equal(teardown.shutdownVerified, true);
   assert.match(teardown.evidence, /nothing was stopped/);
   assert.ok(!readLog(fake.logPath).some((entry) => entry.argv[0] === "stop"));
 });

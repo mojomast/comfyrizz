@@ -11,6 +11,7 @@ import { formatSuperEasyLrcErrors, validateSuperEasyLrc } from './lyrics.ts';
 import { narrationPending } from '../narration-status.ts';
 import type { MotionModel } from './setup.ts';
 import type { VideoType } from './video-types.ts';
+import { validFilmTarget, type FilmTarget } from './film-review.ts';
 
 const EMPTY_PROMPT = 'Tell us what your video is about first.';
 const GOOGLE_COLAB_CONFIRM_REQUIRED = 'Google Colab needs your confirmation before it can spend anything. Choose This computer, or confirm Google Colab first.';
@@ -55,14 +56,18 @@ export interface SuperEasyApi {
   dispatchAction(id: string, body: unknown): Promise<unknown>;
   startRun(body: unknown): Promise<unknown>;
   getRun(id: string): Promise<unknown>;
+  getPackage?(id: string): Promise<any>;
+  compilePackage?(body: { package: unknown; revision: number; editor?: unknown }): Promise<any>;
   getRunRecovery?(id: string): Promise<unknown>;
   recoverRunOutputs?(id: string, body: { baseRevision: number }): Promise<unknown>;
   cancelRun?(id: string): Promise<unknown>;
   getRunVideo(id: string): Promise<Blob>;
+  getSavedRenderVideo?(packageId: string, revision: number): Promise<{ blob: Blob; exportId: string }>;
+  getRenderedArtifactVideo?(packageId: string, revision: number, exportId: string): Promise<{ blob: Blob; exportId: string }>;
   generateLocalNarration?(body: { packageId: string; productionId: string; baseRevision: number; recoveryInputs?: unknown }): Promise<any>;
   colabStatus(): Promise<{ backendId?: string } | null>;
-  inviteSession?(): Promise<{ role?: string; backendId?: string; budgetUnits?: number }>;
-  guestResult?(id: string): Promise<{ status: string; url?: string }>;
+  inviteSession?(): Promise<{ role?: string; backendId?: string; budgetUnits?: number; spendEnabled?: boolean; invite?: { status?: string } }>;
+  guestResult?(id: string): Promise<{ status: string; url?: string; [key: string]: unknown }>;
 }
 
 export interface SuperEasyHost {
@@ -89,6 +94,7 @@ export interface SuperEasyRunPollingOptions {
   setTimer?: (callback: () => void, delayMs: number) => unknown;
   isCurrent?(): boolean;
   onRecord?(record: Record<string, unknown>): void;
+  onConnection?(connected: boolean): void;
 }
 
 export interface RunSuperEasyInput {
@@ -133,6 +139,8 @@ export interface RunSuperEasyDeps {
   onPhase?(stage: SuperEasyRunStage): void;
   /** Expose the active run for Stop-and-start-over cancellation. */
   onRunStarted?(runId: string): void;
+  onRunRecord?(record: Record<string, unknown>): void;
+  onRunConnection?(connected: boolean): void;
 }
 
 export type SuperEasyRunFailureCode =
@@ -152,6 +160,7 @@ export type SuperEasyRunFailureCode =
   | 'RUN_FAILED'
   | 'RECOVERY_FAILED'
   | 'FINAL_VIDEO_FAILED'
+  | 'SAVED_VIDEO_UNAVAILABLE'
   | 'LOCAL_RENDER_FAILED';
 
 export interface SuperEasyRunFailure {
@@ -267,7 +276,7 @@ function isPaidAction(action: PlanCard['actions'][number]): boolean {
   return !(action.kind === 'audition' && action.engine === 'kokoro');
 }
 
-function hasPendingGeneratedShots(pkg: unknown): boolean {
+export function hasPendingGeneratedShots(pkg: unknown): boolean {
   if (!isRecord(pkg)) return false;
   const requiredAssetIds = new Set<string>();
   const scenes = Array.isArray(pkg.scenes) ? pkg.scenes : [];
@@ -353,7 +362,7 @@ function terminalRunFailure(run: Record<string, unknown>): string | null {
   const teardown = isRecord(run.teardown) ? run.teardown : null;
   const teardownState = typeof teardown?.state === 'string' ? teardown.state.toLowerCase() : '';
   if (teardownState === 'stop_unconfirmed') return runFailureMessage(run);
-  if (['failed', 'failure', 'error', 'cancelled', 'canceled', 'stopped', 'refused', 'stop_unconfirmed'].includes(status)) {
+  if (['failed', 'failure', 'error', 'cancelled', 'canceled', 'stopped', 'interrupted', 'refused', 'stop_unconfirmed'].includes(status)) {
     return runFailureMessage(run);
   }
   return null;
@@ -381,14 +390,27 @@ export async function pollFinalRun(
   const pollMs = options?.pollMs ?? DEFAULT_RUN_POLL_MS;
   for (;;) {
     if (options?.isCurrent?.() === false) throw new Error('Recovery stopped or the project changed.');
-    const run = runRecordOf(await api.getRun(runId));
+    let body: unknown;
+    try {
+      body = await api.getRun(runId);
+    } catch (error) {
+      if (options?.isCurrent?.() === false) throw new Error('The project changed or observation stopped.');
+      options?.onConnection?.(false);
+      if (Date.now() - startedAt >= timeoutMs) throw new Error('The run connection is unavailable. Its current execution and stop state are unknown; check the existing run before starting another.');
+      await pause(options, pollMs);
+      continue;
+    }
+    const run = runRecordOf(body);
     if (options?.isCurrent?.() === false) throw new Error('Recovery stopped or the project changed.');
+    options?.onConnection?.(true);
+    // Publish the terminal record too: its completed outputs and stop evidence
+    // must remain available even when final rendering fails.
+    options?.onRecord?.(run);
     const failed = terminalRunFailure(run);
     if (failed !== null) throw Object.assign(new TerminalRunError(failed), { recoveryEligible: run.status === 'failed' });
-    options?.onRecord?.(run);
     const status = typeof run.status === 'string' ? run.status.toLowerCase() : '';
     if (status === 'done' || status === 'idle' || status === 'completed') return run;
-    if (!['starting', 'running', 'rendering', 'verifying', 'queued', 'dispatching', 'pending'].includes(status)) {
+    if (!['starting', 'running', 'rendering', 'verifying', 'queued', 'dispatching', 'pending', 'paused', 'stopping', 'cancel_requested'].includes(status)) {
       throw new Error(runFailureMessage(run));
     }
     if (Date.now() - startedAt >= timeoutMs) throw new Error('The final video run timed out.');
@@ -396,7 +418,7 @@ export async function pollFinalRun(
   }
 }
 
-function snapshotWithFinalVideo(snapshot: unknown, videoUrl: string, runId: string | null): unknown {
+function snapshotWithFinalVideo(snapshot: unknown, videoUrl: string, runId: string | null, target?: FilmTarget): unknown {
   const root = isRecord(snapshot) ? snapshot : {};
   return {
     ...root,
@@ -405,6 +427,7 @@ function snapshotWithFinalVideo(snapshot: unknown, videoUrl: string, runId: stri
       status: 'done',
       url: videoUrl,
       runId,
+      ...(validFilmTarget(target) ? { target } : {}),
     },
   };
 }
@@ -424,11 +447,12 @@ async function finishWithVideo(
     source: SuperEasyFinalArtifact['source'];
     productionId: string;
     draftCommand: DraftLevelCommand;
+    target?: FilmTarget;
   },
   deps: RunSuperEasyDeps,
 ): Promise<SuperEasyRunSuccess> {
   const videoUrl = objectUrlFor(input.blob);
-  const snapshot = snapshotWithFinalVideo(input.snapshot, videoUrl, input.runId);
+  const snapshot = snapshotWithFinalVideo(input.snapshot, videoUrl, input.runId, input.target);
   deps.store.patch({ generate: { status: 'done' } });
   return {
     ok: true,
@@ -512,18 +536,20 @@ export async function runSuperEasy(input: RunSuperEasyInput, deps: RunSuperEasyD
   const hosted = input.hostedInvite === true;
   const getProduction = (id: string): Promise<unknown> => hosted && deps.api.getProductionWithEvents
     ? deps.api.getProductionWithEvents(id) : deps.api.getProduction(id);
-  const compute = hosted ? 'colab' : (input.compute ?? 'cpu');
+  let compute = hosted ? 'colab' : (input.compute ?? 'cpu');
   let budgetUnits: number | undefined;
   if (hosted) {
     try {
       const session = await deps.api.inviteSession?.();
       if (session?.role !== 'guest' || session.backendId !== 'colab'
-          || typeof session.budgetUnits !== 'number' || !Number.isFinite(session.budgetUnits) || session.budgetUnits <= 0) {
-        return failure('INVITE_UNAVAILABLE', 'compute', 'This invite is unavailable or has no compute remaining.');
+          || ['expired', 'revoked'].includes(session.invite?.status ?? '')
+          || typeof session.budgetUnits !== 'number' || !Number.isFinite(session.budgetUnits) || session.budgetUnits < 0) {
+        return failure('INVITE_UNAVAILABLE', 'compute', 'This invite is unavailable.');
       }
-      budgetUnits = session.budgetUnits;
+      compute = input.compute === 'cpu' || session.spendEnabled === false || session.invite?.status === 'exhausted' || session.budgetUnits === 0 ? 'cpu' : 'colab';
+      budgetUnits = compute === 'cpu' ? 0 : session.budgetUnits;
     } catch {
-      return failure('INVITE_UNAVAILABLE', 'compute', 'This invite is unavailable or has no compute remaining.');
+      return failure('INVITE_UNAVAILABLE', 'compute', 'This invite is unavailable.');
     }
   }
 
@@ -558,8 +584,8 @@ export async function runSuperEasy(input: RunSuperEasyInput, deps: RunSuperEasyD
   }
 
   const write = (proposalOnly = false): Promise<void> => writePlan(deps.store.get(), {
-    api: deps.api as never,
-    host: deps.host,
+    api: (hosted ? { ...deps.api, getAgentProgress: undefined, cancelAgent: undefined } : deps.api) as never,
+    host: hosted ? { ...deps.host, aiSelection: async () => ({ provider: 'none' }) } : deps.host,
     store: deps.store,
   }, { stopAfterPackage: proposalOnly, deepSeekNoThinking: input.deepSeekNoThinking,
     ...(narrationOnly ? { narrationRevision: { packageId: priorPackage.id, baseRevision: priorPackage.revision, note: lastNote, ...(input.recoveryProductionId ? { recoveryProductionId: input.recoveryProductionId } : {}) } } : {}),
@@ -674,7 +700,9 @@ export async function runSuperEasy(input: RunSuperEasyInput, deps: RunSuperEasyD
   if (compute === 'colab') {
     const easyCard = readPlanCard(snapshot);
     hasPaidWork = easyCard.actions.some(isPaidAction);
-    if (easyCard.actions.length > 0) {
+    // Hosted plans are authored and priced by the server as a single complete
+    // film action. Guests cannot replace them with client-authored plans.
+    if (!hosted && easyCard.actions.length > 0) {
       let envelope: Record<string, unknown>;
       try {
         envelope = finalPlanEnvelope(easyCard, snapshot);
@@ -793,10 +821,14 @@ export async function runSuperEasy(input: RunSuperEasyInput, deps: RunSuperEasyD
 
   if (hasPaidWork) {
     if (runId === null || runId === '') return failure('RUN_ID_REQUIRED', 'run', RUN_ID_REQUIRED);
+    let completed: Record<string, unknown>;
     try {
-      await pollFinalRun(deps.api, runId, input.run);
+      completed = await pollFinalRun(deps.api, runId, { ...input.run,
+        onRecord(record) { deps.onRunRecord?.(record); input.run?.onRecord?.(record); },
+        onConnection(connected) { deps.onRunConnection?.(connected); input.run?.onConnection?.(connected); },
+      });
     } catch (error) {
-      return { ...failure('RUN_FAILED', 'run', messageOf(error, RUN_FAILED)),
+      return { ...failure('RUN_FAILED', 'run', messageOf(error, RUN_FAILED)), retryable: false,
         ...(error instanceof TerminalRunError && error.recoveryEligible ? { failedRunId: runId } : {}) };
     }
     try {
@@ -806,6 +838,7 @@ export async function runSuperEasy(input: RunSuperEasyInput, deps: RunSuperEasyD
         blob,
         runId,
         source: 'run',
+        target: { packageId: completed.packageId as string, expectedRevision: completed.revision as number, renderId: runId },
         productionId,
         draftCommand: built.command,
       }, deps);
@@ -822,6 +855,7 @@ export async function runSuperEasy(input: RunSuperEasyInput, deps: RunSuperEasyD
       blob: rendered.blob,
       runId: null,
       source: 'local',
+      target: { packageId: deps.store.get().packageId!, expectedRevision: rendered.revision, renderId: rendered.renderId ?? '' },
       productionId,
       draftCommand: built.command,
     }, deps);

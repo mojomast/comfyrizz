@@ -2,7 +2,7 @@
  * UX00 project/session contract (comfyrizz.easy-session/v1).
  *
  * Shared by the Super Easy and Studio journeys (UX06, UX07, UX08). It adds no
- * persisted field: `EasyState` in `./types.ts` stays the stored record and
+ * separate authority record: `EasyState` in `./types.ts` stays the stored record and
  * readiness is derived from evidence, never stored as a flag.
  */
 import type { EasyState } from './types.ts';
@@ -87,6 +87,7 @@ export const NEW_PROJECT_RESET = Object.freeze([
   'spendCap',
   'planHash',
   'builtPackageInputsHash',
+  'proposalCheckpoint',
   'plan',
   'generate',
   'review',

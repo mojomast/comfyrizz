@@ -2,6 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
+import { tmpdir } from 'node:os';
 import { createAgentProgress } from '../src/agent-progress.mjs';
 import { coverGeneratedFilmScenes, createCpuAgentRunner, enforceLiveActionHumans, generatedFilmCompletionProblems, withInitialAdmissionRetry, withRepairAdmissionRetry } from '../src/agent-runner.mjs';
 import { replayProvider } from './fake-provider.mjs';
@@ -20,7 +21,7 @@ const shotDirection = scene => ({
 });
 
 async function setup(t, calls) {
-  const runtimeDir = mkdtempSync(join(new URL('../../../.tmp/', import.meta.url).pathname, 'generated-film-runner-'));
+  const runtimeDir = mkdtempSync(join(tmpdir(), 'generated-film-runner-'));
   const provider = await replayProvider(calls);
   const runner = createCpuAgentRunner({ runtimeDir, providers: { custom: { baseUrl: provider.url } } });
   t.after(async () => {

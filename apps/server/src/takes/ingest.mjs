@@ -294,6 +294,17 @@ function warmThumbs(thumbs, source) {
   }
 }
 
+function hasPendingReference(gen, assets, seen = new Set()) {
+  for (const value of Object.values(gen?.inputs ?? {}).flat(Infinity)) {
+    if (typeof value !== 'string' || seen.has(value)) continue;
+    const ref = assets?.[value];
+    if (!ref) continue;
+    seen.add(value);
+    if (ref.status === 'pending' || hasPendingReference(ref.gen, assets, seen)) return true;
+  }
+  return false;
+}
+
 export function ingestRun({ pkg, manifest, jobsDoc, outputDir, store, corrections = {}, runId = null, backend = null, retry = null, autoSelect = true, thumbs = null, references = null } = {}) {
   if (!isObject(pkg) || typeof pkg.id !== 'string' || pkg.id === '') {
     throw new TypeError('ingestRun needs a package with an id');
@@ -350,6 +361,12 @@ export function ingestRun({ pkg, manifest, jobsDoc, outputDir, store, correction
     const assetId = item.asset ?? assetIdOf(jobId);
     const asset = isObject(pkg.assets?.[assetId]) ? pkg.assets[assetId] : null;
     if (!asset) continue;
+
+    // A per-shot preview can omit already-generated conditioning images from
+    // its manifest. Do not mint an immutable take against hash-less references:
+    // the complete collection will ingest it with its actual input identities.
+    // Explicit reference indexes remain supported for historical import tools.
+    if (references === null && hasPendingReference(asset.gen, refs.assets)) continue;
 
     const entry = entries.get(jobId) ?? { job: jobId };
     const job = jobs.get(jobId) ?? null;

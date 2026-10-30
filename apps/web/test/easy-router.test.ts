@@ -4,6 +4,7 @@ import assert from 'node:assert/strict';
 
 import { defaultEasyState } from '../src/easy/store.ts';
 import { initialRoute } from '../src/easy/router.ts';
+import { escapeToSuperEasy, escapeToHome } from '../src/easy/super-easy/escape.ts';
 
 class FakeLocalStorage {
   map = new Map();
@@ -37,6 +38,20 @@ const blocked = {
   exportCurrent: false,
 };
 
+test('returning a saved project to Super Easy preserves reload identity, while Make another clears it', () => {
+  const url = escapeToSuperEasy('?package=p&production=prod_a&step=review', 'p');
+  const params = new URLSearchParams(url);
+  assert.equal(params.get('package'), 'p');
+  assert.equal(params.get('production'), 'prod_a');
+  assert.equal(params.get('view'), 'super-easy');
+  assert.equal(params.has('step'), false);
+  const route = initialRoute(url, { ...defaultEasyState(), packageId: 'p' }, blocked, { preferStudio: true });
+  assert.equal(route.view, 'superEasy');
+  assert.equal(route.home, false);
+  assert.equal(escapeToHome(url), '');
+  assert.equal(initialRoute('?package=p&view=super-easy&step=plan', defaultEasyState(), blocked).view, 'easy');
+});
+
 test('a review link before the plan is approved opens the plan step', () => {
   const state = defaultEasyState();
   state.idea.text = 'A 30-second video for the bakery subscription.';
@@ -55,6 +70,13 @@ test('view=editor opens the editor', () => {
     exportCurrent: false,
   });
   assert.deepEqual({ view: route.view }, { view: 'editor' });
+});
+
+test('hosted guest routes honor explicit editor and Studio steps for the active copy', () => {
+  const state = { ...defaultEasyState(), packageId: 'pkg_guest_copy' };
+  assert.equal(initialRoute('?demo=1&package=pkg_guest_copy&view=editor', state, blocked).view, 'editor');
+  assert.equal(initialRoute('?demo=1&package=pkg_guest_copy&step=plan', state, blocked).view, 'easy');
+  assert.equal(initialRoute('?demo=1&package=pkg_guest_copy', state, blocked).view, 'superEasy');
 });
 
 test('view=editor stays the editor without a package or step', () => {

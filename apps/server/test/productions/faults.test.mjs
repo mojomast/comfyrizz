@@ -589,6 +589,7 @@ function fakePipelineController() {
       const runId = `run_fake_${state.startCalls}`;
       const run = {
         runId,
+        packageId: _pkg?.id,
         status: 'running',
         origin: options.origin,
         runtimes: {},

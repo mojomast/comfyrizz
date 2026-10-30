@@ -52,6 +52,7 @@ test('defaults equal Appendix B', () => {
     spendCap: 15,
     planHash: null,
     builtPackageInputsHash: null,
+    proposalCheckpoint: null,
     plan: { status: 'none', error: null, errorAt: null, wordsChanged: false },
     generate: { status: 'idle' },
     review: { shotId: null },

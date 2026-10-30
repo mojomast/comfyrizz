@@ -4,7 +4,7 @@
 // creative review visible instead of promoting it to a final approval.
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
-import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync, symlinkSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import test from 'node:test';
@@ -49,9 +49,60 @@ function basePackage() {
   return pkg;
 }
 
+test('composition manifest is validated, fingerprinted and frozen with full-render inputs', t => {
+  const { root, packageDir } = workspace(t);
+  const source = join(repo, 'examples/composition-stories');
+  const pkg = JSON.parse(readFileSync(join(source, 'package.json')));
+  const scoped = join(packageDir, 'compositions', pkg.id);
+  mkdirSync(scoped, { recursive: true });
+  const manifestPath = join(scoped, 'manifest.json');
+  const original = readFileSync(join(source, 'compositions/manifest.json'));
+  writeFileSync(manifestPath, original);
+  const snapshot = createDeliverySnapshot({ pkg, packageDir, intent: 'draft' });
+  const path = `compositions/${pkg.id}/manifest.json`;
+  assert.equal(snapshot.inputs.find(input => input.path === path)?.sha256, hash(original));
+  const staged = stageDeliverySnapshot({ snapshot, packageDir, stagingDir: join(root, 'compositions-stage') });
+  assert.deepEqual(readFileSync(join(staged.packageDir, path)), original);
+  const edited = JSON.parse(original);
+  edited.scenes[0].params.title = 'Changed composition';
+  writeFileSync(manifestPath, JSON.stringify(edited));
+  assert.notEqual(createDeliverySnapshot({ pkg, packageDir, intent: 'draft' }).fingerprint, snapshot.fingerprint);
+  assert.throws(() => stageDeliverySnapshot({ snapshot, packageDir, stagingDir: join(root, 'stale-compositions') }), /source changed/);
+  assert.deepEqual(readFileSync(join(staged.packageDir, path)), original);
+  writeFileSync(manifestPath, '{"version":99,"scenes":[]}');
+  assert.throws(() => createDeliverySnapshot({ pkg, packageDir, intent: 'draft' }), /manifest.version/);
+});
+
 function sceneId(pkg) {
   return pkg.scenes[0].id;
 }
+
+test('selected package-owned take bytes are frozen under their original relative render path', t => {
+  const { root, packageDir } = workspace(t);
+  const pkg = basePackage();
+  pkg.id = 'pkg_selected_take';
+  const relative = 'takes/a_selected/tk_123456789abc.mp4';
+  const bytes = Buffer.from('synthetic native-audio take bytes');
+  const own = join(packageDir, pkg.id, 'takes/a_selected');
+  mkdirSync(own, { recursive: true });
+  writeFileSync(join(own, 'tk_123456789abc.mp4'), bytes);
+  pkg.assets.a_selected = { kind: 'video', origin: 'upload', status: 'ready', file: relative, sha256: hash(bytes), bytes: bytes.length };
+  pkg.scenes[0].background = { asset: 'a_selected', muted: false, speed: 1, loop: false };
+  const snapshot = createDeliverySnapshot({ pkg, packageDir });
+  assert.equal(snapshot.inputs.find(input => input.path === relative).sha256, hash(bytes));
+  const staged = stageDeliverySnapshot({ snapshot, packageDir, stagingDir: join(root, 'staged') });
+  assert.deepEqual(readFileSync(join(staged.packageDir, relative)), bytes);
+  assert.equal(JSON.parse(readFileSync(staged.packagePath)).assets.a_selected.file, relative);
+  assert.equal(preflightDelivery(snapshot).blockers.some(item => item.code === 'ACTIVE_MEDIA_MISSING' && item.assetId === 'a_selected'), false);
+  writeFileSync(join(own, 'tk_123456789abc.mp4'), 'overwritten');
+  assert.throws(() => stageDeliverySnapshot({ snapshot, packageDir, stagingDir: join(root, 'changed') }), /source changed/);
+  rmSync(join(own, 'tk_123456789abc.mp4'));
+  const missing = createDeliverySnapshot({ pkg, packageDir });
+  assert.equal(preflightDelivery(missing).blockers.some(item => item.code === 'ACTIVE_MEDIA_MISSING' && item.assetId === 'a_selected'), true);
+  const outside = join(root, 'outside.mp4'); writeFileSync(outside, bytes);
+  symlinkSync(outside, join(own, 'tk_123456789abc.mp4'));
+  assert.throws(() => createDeliverySnapshot({ pkg, packageDir }), /escapes/);
+});
 
 function snapshotFor(pkg, packageDir, overrides = {}) {
   collectMockContribution(pkg, packageDir);

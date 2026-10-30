@@ -1,6 +1,6 @@
 const SAMPLE_RATE = 24000;
 
-type FinishingTheme = 'paper' | 'storm' | 'percussion' | 'noir' | 'score' | 'ambient';
+type FinishingTheme = 'paper' | 'storm' | 'percussion' | 'noir' | 'score' | 'ambient' | 'foley';
 
 function random(seed: number): () => number {
   let state = seed >>> 0 || 1;
@@ -11,6 +11,8 @@ function random(seed: number): () => number {
 }
 
 function finishingTheme(text: string): FinishingTheme {
+  // Negative direction is a constraint, not a positive music keyword.
+  if (/\b(?:no|without)\s+(?:any\s+)?(?:music|musical\s+score|score|soundtrack)\b|\b(?:foley|room tone|sound effects)\s+only\b/.test(text)) return 'foley';
   if (/cartographer|woodcut|eraser|paper|ink|map room/.test(text)) return 'paper';
   if (/salt|brine|storm|squall|rake|thunder/.test(text)) return 'storm';
   if (/prepared.piano|player piano|percussion|floor thump|stomp|call.and.response/.test(text)) return 'percussion';
@@ -44,7 +46,20 @@ export function synthesizeFinishingWav(plan: string, seconds: number, seed = 1):
     noise = noise * 0.985 + white * 0.015;
     let sample = 0;
 
-    if (theme === 'paper') {
+    if (theme === 'foley') {
+      // Quiet non-pitched room texture and isolated physical transients. No
+      // repeating beat, harmonic bed or melodic oscillator in this path.
+      sample += noise * 0.2 + white * 0.002;
+      const drawer = t - duration * 0.27;
+      if (/drawer|slide|scrape/.test(localText) && drawer >= 0 && drawer < 0.8) {
+        sample += noise * Math.sin(Math.PI * drawer / 0.8) * 1.4;
+      }
+      const clink = t - duration * 0.59;
+      if (/clink|utensil|teaspoon|metal|chime/.test(localText) && clink >= 0 && clink < 0.18) {
+        sample += (Math.sin(2 * Math.PI * 2230 * clink) + 0.45 * Math.sin(2 * Math.PI * 3710 * clink)) * Math.exp(-clink * 48) * 0.06;
+      }
+      if (/silence/.test(localText) && t >= duration * 0.8) sample *= Math.max(0, 1 - (t - duration * 0.8) / 0.1);
+    } else if (theme === 'paper') {
       // Dry eraser/paper gestures alternate with uneven woodblock ticks. The
       // erased middle is intentionally sparse instead of resting on a drone.
       const raspCycle = t % 3.75;

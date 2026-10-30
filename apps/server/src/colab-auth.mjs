@@ -7,6 +7,8 @@
 // token must not land in the card or in a log file.
 import { spawn as spawnProcess } from "node:child_process";
 import os from "node:os";
+import { existsSync, readdirSync, readFileSync } from 'node:fs';
+import { join } from 'node:path';
 
 import { redactForLog, resolveColabBinary } from "../../../packages/backends/src/colab-plan.mjs";
 
@@ -17,6 +19,27 @@ export const AUTH_TIMEOUT_MS = 5 * 60 * 1000;
 
 // The local server owns one interactive CLI exchange, even if two tabs open the card.
 let authInFlight = false;
+export const colabAuthInProgress = () => Boolean(authInFlight);
+
+/** Read-only account lifecycle guard. Unknown durable state is not evidence
+ * that changing the shared CLI account is safe. CPU-only work does not bind it. */
+export function colabAccountBusy({ runtimeDir, runs, pipelines, inviteLedger } = {}) {
+  const unresolved = record => record?.backendId !== 'cpu' && (
+    ['allocating', 'starting', 'running', 'rendering', 'reconciling', 'stop_unconfirmed', 'idle'].includes(record?.status)
+    || record?.teardown && !['stopped', 'not_owned', 'not_started'].includes(record.teardown.state)
+    || !record?.teardown && (record?.settlement ?? record?.settled)?.kind !== 'not_allocated');
+  try {
+    if (pipelines?.accountBusy?.() || [...(runs?.runs?.values?.() ?? [])].some(unresolved)
+      || (inviteLedger?.list?.() ?? []).some(invite => invite.committedEstimateCu > 0)) return true;
+    const dir = join(runtimeDir, 'runs');
+    if (existsSync(dir)) for (const id of readdirSync(dir)) {
+      if (!/^run_[a-f0-9]{12}$/.test(id)) continue;
+      const file = join(dir, id, 'state.json');
+      if (existsSync(file) && unresolved(JSON.parse(readFileSync(file, 'utf8')))) return true;
+    }
+    return false;
+  } catch { return true; }
+}
 
 /**
  * Start `colab auth` and stream what it prints.
@@ -29,7 +52,8 @@ let authInFlight = false;
  * @param {string} [opts.home]
  * @param {(argv: string[], opts: object) => any} [opts.spawn]  injectable for tests
  */
-export async function startColabAuth({ onLine = null, home = defaultHome(), spawn = spawnProcess, timeoutMs = AUTH_TIMEOUT_MS } = {}) {
+export async function startColabAuth({ onLine = null, home = defaultHome(), spawn = spawnProcess, timeoutMs = AUTH_TIMEOUT_MS, isBusy = () => false } = {}) {
+  if (isBusy()) return { ok: false, code: null, lines: [], reason: 'Google Colab work or unresolved account reservations prevent changing accounts.', busy: true, errorCode: 'COLAB_ACCOUNT_BUSY' };
   let binary;
   try {
     binary = resolveColabBinary({ home });
@@ -40,7 +64,9 @@ export async function startColabAuth({ onLine = null, home = defaultHome(), spaw
   if (authInFlight) {
     return { ok: false, code: null, lines: [], reason: "Google Colab sign-in is already in progress", busy: true };
   }
-  authInFlight = true;
+  const authToken = Symbol('colab-auth');
+  authInFlight = authToken;
+  const releaseAuth = () => { if (authInFlight === authToken) authInFlight = false; };
 
   return await new Promise((resolve) => {
     const lines = [];
@@ -69,11 +95,11 @@ export async function startColabAuth({ onLine = null, home = defaultHome(), spaw
         if (raw) emit(raw);
       }
     };
-    const finish = (result) => {
+    const finish = (result, release = true) => {
       if (settled) return;
       flush();
       settled = true;
-      authInFlight = false;
+      if (release) releaseAuth();
       if (timer) clearTimeout(timer);
       resolve({ ...result, lines });
     };
@@ -93,13 +119,14 @@ export async function startColabAuth({ onLine = null, home = defaultHome(), spaw
         /* already gone */
       }
       const window = timeoutMs < 60000 ? `${Math.round(timeoutMs / 1000)} seconds` : `${Math.round(timeoutMs / 60000)} minutes`;
-      finish({ ok: false, code: null, reason: `sign-in did not finish within ${window}` });
+      finish({ ok: false, code: null, reason: `sign-in did not finish within ${window}` }, false);
     }, timeoutMs);
 
     child.stdout?.on("data", chunk => relay("stdout", chunk));
     child.stderr?.on("data", chunk => relay("stderr", chunk));
-    child.on("error", (error) => finish({ ok: false, code: null, reason: `could not run the CLI: ${error.message}` }));
+    child.on("error", (error) => finish({ ok: false, code: null, reason: `could not run the CLI: ${error.message}` }, !child.pid));
     child.on("close", (code) => {
+      releaseAuth();
       finish({
         ok: code === 0,
         code,

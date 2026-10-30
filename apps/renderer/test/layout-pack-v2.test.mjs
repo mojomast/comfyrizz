@@ -12,6 +12,7 @@ import { spawnSync } from 'node:child_process';
 import { presenterBox } from '../src/presenter-model.js';
 import { renderPackage } from '../scripts/render-package-lib.mjs';
 import { checkVideo } from '../scripts/frame-qa.mjs';
+import { collectMockContribution } from '../../server/test/helpers/comfy-contribution.mjs';
 
 const CODE = "export function hello() {\n  return 'ok';\n}\n";
 const ASPECTS = {
@@ -186,6 +187,10 @@ test('split, compare and inset render in 16:9, 9:16 and 1:1, and the code scene 
     let landscape = null;
     for (const aspect of Object.keys(ASPECTS)) {
       const pkg = packageFor(aspect, plate);
+      pkg.scenes.find(scene => scene.id === 's_inset').preferredFrames = 60;
+      collectMockContribution(pkg, dir, { sceneId: 's_inset' });
+      // Keep the synthetic contribution clear of the coral inset under test.
+      Object.assign(pkg.scenes[2].foreground.at(-1), { x: 0.5, y: 0.3 });
       const packagePath = join(dir, `package-${aspect.replace(':', '')}.json`);
       const mp4 = join(dir, `${aspect.replace(':', '')}.mp4`);
       writeFileSync(packagePath, JSON.stringify(pkg));

@@ -384,6 +384,7 @@ test('a render function named renderPackage still runs on the server thread', as
     renderScene: renderPackage,
   });
   seedMockContribution(app.store, structuredClone(seed));
+  cpSync(join(repo, 'examples/launch-demo/assets'), join(app.store.dir, 'assets'), { recursive: true });
   const server = createServer(app.handler);
   await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
   t.after(async () => {

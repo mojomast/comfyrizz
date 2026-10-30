@@ -1,5 +1,6 @@
-import { copyFileSync, cpSync, existsSync, mkdirSync, readFileSync, rmSync, statSync } from 'node:fs';
+import { copyFileSync, cpSync, existsSync, mkdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { recordGenerationReceipts, assertModelContribution, recordRenderedContribution } from '../../../packages/jobs/src/model-contribution.mjs';
+import { completedModels } from './invites/model-provenance.mjs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { planJobs } from '../../../packages/jobs/src/index.mjs';
@@ -17,11 +18,43 @@ import { json, writeJson, preparePresenterInputs, correctPresenters, presenterSc
 import { summarizeJobs, syncnetConfigured, SYNCNET_RUNTIME_SKIP_CODE, SYNCNET_SKIP_MESSAGE, musicPerformanceScenes, MUSIC_SYNC_SKIP_CODE, MUSIC_SYNC_SKIP_MESSAGE } from './pipeline-contract.mjs';
 import { assessBudget, nextJobUpperEstimate, rateForGpu, reserveUnitsFor, spendingMinutes, COLLECT_AND_STOP_RESERVE_MINUTES } from '../../../packages/backends/src/budget.mjs';
 import { decideRenderFallback } from '../../../packages/backends/src/colab-render-plan.mjs';
-import { redactForLog } from '../../../packages/backends/src/colab-plan.mjs';
+import { redactForLog, sessionNameFor } from '../../../packages/backends/src/colab-plan.mjs';
+import { sessionUsageAccounting } from '../../../packages/backends/src/session-accounting.mjs';
 import { runColabRender } from './pipeline-colab-render.mjs';
 
 export async function executePipeline(spec, { send = () => {}, signal = new AbortController().signal, runCommand = pipelineCommand, render = renderPipeline, colabFactory = createColabBackend, byoFactory = createByoBackend, qwenRunner = runQwenColab, presenterPreparation = preparePresenterInputs, presenterCorrection = correctPresenters, colabRender = runColabRender } = {}) {
 const { runDir, workDir, plan, runId } = spec;
+// Only server-owned specs/environment select accounting mode. Concurrent invite
+// workers retain their reservation instead of charging overlapping account CU.
+const inviteAccounting = spec.accountingMode === 'invite-reserved' || process.env.COMFYRIZZ_HOSTED_INVITES === '1';
+const runtimeRecords = {}, attemptedRuntimes = new Set();
+const runtimeSession = runtime => sessionNameFor(runtime === 'narration' ? `${plan.packageId}_qwen` : runId);
+const reportRuntime = (runtime, value) => {
+  const record = { ...value, runId, session: runtimeSession(runtime) };
+  runtimeRecords[runtime] = record;
+  send({ kind: 'runtime', runtime, value: record });
+};
+function finishRuntime(runtime, teardown, accountDelta, extra = {}) {
+  const noAllocation = teardown?.allocation === 'not_attempted' && teardown.shutdownVerified === true;
+  const shutdownVerified = teardown?.state === 'stopped' || teardown?.shutdownVerified === true;
+  const state = teardown?.state === 'not_owned'
+    ? inviteAccounting && !shutdownVerified ? 'stop_unconfirmed' : 'stopped'
+    : (teardown?.state ?? 'stop_unconfirmed');
+  reportRuntime(runtime, { ...extra, state, ownership: 'managed', shutdownVerified,
+    allocation: noAllocation ? 'not_attempted' : 'attempted_or_unknown',
+    spentUnits: inviteAccounting ? noAllocation ? 0 : null : accountDelta,
+    accountBalanceDeltaUnits: accountDelta,
+    costSource: noAllocation ? 'verified_no_allocation' : inviteAccounting ? 'account_balance_delta_unattributed' : 'account_balance_delta',
+    ...(teardown?.usageReceipt ? { usageReceipt: teardown.usageReceipt } : {}) });
+  return state;
+}
+function finishUnattemptedRuntimes() {
+  if (!inviteAccounting) return;
+  for (const runtime of Object.keys(runtimeRecords)) {
+    if (!attemptedRuntimes.has(runtime)) finishRuntime(runtime,
+      { state: 'not_owned', allocation: 'not_attempted', shutdownVerified: true }, null);
+  }
+}
 const packagePath = join(workDir, 'package.json');
 let stageId = null;
 const heartbeat = setInterval(() => send({ kind: 'heartbeat', stageId }), 10000);
@@ -43,7 +76,7 @@ const sourceEvent = event => {
   else progress(event.phase ?? id, null, { jobId: event.job ?? null, attemptId: event.attempt ?? null });
   send({ kind: 'task', stageId, detail: event });
   if (event.flagged) send({ kind: 'warning', stageId, code: 'ASR_REVIEW', sceneId: event.sceneId, message: 'Speech recognition flagged this take. Review the transcript; spelling differences can also trigger this flag.' });
-  if (id === 'qwen_finished') send({ kind: 'runtime', runtime: 'narration', value: { state: event.teardown?.state ?? 'stop_unconfirmed', spentUnits: event.spentUnits, costSource: 'account_balance_delta' } });
+  if (id === 'qwen_finished') finishRuntime('narration', event.teardown, event.accountBalanceDeltaUnits ?? event.spentUnits ?? null);
 };
 const command = (bin, args, options = {}) => runCommand(bin, args, { signal, onEvent: sourceEvent, ...options });
 async function stage(id, fn, skip = false) {
@@ -70,13 +103,12 @@ async function releaseHeld(reason) {
   let teardown;
   try { teardown = await backend.teardown(reason); }
   catch (error) { teardown = { state: 'stop_unconfirmed', evidence: error.message }; }
-  const state = teardown?.state === 'not_owned' ? 'stopped' : (teardown?.state ?? 'stop_unconfirmed');
   let spentUnits = null;
   try {
     const after = await backend.usage?.();
     if (Number.isFinite(backend.inspect?.().usageBefore?.balance) && Number.isFinite(after?.balance)) spentUnits = Number((backend.inspect().usageBefore.balance - after.balance).toFixed(3));
   } catch { /* unknown is not zero */ }
-  send({ kind: 'runtime', runtime: 'media', value: { state, ownership: 'managed', spentUnits, costSource: 'account_balance_delta', note: reason } });
+  const state = finishRuntime('media', teardown, spentUnits, { note: reason });
   if (state !== 'stopped') {
     const error = new Error('Google Colab shutdown is unconfirmed');
     error.teardown = teardown;
@@ -86,6 +118,12 @@ async function releaseHeld(reason) {
 }
 
 async function main() {
+  if (inviteAccounting && (plan.options?.backendId === 'colab' || plan.remoteVoice)) {
+    // Missing allocation events after a crash are not proof of zero spend.
+    // Only a terminal worker observation upgrades these placeholders to zero.
+    for (const runtime of ['media', 'narration']) reportRuntime(runtime,
+      { state: 'not_started', ownership: 'managed', spentUnits: null, shutdownVerified: false });
+  }
   let pkg = json(packagePath), renderResult;
   for (const scene of musicPerformanceScenes(pkg)) {
     send({ kind: 'warning', stageId: 'preflight', sceneId: scene.id, code: MUSIC_SYNC_SKIP_CODE, message: MUSIC_SYNC_SKIP_MESSAGE });
@@ -111,8 +149,10 @@ async function main() {
   await stage('narration', async () => {
     if (plan.remoteVoice) {
       const out = join(runDir, 'qwen');
-      send({ kind: 'runtime', runtime: 'narration', value: { state: 'allocating', spentUnits: null } });
-      await qwenRunner({ packagePath, out, units: plan.budget.narrationCeilingUnits, signal, onEvent: sourceEvent });
+      attemptedRuntimes.add('narration');
+      reportRuntime('narration', { state: 'allocating', ownership: 'managed', spentUnits: null, shutdownVerified: false });
+      await qwenRunner({ packagePath, out, units: plan.budget.narrationCeilingUnits, signal, onEvent: sourceEvent,
+        accountingMode: inviteAccounting ? 'invite-reserved' : 'owner-account', runId });
       // Validate all archive paths before extraction. The worker only accepts audio output.
       await command(process.env.COMFYRIZZ_PYTHON || 'python3', ['-c', `import zipfile,pathlib,sys
 with zipfile.ZipFile(sys.argv[1]) as z:
@@ -200,7 +240,7 @@ with zipfile.ZipFile(sys.argv[1]) as z:
     let result, teardown;
     const holdForRender = remoteRender && colab;
     if (holdForRender && typeof backend.setCollectPolicy === 'function') backend.setCollectPolicy('manifest');
-    send({ kind: 'runtime', runtime: 'media', value: { state: 'allocating', ownership: colab ? 'managed' : 'external', spentUnits: null } });
+    reportRuntime('media', { state: 'allocating', ownership: colab ? 'managed' : 'external', spentUnits: null, shutdownVerified: false });
     try {
       if (colab) {
         // PO-3: the ceiling is checked before anything is allocated. `required` is the upper estimate plus
@@ -217,6 +257,7 @@ with zipfile.ZipFile(sys.argv[1]) as z:
           throw new Error(`The account balance (${balance} units) does not cover the estimated ${required} units for this run at ${balanceRate} units/h on ${gpu} (planned ${planned.ratePerHour} + the account's current ${measured ?? 0}), which includes the ${reserveUnitsFor(balanceRate)}-unit collect-and-stop reserve (${COLLECT_AND_STOP_RESERVE_MINUTES} min at ${balanceRate} units/h). Nothing was allocated; reduce the media allocation or top the account up.`);
         }
       }
+      attemptedRuntimes.add('media');
       result = await backend.runPackage(pkg, { workDir, outDir, budget: admission, approved: true, teardownMode: holdForRender ? 'never' : 'done', gateCommand: null, signal, onEvent: sourceEvent });
       teardown = result.teardown;
       if (!result.ok) throw new Error('Media generation did not complete; collected assets are retained for diagnosis');
@@ -237,7 +278,8 @@ with zipfile.ZipFile(sys.argv[1]) as z:
       throw error;
     } finally {
       if (heldBackend) {
-        send({ kind: 'runtime', runtime: 'media', value: { state: 'running', ownership: 'managed', spentUnits: null, costSource: 'account_balance_delta', note: 'Held for the Google Colab render' } });
+        reportRuntime('media', { state: 'running', ownership: 'managed', spentUnits: null, shutdownVerified: false,
+          costSource: inviteAccounting ? 'account_balance_delta_unattributed' : 'account_balance_delta', note: 'Held for the Google Colab render' });
       } else {
         if (!teardown) { try { teardown = await backend.teardown('pipeline cleanup'); } catch (error) { teardown = { state: 'stop_unconfirmed', evidence: error.message }; } }
         let spentUnits = null;
@@ -246,10 +288,11 @@ with zipfile.ZipFile(sys.argv[1]) as z:
         }
         // A rejected allocation never creates an owned runtime. Preserve its real
         // failure (for example, no GPU capacity), just as releaseHeld does above.
-        const state = teardown?.state === 'not_owned' ? 'stopped' : (teardown?.state ?? 'stop_unconfirmed');
-        send({ kind: 'runtime', runtime: 'media', value: { state, ownership: colab ? 'managed' : 'external', spentUnits, costSource: colab ? 'account_balance_delta' : 'external_unknown' } });
+        const state = colab ? finishRuntime('media', teardown, spentUnits)
+          : teardown?.state ?? 'stop_unconfirmed';
+        if (!colab) reportRuntime('media', { state, ownership: 'external', spentUnits: null, costSource: 'external_unknown' });
         if (colab && state !== 'stopped') throw new Error('Media runtime shutdown is unconfirmed');
-        if (colab && spentUnits !== null && spentUnits > ceiling) throw new Error('Media spend exceeded its allocation; no further work will start');
+        if (colab && !inviteAccounting && spentUnits !== null && spentUnits > ceiling) throw new Error('Media spend exceeded its allocation; no further work will start');
       }
     }
     const collected = colab ? join(scratch, 'out') : outDir;
@@ -377,8 +420,20 @@ with zipfile.ZipFile(sys.argv[1]) as z:
       }
       if (Object.values(report.checks).some(value => !value)) throw new Error('Final video verification failed');
       const verifiedPackage = json(packagePath);
+      const verifiedTimeline = renderResult.timeline ?? compileTimeline(verifiedPackage, narrationOptions(workDir));
       report.modelContribution = recordRenderedContribution({ pkg: verifiedPackage, packageDir: workDir,
-        timeline: compileTimeline(verifiedPackage, narrationOptions(workDir)), videoPath: join(runDir, 'video.mp4') });
+        timeline: verifiedTimeline, videoPath: join(runDir, 'video.mp4') });
+      // Preserve the exact fresh publication inputs, never reconstruct them from
+      // an editable project on a later review request. Pipeline completion still
+      // requires successful export and clean worker exit; this is not an r_/run_
+      // artifact alias or evidence that the pipeline has completed.
+      writeFileSync(join(runDir, 'render-input.json'), JSON.stringify({
+        schema: 'comfyrizz.pipeline-render-input/v1', runId, packageId: verifiedPackage.id,
+        package: verifiedPackage, timeline: verifiedTimeline,
+        render: { bytes: renderResult.bytes, frames: renderResult.frames,
+          package_sha256: report.modelContribution.packageHash, timeline_sha256: report.modelContribution.timelineHash,
+          video_sha256: report.modelContribution.videoSha256 },
+      }), { flag: 'wx', mode: 0o600 });
     } catch (error) {
       report.error = error.message;
       if (plan.voiced && report.checks.narrationEnvelope === undefined) report.checks.narrationEnvelope = false;
@@ -403,7 +458,11 @@ with zipfile.ZipFile(sys.argv[1]) as z:
  for a in p['assets'].values():
   if a.get('file') and a.get('sha256'): assert hashlib.sha256(z.read(a['file'])).hexdigest()==a['sha256']`, join(target, 'package.zip')]);
     const files = json(join(runDir, 'export.json')).files.map(file => ({ name: file.name, bytes: file.bytes, url: `/api/pipeline/${runId}/files/${file.name}` }));
-    send({ kind: 'result', result: { packageId: pkg.id, baseRevision: plan.baseRevision, inputHash: plan.inputHash, frames: renderResult.frames, fps: renderResult.fps, renderLocation: renderResult.location ?? 'local', files, packageUrl: `/api/pipeline/${runId}/package`, verificationUrl: `/api/pipeline/${runId}/verification` } });
+    finishUnattemptedRuntimes();
+    send({ kind: 'result', result: { ...(inviteAccounting ? { accounting: plan.options?.backendId === 'cpu'
+      ? { status: 'not_required', actualSpendCu: 0, costSource: 'cpu_no_colab_spend' }
+      : sessionUsageAccounting({ runId, runtimes: runtimeRecords, budget: plan.budget }) } : {}),
+      models: completedModels(pkg, json(join(runDir, 'verification.json')).modelContribution), packageId: pkg.id, baseRevision: plan.baseRevision, inputHash: plan.inputHash, frames: renderResult.frames, fps: renderResult.fps, renderLocation: renderResult.location ?? 'local', files, packageUrl: `/api/pipeline/${runId}/package`, verificationUrl: `/api/pipeline/${runId}/verification` } });
   });
 }
 
@@ -413,6 +472,7 @@ catch (error) {
     try { await releaseHeld(signal.aborted ? 'cancelled' : 'pipeline cleanup'); }
     catch { /* releaseHeld already reported an unconfirmed stop */ }
   }
+  finishUnattemptedRuntimes();
   send({ kind: signal.aborted ? 'cancelled' : 'failed', stageId, code: signal.aborted ? 'CANCELLED' : 'STAGE_FAILED', message: signal.aborted ? 'Pipeline cancelled. Check the runtime states for shutdown confirmation.' : error.message });
   return 1;
 } finally {
@@ -454,10 +514,11 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
         const teardown = check.clean ? { state: 'stopped', evidence: 'Runtime no longer listed by Google Colab' }
           : check.ours ? await backend.teardown('pipeline reconciliation')
           : { state: 'stop_unconfirmed', evidence: check.note, orphans: check.orphans, manual: 'colab sessions; colab stop -s <name> for any session this run created' };
-        send({ kind: 'runtime', runtime, value: { ...value, state: teardown.state === 'stopped' ? 'stopped' : 'stop_unconfirmed', evidence: teardown.evidence } });
+        send({ kind: 'runtime', runtime, value: { ...value, state: teardown.state === 'stopped' ? 'stopped' : 'stop_unconfirmed',
+          shutdownVerified: teardown.state === 'stopped', evidence: teardown.evidence } });
         if (teardown.state !== 'stopped') process.exitCode = 1;
       } catch (error) {
-        send({ kind: 'runtime', runtime, value: { ...value, state: 'stop_unconfirmed', evidence: error.message } }); process.exitCode = 1;
+        send({ kind: 'runtime', runtime, value: { ...value, state: 'stop_unconfirmed', shutdownVerified: false, evidence: error.message } }); process.exitCode = 1;
       }
     }
   } else process.exitCode = await executePipeline(spec, { signal: abort.signal, send });

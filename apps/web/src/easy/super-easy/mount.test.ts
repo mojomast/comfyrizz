@@ -974,7 +974,7 @@ test('Easy delegates first paint to Super Easy and releases the player first', (
 
   assert.doesNotMatch(superEasy, /preview-slot|adoptPlayer|releasePlayer/u);
   assert.doesNotMatch(superEasy, /data-easy-player|playerElement/u);
-  assert.doesNotMatch(superEasy, /Google Colab/u);
+  assert.doesNotMatch(superEasy, /\/api\/colab\//u, 'the shell never manages backend connections');
 });
 
 function richRoot() {

@@ -1,8 +1,7 @@
-// UX05 baseline: undo after a successful autosave must not restore an obsolete CAS revision.
+// UX05 regression: undo after a successful autosave must not restore an obsolete CAS revision.
 //
-// Audit finding (P1): `apps/web/src/editor/store.ts` keeps the acknowledged
-// server revision inside undoable document content, so edit -> save -> undo ->
-// save sends the pre-save revision and the server answers with a conflict.
+// Original audit finding (P1): the store kept the acknowledged server revision
+// inside undoable content, so undo -> save sent a stale revision and conflicted.
 //
 // The server here is a faithful compare-and-set fake (accept only when
 // baseRevision equals the stored revision). It is the editor's real store and
@@ -13,7 +12,6 @@ import { test } from 'node:test';
 import { createEditorStore } from '../../apps/web/src/editor/store.ts';
 import { createAutosave } from '../../apps/web/src/editor/autosave.ts';
 import { createMemoryDraftStore } from '../../apps/web/src/editor/recovery.ts';
-import { knownDefect } from '../lib/known-defect.mjs';
 
 function harness() {
   const store = createEditorStore({
@@ -64,24 +62,24 @@ test('CONTROL: a genuine second-writer conflict is still reported (conflicts are
   assert.equal(server.conflicts, 1);
 });
 
-test('UX05 baseline: edit -> save -> undo -> save -> redo -> save advances the revision with no false conflict', async t => {
+test('UX05 regression: edit -> save -> undo -> save -> redo -> save advances the revision with no false conflict', async () => {
   const { store, server, autosave, headline } = harness();
-  await knownDefect(t, { packet: 'UX05', finding: 'undo restores obsolete CAS revision' }, async () => {
-    store.dispatch({ type: 'SetSceneCopy', sceneId: 's1', copy: { headline: 'Edited' } });
-    await autosave.flush();
-    assert.equal(store.saveStatus(), 'saved');
-    store.undo();
-    assert.equal(headline(), 'Start');
-    await autosave.flush();
-    assert.equal(server.conflicts, 0, `undo save sent baseRevision ${server.saves.at(-1)} against server revision ${server.revision}`);
-    assert.equal(store.saveStatus(), 'saved');
-    assert.equal(server.headline, 'Start');
-    store.redo();
-    await autosave.flush();
-    assert.equal(server.conflicts, 0);
-    assert.equal(store.saveStatus(), 'saved');
-    assert.equal(server.headline, 'Edited');
-    assert.equal(server.revision, 4);
-    assert.equal(store.getState().doc.package.revision, 4);
-  });
+  store.dispatch({ type: 'SetSceneCopy', sceneId: 's1', copy: { headline: 'Edited' } });
+  await autosave.flush();
+  assert.equal(store.saveStatus(), 'saved');
+  store.undo();
+  assert.equal(headline(), 'Start');
+  await autosave.flush();
+  assert.equal(server.conflicts, 0, `undo save sent baseRevision ${server.saves.at(-1)} against server revision ${server.revision}`);
+  assert.equal(store.saveStatus(), 'saved');
+  assert.equal(server.headline, 'Start');
+  store.redo();
+  assert.equal(headline(), 'Edited');
+  await autosave.flush();
+  assert.equal(server.conflicts, 0);
+  assert.equal(store.saveStatus(), 'saved');
+  assert.equal(server.headline, 'Edited');
+  assert.deepEqual(server.saves, [1, 2, 3], 'every save uses the latest acknowledged CAS revision');
+  assert.equal(server.revision, 4);
+  assert.equal(store.getState().doc.package.revision, 4);
 });

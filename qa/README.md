@@ -77,13 +77,13 @@ is broken.
 
 | packet | where | what it reproduces today |
 | --- | --- | --- |
-| UX01 | `qa/tests/ux01-admission.baseline.test.mjs` | an active, paused or cancelled bound production still launches `/api/pipeline` (202, one launch) |
+| UX01 (fixed) | `qa/tests/ux01-admission.baseline.test.mjs` | active, paused and cancelled bound productions refuse unauthorized starts with zero dispatches. Unbound native-only input fails contribution admission; a pending supported plate admits through the counting launcher with the explicit clip-review override |
 | UX09 (fixed) | `qa/tests/ux09-scope.baseline.test.mjs` | landed in UX09 and unwrapped: viewer `iterationScope` propagated; named ids accepted; paused/unrelated/build-before-read ordinary-tool mutation refused with shared codes. Now ordinary regressions |
-| UX05 | `qa/tests/ux05-undo-save.baseline.test.mjs`, `apps/web/e2e/acceptance/ux05-undo-save.spec.ts` | edit, save, undo sends the stale CAS revision (browser: the undo is never saved) |
+| UX05 (Node fixed) | `qa/tests/ux05-undo-save.baseline.test.mjs` | ordinary regression: edit/save/undo/save/redo/save preserves content and advances CAS revisions without false conflicts; genuine second-writer conflicts still fail |
 | UX06 | `apps/web/e2e/acceptance/ux06-first-result.spec.ts` | Super Easy CPU build ends on "Making your video 0%": no Review/Export handoff, no escape control |
-| finding | `qa/tests/easy-steps-glob.baseline.test.mjs` | `easy/steps/index.ts` globs `*.test.ts` into the app (see Limitations) |
+| UX20 finding (fixed) | `qa/tests/easy-steps-glob.baseline.test.mjs` | ordinary regression: the eager step glob excludes `*.test.ts`; the control detects the original broad-glob defect |
 
-The Node baselines use `knownDefect(t, { packet, finding }, assertion)`. The
+Historical Node baselines used `knownDefect(t, { packet, finding }, assertion)`. The
 assertion states the required behavior. While the defect exists it fails with an
 `AssertionError` and is reported as reproduced. Anything else (a TypeError, a
 timeout) is rethrown as a harness bug. When the assertion starts passing the
@@ -99,11 +99,40 @@ Converting a baseline when your packet lands:
    regression. Keep the CONTROL.
 3. Add your packet's own cases next to it. Extend the helpers rather than copying them.
 
-Verified now: `QA_EXPECT_FIXED=UX01` fails the 3 UX01 baselines,
-`UX05` fails 1 (node), and `all` fails 5 Node baselines. The 4 UX09 baselines were
-unwrapped when UX09 landed and now pass with or without `QA_EXPECT_FIXED=UX09`. Unwrapped, the browser
-UX05 and UX06 baselines fail for the audited reason (the undo is not saved; no
-handoff or escape control appears).
+### Integration refresh (2026-10-30)
+
+`pnpm test:qa`: **41 passed, 0 failed, 0 skipped**. The preceding run had
+38 passes and three stale-expectation failures. UX20 and UX05 now use permanent
+assertions without `knownDefect`; their controls and behavior checks remain.
+Browser acceptance was not rerun in this refresh.
+
+The UX01 control checks native-only rejection (`422`,
+`COMFY_MODEL_CONTRIBUTION_REQUIRED`), zero dispatches, no run record and unchanged
+package content. Positive unbound compatibility uses the shared
+`plannedContribution` fixture with a pending supported plate. It first verifies
+the clip-review refusal, then uses the existing explicit, journaled review
+override to reach exactly one fake launcher invocation. Backend requests remain
+empty, and model-contribution verification remains false before and after
+admission. No completed media, generation receipts or final-render receipts are
+fabricated; the egress guard stays active.
+
+Code comparison establishes these as **pre-existing on `origin/main`**
+(`61c5d5d`), rather than regressions introduced by the reviewed-delivery branch:
+
+- `origin/main` already excludes tests in the step glob, but retains the UX20
+  expected-defect wrapper.
+- `origin/main` already reapplies the acknowledged revision in undo/redo, but
+  retains the UX05 expected-defect wrapper.
+- `origin/main` already requires a planned model contribution in
+  `pipeline-contract.mjs`, while the UX01 control still expects the native-only
+  launch-demo fixture to start. The contract and original UX01 test match the
+  branch's committed versions.
+
+The local `main` ref (`8cdd1f6`) is older: it lacks these QA tests, the step
+registry and the contribution-policy module. Its editor store still restores
+historical package revisions during undo/redo. Thus local `main` is not the
+upstream baseline for these three QA failures. This attribution is based on
+source comparison, not a separate upstream test run.
 
 ## Helpers for later packets
 
@@ -148,14 +177,9 @@ the browser itself decoded, so a test proves which take a player really loaded.
   or the planning-failure retry path.
 - Fault injection before and after dispatch, selection commit and export commit is
   not built. It is the natural next extension (UX03, UX15, UX16).
-- Product defect found while building this: `apps/web/src/easy/steps/index.ts` uses
-  `import.meta.glob('./*.ts', { eager: true })`, which also loads `steps/*.test.ts`.
-  Those import `node:test`, so the dev app throws `test is not a function` on load
-  and every browser e2e under `apps/web/e2e` fails on this base. The acceptance
-  Vite wrapper (`e2e/acceptance/vite.acceptance.config.ts`) stubs `node:test` for
-  test-file importers only, leaving product code untouched. The Node baseline
-  `easy-steps-glob` marks the defect; remove the wrapper plugin once the glob
-  excludes tests.
+- The historical broad-glob startup defect is fixed and covered by the Node
+  `easy-steps-glob` regression. The acceptance Vite wrapper's `node:test` workaround
+  was not changed or revalidated by the Node-only integration refresh.
 - Observation, not asserted: during the Super Easy run the page keeps polling
   `GET /api/productions/:id` and receives 401 responses.
 - `apps/server/src/app.mjs` and `apps/web/src/main.ts` are not modified.

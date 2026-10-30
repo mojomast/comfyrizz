@@ -5,6 +5,7 @@ import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { validatePackage } from '../src/index.mjs';
 import { VOICE_PRESETS } from '../../tts/voices.mjs';
+import { resolvePython } from '../../../scripts/py.mjs';
 
 const fixture = JSON.parse(readFileSync(new URL('../fixtures/valid/minimal.json', import.meta.url)));
 test('every selectable voice preset is valid production input', () => {
@@ -30,10 +31,10 @@ test('Python and JavaScript agree on new voice settings, including malformed ble
     { enabled: true, engine: 'kokoro', voice: 'am_michael', blend: [{ voice: 'am_michael', weight: .7 }, { voice: 'bf_emma', weight: .3 }] }];
   const docs = voices.map(voice => ({ ...structuredClone(fixture), voice }));
   const root = fileURLToPath(new URL('../../../', import.meta.url));
-  const result = spawnSync(`${root}.venv/bin/python`, ['-c', 'import sys,json;from comfyrizz_pipeline.schema import validate_package;print(json.dumps([validate_package(p) for p in json.load(sys.stdin)]))'], {
+  const result = spawnSync(resolvePython({ rootDir: root }), ['-c', 'import sys,json;from comfyrizz_pipeline.schema import validate_package;print(json.dumps([validate_package(p) for p in json.load(sys.stdin)]))'], {
     input: JSON.stringify(docs), encoding: 'utf8', env: { ...process.env, PYTHONPATH: `${root}pipeline-py` },
   });
-  assert.equal(result.status, 0, result.stderr);
+  assert.equal(result.status, 0, result.error?.message ?? result.stderr);
   JSON.parse(result.stdout).forEach((py, i) => {
     const js = validatePackage(docs[i]);
     assert.equal(py.valid, js.valid, `voice case ${i}`);
