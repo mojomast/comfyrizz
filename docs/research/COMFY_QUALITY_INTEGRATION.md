@@ -149,10 +149,12 @@ zero-CU. This is an operational limitation, not verified actual reconciliation.
 - Renderer full run after fixes: **339 passed, 2 failed, 2 skipped**. Both remaining
   failures were intermittent `QA_FLASH` findings and passed in the focused run;
   their investigation remains separate from a green full-suite claim.
-- The preceding server broad run had **2,363 passed, 12 failed, 8 skipped**.
-  Follow-up staging/reference fixes and saved-drawing CAS coverage addressed the
-  remaining failures; hosted HTTP checks passed **3/3** on the merged branch.
-  A fresh full run is required before recording a green integration result.
+- The final server broad run passed **2,436 with 0 failures and 8 skipped**. Two
+  later, narrowly scoped server changes (owner production binding and the
+  same-host private-demo origin rule) were covered by focused server/hosted
+  checks and live verification; the broad run predates only those two edits.
+- The final web suite passed **1,756 with 0 failures and 1 skipped**; the
+  production build and release scan pass.
 - Saved-drawing changes passed **42 agent checks** and **4 finished-package chat
   checks**, including preserving concurrent edits on CAS conflict.
 - Release scan passed after integration; final navigation changes require another

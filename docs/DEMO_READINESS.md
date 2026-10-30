@@ -40,6 +40,21 @@ selection.
 - The render gate's review drawer was unreachable after the review pill moved out
   of the topbar. Export MP4 is now enabled while the gate is blocked and opens the
   drawer, where blockers and the explicit override live.
+- The private demo is served over plain Tailscale/LAN HTTP. Hosted-hardening CSRF
+  logic rejected every same-host POST/PATCH there (saves, chat, generation, media
+  tickets). Exact host:port remains the boundary, Tailscale encrypts transport,
+  and the hosted public profile still requires HTTPS.
+- Reopening a project in Super Easy on a fresh browser showed a blank new-film
+  prompt. The owner package read now returns the bound production, and the client
+  hydrates it so the saved plan, gallery and status resume. Hosted guests never
+  receive another viewer's production identity.
+- Stale takes still have real media. They now keep their previews after a
+  reference change instead of disappearing, and each shot carries its exact saved
+  prompt, model/workflow, dimensions, duration and seed. Conditioning images stay
+  labelled as references, not generated clips.
+- The Easy home's **New video** action previously called a step renderer with no
+  shell mounted and did nothing. It now clears the old project from the address
+  and opens the new film's idea step.
 
 ## Verification
 
@@ -56,7 +71,13 @@ generation POSTs. No GPU, model, Colab or paid call is made.
   — **2 passed**; `super-easy-generation-status.spec.ts` — **1 passed**;
   `super-easy-film-review.spec.ts` — **2 passed**; `super-easy-landing.spec.ts`
   — **3 passed**; `super-easy-compute-recovery.spec.ts` — **1 passed**.
-- Unit suite and release scan results are recorded with the integration release.
+- Unit suite: **1,756 passed, 1 skipped, 0 failed**; TypeScript typecheck and the
+  production build pass. Release scan is clean.
+- Server suite: **2,436 passed, 0 failed, 8 skipped**.
+- Deployed to the private demo at `<TAILNET_HOST>:4404` on `main`. The live
+  Checkmate project opens with all ten shot previews, exact prompts/models, the
+  failed-export status, and verified GPU shutdown; its package bytes were not
+  modified.
 
 ## Known limits for the demo
 
