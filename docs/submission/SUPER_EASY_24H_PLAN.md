@@ -1068,3 +1068,31 @@ LTX motion job, with voice disabled and no music. At this documentation boundary
 generation/collection/render/Download and final cost reconciliation remain pending
 under `/home/mojo/comfyrizz-gallery-tests/character-reference-final/`. The running
 build remains frozen at 8f4c635; the later mixed-media/audio edits do not alter it.
+
+**Character-reference delivery completed:** normal Super Easy upload → proposal →
+Make this film → generation → render → Download produced **Tea at the Helm**:
+one six-second spaceship/teacup shot, **1920×1080 / 30 fps / 180 frames**, H.264,
+silent. One Klein reference-edit image and one LTX candidate completed. The trusted
+Klein receipt records the exact uploaded JPEG hash; LTX records consumption of
+that completed image. Both generation receipts and the package/timeline/byte-bound
+final render receipt passed the production verification functions. Completed
+package is r4; run **run_fc77b08581f2**. UI Download and Tailscale HTTP bytes match:
+**c89d74ef5d59e5de7f6669f1c19f37eeb227eeb63aa635297bd9e9517d42b216**,
+9,529,133 bytes. Private share:
+http://100.72.41.9:8766/character-reference-space-tea.mp4
+
+Actual account delta **0.97 credits** (207.96 → 206.99), versus the unchanged
+conservative app settlement 1.821. The three-credit reservation is released;
+campaign **6.12 spent / 0 reserved / 53.88 remaining**. Fresh CLI confirmed no
+assignments/sessions and 0.00/hr. Full 1× player execution reached the six-second
+end; sampled frames show the sip and camera glance, with reference beard, glasses,
+hat and cat-print shirt retained. Facial proportions/detail differ and the
+close-up crops the hat top. This is sampled inspection, not human acceptance or
+an exact facial-reproduction claim.
+
+**Cold-reload limitation:** after successful Download, reloading Super Easy's
+root page restored source/shot gallery entries but lost the final-video/Download
+state and displayed Making your video / 0%. No regenerated output was requested.
+The verified MP4 remains available, but reopened Download did **not** pass for
+this final-run path. Evidence and handoff:
+`/home/mojo/comfyrizz-gallery-tests/character-reference-final/PARENT-HANDOFF.md`.

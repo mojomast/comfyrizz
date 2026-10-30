@@ -4,6 +4,28 @@
 
 Updated 2026-10-27 on `feat/hackathon-submission` / draft PR #53.
 
+## 2026-10-30 character-reference delivery
+
+- **Delivered via Super Easy:** user-supplied character photo → Klein reference
+  edit → LTX motion → render → Download. *Tea at the Helm* is six seconds,
+  1080p/30 fps, silent, with a spaceship teacup sip and camera glance.
+  [Private Tailscale video](http://100.72.41.9:8766/character-reference-space-tea.mp4).
+- Exact original-image consumption, both generated outputs and the final
+  downloaded MP4 are backed by verified generation/render receipts. Actual spend
+  was **0.97 credits**; Colab shutdown confirmed. Campaign: **6.12 spent,
+  0 reserved, 53.88 remaining**. Sampled frames retain the reference's distinctive
+  beard, glasses, hat and shirt, with facial-detail changes and tighter framing.
+- **Remaining UI defect:** cold root-page reload loses the completed final-run
+  Download state, despite restoring generated gallery entries. Initial Download
+  passed; reopened Download did not. This differs from the verified durable
+  editor-export/reopen journey recorded for revised Neon.
+- Character-reference wiring is pushed in **8f4c635**. **4452117** integrates the
+  later mixed-media, dialogue-intent and exact-timing fixes: 60 server, 57 agent
+  audio/intent and 33 UI tests passed, plus agent build and web typecheck.
+  Those later fixes were not injected into the running reference-film build.
+- The speaking teaser and Spoon showcase remain undelivered after pre-spend
+  planning failures; later passing offline checks do not establish live delivery.
+
 ## 2026-10-29 update
 
 - **Default managed Colab inference:** the README, setup guide and
