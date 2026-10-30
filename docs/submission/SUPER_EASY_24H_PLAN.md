@@ -1140,3 +1140,13 @@ selected-take path handling passed nineteen focused tests and a read-only real
 Spoon ffprobe smoke. Automatic final-render inspection/re-rendering is the next
 stage. Research and explicit capability limits are in that branch's
 `docs/AGENT_SELF_REVIEW.md`.
+
+**Teaser approval boundary:** full-plan UI corrections saved r61 on frozen
+`3e9e609`, with one shared H3 identity image and face-visible notebook coverage.
+All scene windows, exact dialogue and conditioning bytes are preserved. Super Easy
+re-reviewed r61 and quoted **5.42 credits** for five Klein images plus eleven H3
+clips. Production `prod_1a4cc5f43ee161269f222c5e` received its atomic **9-credit**
+reservation at fresh balance 205.11, zero sessions, before approval was released.
+Campaign is **8.00 spent / 9 reserved / 43.00 remaining** at that boundary. Runtime:
+`/home/mojo/comfyrizz-gallery-tests/speaking-teaser-reviewed-3e9e609/`. Generation,
+actual native-speech inspection, final delivery and settlement are pending.
