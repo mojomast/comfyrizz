@@ -231,4 +231,4 @@ export function captionsToWordVtt(cues: WordCaptionCue[], fps = 30): string {
 }
 
 /** R3: optional narration engines. `kokoro` is the default and the no-GPU fallback. */
-export type VoiceEngine = 'kokoro' | 'qwen3-tts';
+export type VoiceEngine = 'kokoro' | 'qwen3-tts' | 'chatterbox';

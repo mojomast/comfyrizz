@@ -1,5 +1,5 @@
 import { randomBytes } from 'node:crypto';
-import { KOKORO_VOICES } from '../../../../packages/tts/voices.mjs';
+import { CHATTERBOX_ENGINE, KOKORO_VOICES } from '../../../../packages/tts/voices.mjs';
 import { VOICE_LANGUAGES } from './voice.mjs';
 
 export const SCHEMA = 'comfyrizz.character/v1';
@@ -31,7 +31,7 @@ export const IMAGE_VIEWS = Object.freeze([
 export const IMAGE_SOURCES = Object.freeze(['upload', 'generated', 'reference']);
 export const SHEET_STATUSES = Object.freeze(['none', 'proposed', 'ready']);
 export const IDENTITY_METHODS = Object.freeze(['klein_ref', 'ip_adapter', 'pulid', 'lora']);
-export const VOICE_ENGINES = Object.freeze(['kokoro', 'qwen3-tts', 'none']);
+export const VOICE_ENGINES = Object.freeze(['kokoro', 'qwen3-tts', CHATTERBOX_ENGINE, 'none']);
 export const CHUNKING_MODES = Object.freeze(['sentence', 'paragraph']);
 export const QWEN_MODES = Object.freeze(['custom', 'design']);
 
