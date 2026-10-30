@@ -5,8 +5,9 @@ Decision date: 2026-10-29. This supersedes the repeated original-Pérez retry st
 **Latest production-lane outcome (2026-10-30):** the speaking teaser completed
 generation/export but failed exact-monologue and sampled visual review. Its
 reservation is settled and owned browser/server closed. Campaign: **9.99 spent /
-0 reserved / 50.01 remaining**. See [terminal review and assessment-only next
-action](#2026-10-30-speaking-teaser-terminal-review--closed-not-accepted).
+0 reserved / 50.01 remaining**. Source-aware assessment is complete: five scenes
+are timing-viable, two uncertain and two impossible at unchanged timing. See the
+[terminal review and assessment follow-up](#2026-10-30-speaking-teaser-terminal-review--closed-not-accepted).
 
 ## Submission objective
 
@@ -1238,14 +1239,36 @@ All paths below are under
   remain preserved. Cleanup started no account activity, so existing zero-use
   CLI evidence was retained without another query.
 
-### Next action — source-aware feasibility assessment only
+### 2026-10-30 follow-up — source-aware assessment complete
 
-Assess whether existing source words, pauses and clean in/out ranges can satisfy
-the unchanged exact monologue, natural speed, face-visible coverage, listening
-reaction, native overlays and **45-second** total. Distinguish feasible timing
-changes from source-performance defects and visual continuity/layout problems;
-do not infer that every failure can be repaired with source-in offsets. Record
-the assessment and remaining human-review needs before any proposed intervention.
-**No actual trims, regeneration, re-render or paid retry in this next action.**
-Pi self-repair development continues separately; this production-lane handoff
-does not merge or modify the active self-review worktree.
+**At unchanged compiled timing: five viable / two uncertain / two impossible.**
+Read-only assessment compared all nine complete expected lines with preserved
+source ASR words, 24-fps source bounds, 30-fps project rounding, 0.100s uncertainty
+at each speech boundary and transition clearances. Intro, trick, storm (after
+excluding the unwanted spoken name), silent and slept have feasible candidates.
+Name's “it”/“it's” and switched's low-confidence repeated opening remain uncertain.
+Notes spans **7.10s against a 5.90s scene**; like-me spans **7.12s against 4.50s
+before its outgoing fade**. Like-me's word alignment also suggests an unresolved
+restart/repetition. In-point changes alone cannot recover the full monologue.
+
+An optional continuous-source **exact-45-second** timing construction requires
+**127 frames reallocated at 30 fps**: notes 177→219 (+42), like-me 149→234 (+85),
+trick 121→75 (−46), silent 111→71 (−40), slept 111→70 (−41). Source-frame-aligned
+in-points, original source ends, natural speed, title/outro durations and both
+14-frame fades are retained: 1,378 scene frames − 28 overlap frames = **1,350**.
+Boundary margins are tight. **Listening to existing speech comes first**;
+incorrect/restarted dialogue could defeat this conditional plan. No trims,
+duration changes or re-render were applied, and the teaser is **not delivered
+or accepted**.
+
+Matched source/final samples and frozen renderer code confirm the forehead
+**MARA VALE is native editable text**, not generated lettering: the package omits
+position and `LowerThird` defaults to `top`. Explicit bottom placement is a
+possible fix, **not applied**; its linear entrance also does not fulfill the
+requested mask-rise/spring animation.
+
+Evidence: `/tmp/opencode/teaser-feasibility-ESwU3BDN/assessment.md` and
+`assessment.json`, plus paired source/final PNGs and `input-integrity.json`
+(30 read-input hashes unchanged). **No new paid generation, inference, GPU work,
+package edits or render.** Settled spend remains 1.99 credits. Real Pi self-repair
+proof is a separate self-review-branch report, not evidence of teaser delivery.

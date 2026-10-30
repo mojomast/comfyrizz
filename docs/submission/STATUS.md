@@ -42,11 +42,30 @@ Updated 2026-10-27 on `feat/hackathon-submission` / draft PR #53.
   `delivery-reloaded-byte-identity.json`, `speaking-terminal-settlement.json`,
   `closed.json` and `delivery-cleanup-verification.json`. Failed artifacts:
   `speaking-terminal-download.mp4` and `delivery-reloaded-download.mp4`.
-- **Next action: source-aware feasibility assessment only.** Determine whether
-  the existing source speech, pauses, exact 45-second total, face-visible coverage
-  and native overlays can satisfy the unchanged brief. Record infeasible lines
-  and source-performance defects separately. No actual trims, regeneration or
-  paid retry; active Pi self-repair development remains a separate worktree/lane.
+
+### 2026-10-30 follow-up — source-aware assessment complete
+
+- **Unchanged timing: five viable / two uncertain / two impossible.** Existing
+  source ASR and frame-aligned bounds support intro, trick, storm (excluding its
+  unwanted spoken-name prefix), silent and slept. Name and switched remain
+  uncertain because of “it”/“it's” and the low-confidence repeated opening.
+  Notes needs **7.10s versus 5.90s** available; like-me needs **7.12s versus
+  4.50s before the outgoing fade**, with possible restarted dialogue unresolved.
+  Timing viability is not actual-speech or audiovisual acceptance.
+- **Conditional 45-second salvage:** source-in changes alone cannot repair all
+  scenes. A minimum **127-frame reallocation at 30 fps** (+42 notes, +85 like-me;
+  −46 trick, −40 silent, −41 slept) can retain 1,350 frames, natural speed and
+  source ends. Calculations include 0.100s speech-boundary uncertainty and project
+  rounding. **Listen to the existing speech first**; no timing changes were applied.
+- **Forehead label confirmed native:** matching source/final samples and renderer
+  code identify the omitted position's default `top`, not generated lettering.
+  Explicit bottom placement is a possible fix, **not applied**; the requested
+  mask-rise/spring entrance also remains unfulfilled.
+- Evidence: `/tmp/opencode/teaser-feasibility-ESwU3BDN/assessment.md` and
+  `assessment.json`, with source/final PNGs and `input-integrity.json` confirming
+  30 read-input hashes unchanged. **No new paid generation, inference, package
+  edits or render; teaser remains unaccepted.** Pi self-repair proof belongs to
+  the separate self-review branch and does not establish teaser delivery.
 
 ## 2026-10-30 character-reference delivery
 
