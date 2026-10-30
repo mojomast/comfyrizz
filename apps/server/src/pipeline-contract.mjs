@@ -85,7 +85,7 @@ export function summarizeJobs(pkg, jobs) {
     };
     for (const job of jobs) if (assets.has(job.asset)) visit(job.id);
   }
-  return jobs.map(job => ({ id: job.id, assetId: job.asset, sceneId: job.scene, sceneIds: [...scenes.get(job.id)], batch: job.batch, dependencies: job.deps }));
+  return jobs.map(job => ({ id: job.id, assetId: job.asset, sceneId: job.scene, sceneIds: [...scenes.get(job.id)], batch: job.batch, dependencies: job.deps, generator: job.generator }));
 }
 
 export function pipelineOptions(input = {}) {

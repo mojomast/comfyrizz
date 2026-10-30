@@ -33,6 +33,10 @@ export function mergeLiveGallery(base: GalleryModel, live: readonly GalleryItem[
     const replacement = item.kind === 'shot' || item.kind === 'character' ? liveMedia.get(item.id) : undefined;
     if (!replacement) return { ...item, index };
     used.add(item.id);
+    // A normalized snapshot binds this preview to exact generation metadata.
+    // Legacy take polling must not replace it with a URL-only card (or label a
+    // conditioning image as the generated shot). Snapshot refresh owns it.
+    if (item.details && item.url) return { ...item, index };
     if (replacement.state !== 'ready' && item.state === 'ready') return { ...item, index };
     return { ...replacement, index, highlighted: item.highlighted };
   });

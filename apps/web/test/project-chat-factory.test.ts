@@ -653,3 +653,338 @@ test('a cold saved package displays its exact edit diff and applies through the 
     assert.match(host.querySelector('[data-project-chat-panel]').innerHTML, /Applied package edits · revision 42/);
   } finally { dom.restore(); }
 });
+
+test('package restoration ignores the global chat and preserves each project conversation across modes', async () => {
+  const dom = installDom();
+  try {
+    localStorage.setItem('comfyrizz.project-chat', 'chat_unrelated');
+    localStorage.setItem('comfyrizz.project-chat:pkg_selected', 'chat_selected');
+    const calls = [], applied = [];
+    const options = {
+      restoreSaved: true,
+      getEditContext: () => ({ packageId: 'pkg_selected', revision: 12 }),
+      applyProject: project => applied.push(project.revision),
+      apiFetch: async (url, init = {}) => {
+        calls.push([url, init.method ?? 'GET']);
+        return jsonResponse({ conversation: conversation({ id: 'chat_selected', projectId: 'pkg_selected', projectRevision: 10 }),
+          project: { package: { id: 'pkg_selected' }, revision: 12 }, built: false });
+      },
+    };
+    const first = create(dom.doc.createElement('div'), options);
+    await first.ready;
+    first.destroy();
+    const next = create(dom.doc.createElement('div'), options);
+    await next.ready;
+    assert.equal(next.conversationId, 'chat_selected');
+    assert.deepEqual(calls, Array(2).fill(['/api/agent/chat/chat_selected', 'GET']));
+    assert.deepEqual(applied, [12, 12]);
+    next.destroy();
+  } finally { dom.restore(); }
+});
+
+test('rebinding drops a late restore and sends with the selected conversation and current CAS', async () => {
+  const dom = installDom();
+  try {
+    let release;
+    const delayed = new Promise(resolve => { release = resolve; });
+    const applied = [], snapshots = [], bodies = [];
+    const chat = create(dom.doc.createElement('div'), {
+      initialConversationId: 'chat_old', expectedPackageId: 'pkg_old',
+      applyProject: project => applied.push(project.package.id),
+      onConversationChange: value => snapshots.push(value.id),
+      apiFetch: async (url, init = {}) => {
+        if (url.endsWith('/chat_old')) return delayed;
+        if (init.method === 'POST') bodies.push(JSON.parse(init.body));
+        return jsonResponse({ conversation: conversation({ id: 'chat_selected', revision: 7, projectId: 'pkg_selected', projectRevision: 22 }), built: false });
+      },
+    });
+    const oldReady = chat.ready;
+    await chat.setProjectContext({ packageId: 'pkg_selected', revision: 22, conversationId: 'chat_selected' });
+    release(jsonResponse({ conversation: conversation({ id: 'chat_old', projectId: 'pkg_old' }),
+      project: { package: { id: 'pkg_old' }, revision: 99 } }));
+    await oldReady;
+    await chat.send('Edit the selected project.', 'plan');
+    assert.equal(chat.conversationId, 'chat_selected');
+    assert.deepEqual(applied, []);
+    assert.deepEqual(snapshots, ['chat_selected', 'chat_selected']);
+    assert.equal(bodies.length, 1);
+    assert.equal(bodies[0].conversationId, 'chat_selected');
+    assert.equal(bodies[0].baseRevision, 7);
+    assert.equal(bodies[0].expectedPackageId, 'pkg_selected');
+    assert.equal(bodies[0].expectedPackageRevision, 22);
+    chat.destroy();
+  } finally { dom.restore(); }
+});
+
+test('same-project revision updates preserve the conversation without creating or loading another', async () => {
+  const dom = installDom();
+  try {
+    const calls = [];
+    const chat = create(dom.doc.createElement('div'), {
+      apiFetch: async (url, init = {}) => {
+        calls.push({ url, body: init.body && JSON.parse(init.body) });
+        return jsonResponse({ conversation: conversation({ id: 'chat_selected', projectId: 'pkg_selected', revision: 3 }), built: false });
+      },
+    });
+    await chat.setProjectContext({ packageId: 'pkg_selected', revision: 22, conversationId: 'chat_selected' });
+    await chat.setProjectContext({ packageId: 'pkg_selected', revision: 23 });
+    await chat.send('Use my latest edits.', 'plan');
+    assert.equal(calls.length, 2);
+    assert.equal(calls[1].body.conversationId, 'chat_selected');
+    assert.equal(calls[1].body.expectedPackageRevision, 23);
+    chat.destroy();
+  } finally { dom.restore(); }
+});
+
+test('a restored stale package never overwrites the newer authoritative selected revision', async () => {
+  const dom = installDom();
+  try {
+    const applied = [];
+    const chat = create(dom.doc.createElement('div'), {
+      initialConversationId: CHAT_ID,
+      getEditContext: () => ({ packageId: 'pkg_selected', revision: 42 }),
+      applyProject: project => applied.push(project),
+      apiFetch: async () => jsonResponse({ conversation: conversation({ projectId: 'pkg_selected', projectRevision: 40 }),
+        project: { package: { id: 'pkg_selected' }, revision: 40 } }),
+    });
+    await chat.ready;
+    assert.equal(chat.conversationId, CHAT_ID);
+    assert.deepEqual(applied, []);
+    chat.destroy();
+  } finally { dom.restore(); }
+});
+
+test('destroy during restore or a turn prevents late project, conversation, and storage handoff', async () => {
+  const dom = installDom();
+  try {
+    for (const restoring of [true, false]) {
+      let release;
+      const delayed = new Promise(resolve => { release = resolve; });
+      const effects = [];
+      const host = dom.doc.createElement('div');
+      const chat = create(host, {
+        ...(restoring ? { initialConversationId: CHAT_ID } : {}),
+        getEditContext: () => ({ packageId: 'pkg_selected', revision: 1 }),
+        apiFetch: async () => delayed,
+        applyProject: () => effects.push('project'),
+        onConversationChange: () => effects.push('conversation'),
+        onReferencesChanged: () => effects.push('references'),
+      });
+      const completion = restoring ? chat.ready : chat.send('Edit.', 'plan');
+      if (!restoring) await waitFor(() => chat.conversationId !== null, 'turn started');
+      chat.destroy();
+      const storedBefore = localStorage.getItem('comfyrizz.project-chat:pkg_selected');
+      release(jsonResponse({ conversation: conversation({ projectId: 'pkg_selected' }), built: true,
+        project: { package: { id: 'pkg_selected' }, revision: 2 } }));
+      await completion;
+      assert.deepEqual(effects, []);
+      assert.equal(host.innerHTML, '');
+      assert.equal(localStorage.getItem('comfyrizz.project-chat:pkg_selected'), storedBefore);
+      await chat.send('Disposed controllers cannot send.', 'plan');
+    }
+  } finally { dom.restore(); }
+});
+
+test('project or revision changes during provider selection prevent the old turn from being sent', async () => {
+  const dom = installDom();
+  try {
+    for (const next of [{ packageId: 'pkg_other', revision: 2 }, { packageId: 'pkg_selected', revision: 3 }]) {
+      let current = { packageId: 'pkg_selected', revision: 2 }, release, selecting = false;
+      const calls = [];
+      const chat = create(dom.doc.createElement('div'), {
+        getEditContext: () => current,
+        provider: () => { selecting = true; return new Promise(resolve => { release = resolve; }); },
+        apiFetch: async url => { calls.push(url); return jsonResponse({}); },
+      });
+      const sending = chat.send('Apply this edit.', 'plan');
+      await waitFor(() => selecting, 'provider selection started');
+      current = next;
+      release({ provider: 'fake', model: 'fake' });
+      await sending;
+      assert.deepEqual(calls, []);
+      chat.destroy();
+    }
+  } finally { dom.restore(); }
+});
+
+test('an external edit while a turn is running makes its late result ineligible to replace the project', async () => {
+  const dom = installDom();
+  try {
+    let current = { packageId: 'pkg_selected', revision: 2 }, release, started = false;
+    const effects = [];
+    const chat = create(dom.doc.createElement('div'), {
+      getEditContext: () => current,
+      apiFetch: () => { started = true; return new Promise(resolve => { release = resolve; }); },
+      applyProject: () => effects.push('project'),
+      onConversationChange: () => effects.push('conversation'),
+    });
+    const sending = chat.send('Apply this edit.', 'plan');
+    await waitFor(() => started, 'turn started');
+    current = { ...current, revision: 4 };
+    release(jsonResponse({ conversation: conversation({ projectId: 'pkg_selected', projectRevision: 3 }), built: true,
+      project: { package: { id: 'pkg_selected' }, revision: 3 } }));
+    await sending;
+    assert.deepEqual(effects, []);
+    chat.destroy();
+  } finally { dom.restore(); }
+});
+
+test('guest chat never calls owner restore, provider, proposal, progress, or turn APIs', async () => {
+  const dom = installDom();
+  try {
+    const calls = [];
+    const host = dom.doc.createElement('div');
+    const chat = create(host, {
+      initialConversationId: CHAT_ID,
+      canUseOwnerApi: () => false,
+      apiFetch: async () => { calls.push('fetch'); return jsonResponse({}); },
+      provider: async () => { calls.push('provider'); return { provider: 'fake', model: 'fake' }; },
+      getAgentProgress: async () => { calls.push('progress'); return {}; },
+    });
+    await chat.ready;
+    await chat.send('Edit this.', 'plan');
+    await chat.decideProposal('reference', 'proposal_1', 'accept');
+    await chat.confirmClipProposals(['proposal_2']);
+    await chat.authorizeClipProposals(['proposal_2']);
+    assert.throws(() => chat.ensureConversationId(), /owner/);
+    assert.equal(host.querySelector('textarea').disabled, true);
+    await chat.setProjectContext({ packageId: 'pkg_selected', revision: 1, conversationId: 'chat_selected', owner: false });
+    assert.deepEqual(calls, []);
+    chat.destroy();
+  } finally { dom.restore(); }
+});
+
+test('failed restoration blocks new turns until reload succeeds instead of silently forking the conversation', async () => {
+  const dom = installDom();
+  try {
+    const calls = [], host = dom.doc.createElement('div');
+    let available = false;
+    const chat = create(host, {
+      initialConversationId: CHAT_ID,
+      apiFetch: async (url, init = {}) => {
+        calls.push(init.method ?? 'GET');
+        return available ? jsonResponse({ conversation: conversation({ revision: 4 }), built: false })
+          : jsonResponse({ error: 'Temporary outage' }, 503);
+      },
+    });
+    await chat.ready;
+    await chat.send('Do not fork the failed restore.', 'plan');
+    assert.deepEqual(calls, ['GET']);
+    assert.equal(chat.conversationId, CHAT_ID);
+    available = true;
+    host.querySelector('#project-reload').dispatchEvent({ type: 'click', bubbles: true });
+    await waitFor(() => chat.conversation?.revision === 4, 'restored original conversation');
+    await chat.send('Now continue.', 'plan');
+    assert.deepEqual(calls, ['GET', 'GET', 'POST']);
+    chat.destroy();
+  } finally { dom.restore(); }
+});
+
+test('explicit new video clears static package adoption while retaining the old project chat for reopening', async () => {
+  const dom = installDom();
+  try {
+    localStorage.setItem('comfyrizz.project-chat:pkg_old', 'chat_old');
+    const bodies = [], host = dom.doc.createElement('div');
+    const chat = create(host, {
+      expectedPackageId: 'pkg_old', adoptPackageId: 'pkg_old',
+      apiFetch: async (_url, init = {}) => {
+        const body = JSON.parse(init.body); bodies.push(body);
+        return jsonResponse({ conversation: conversation({ id: body.conversationId, projectId: 'pkg_new' }), built: true,
+          project: { package: { id: 'pkg_new' }, revision: 1 } });
+      },
+    });
+    await chat.ready;
+    host.querySelector('#project-new').dispatchEvent({ type: 'click', bubbles: true });
+    await chat.send('Make a new film.', 'plan');
+    assert.equal(bodies[0].adoptPackageId, undefined);
+    assert.equal(bodies[0].expectedPackageId, undefined);
+    assert.equal(chat.conversation.projectId, 'pkg_new');
+    assert.equal(localStorage.getItem('comfyrizz.project-chat:pkg_old'), 'chat_old');
+    chat.destroy();
+  } finally { dom.restore(); }
+});
+
+test('the host can advance the bound package revision while a stale package selection is ignored', async () => {
+  const dom = installDom();
+  try {
+    let live = { packageId: 'pkg_selected', revision: 22 };
+    const sent = [];
+    const chat = create(dom.doc.createElement('div'), {
+      getEditContext: () => live,
+      apiFetch: async (_url, init = {}) => {
+        if (init.method === 'POST') {
+          sent.push(JSON.parse(init.body));
+          return jsonResponse({ conversation: conversation({ projectId: 'pkg_selected', revision: 4 }), built: false });
+        }
+        return jsonResponse({ conversation: conversation({ id: 'chat_selected', projectId: 'pkg_selected' }), built: false });
+      },
+    });
+    await chat.setProjectContext({ packageId: 'pkg_selected', revision: 22, conversationId: 'chat_selected' });
+    live = { packageId: 'pkg_selected', revision: 25 };
+    await chat.send('Use revision 25.', 'plan');
+    assert.equal(sent[0].expectedPackageRevision, 25);
+    live = { packageId: 'pkg_stale_other', revision: 99 };
+    await chat.send('Stay on the selected package.', 'plan');
+    assert.equal(sent[1].expectedPackageId, 'pkg_selected');
+    assert.equal(sent[1].expectedPackageRevision, 25);
+    chat.destroy();
+  } finally { dom.restore(); }
+});
+
+test('gallery switching A to B to A reopens A chat and never creates a replacement conversation', async () => {
+  const dom = installDom();
+  try {
+    const calls = [];
+    let nextChat = 0;
+    const chat = create(dom.doc.createElement('div'), {
+      restoreSaved: false,
+      apiFetch: async (url, init = {}) => {
+        calls.push([url, init.method ?? 'GET']);
+        if (init.method === 'POST') {
+          nextChat += 1;
+          const body = JSON.parse(init.body);
+          return jsonResponse({ conversation: conversation({ id: body.conversationId, projectId: `pkg_${nextChat === 1 ? 'a' : 'b'}` }), built: false });
+        }
+        return jsonResponse({ conversation: conversation({ id: decodeURIComponent(String(url).split('/').at(-1)), projectId: 'pkg_a', messages: [{ role: 'user', content: 'A history' }] }), built: false });
+      },
+    });
+    await chat.ready;
+    await chat.setProjectContext({ packageId: 'pkg_a', revision: 1 });
+    await chat.send('Start A.', 'plan');
+    const chatA = chat.conversationId;
+    await chat.setProjectContext({ packageId: 'pkg_b', revision: 1 });
+    await chat.send('Start B.', 'plan');
+    const chatB = chat.conversationId;
+    assert.notEqual(chatA, chatB);
+    calls.length = 0;
+    await chat.setProjectContext({ packageId: 'pkg_a', revision: 4 });
+    assert.equal(chat.conversationId, chatA);
+    assert.deepEqual(calls, [[`/api/agent/chat/${chatA}`, 'GET']]);
+    assert.equal(chat.conversation.messages[0].content, 'A history');
+    chat.destroy();
+  } finally { dom.restore(); }
+});
+
+test('reload refreshes only the current conversation and makes an earlier load ineligible', async () => {
+  const dom = installDom();
+  try {
+    const releases = [], snapshots = [];
+    const chat = create(dom.doc.createElement('div'), {
+      initialConversationId: CHAT_ID,
+      apiFetch: () => new Promise(resolve => releases.push(resolve)),
+      onConversationChange: value => snapshots.push(value.revision),
+    });
+    await waitFor(() => releases.length === 1, 'initial load started');
+    const initial = chat.ready;
+    const refreshed = chat.reload();
+    await waitFor(() => releases.length === 2, 'refresh started');
+    assert.equal(chat.conversationId, CHAT_ID);
+    releases[1](jsonResponse({ conversation: conversation({ id: CHAT_ID, revision: 8 }), built: false }));
+    await refreshed;
+    releases[0](jsonResponse({ conversation: conversation({ id: CHAT_ID, revision: 2 }), built: false }));
+    await initial;
+    assert.equal(chat.conversation.revision, 8);
+    assert.deepEqual(snapshots, [8]);
+    chat.destroy();
+  } finally { dom.restore(); }
+});

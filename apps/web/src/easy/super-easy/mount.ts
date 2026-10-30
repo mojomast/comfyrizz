@@ -2,8 +2,8 @@
 //
 // The router decides that a bare visit belongs to Super Easy; this module
 // paints the one-prompt home or the progress view for a run that is already
-// under way. It is presentation and navigation only: no network, no player
-// adoption and no generation logic. The studio handoff belongs to the Easy
+// under way. It reads the guest's own allowance but never manages compute or
+// adopts the player. The studio handoff belongs to the Easy
 // mount so there is one owner of the borrowed player.
 
 import { COPY } from './copy.ts';
@@ -27,7 +27,8 @@ import {
   type SuperEasyProgressViewOptions,
 } from './progress-view.ts';
 import type { StagesProgress } from './stages.ts';
-import type { GalleryModel } from './gallery-model.ts';
+import { buildGalleryModel, type GalleryModel } from './gallery-model.ts';
+import { createAssetInspector } from './asset-detail.ts';
 import { DEFAULT_SUPER_EASY_SETUP, type SuperEasySetup, type MotionModel } from './setup.ts';
 import { renderSuperEasyProposal, type SuperEasyProposal } from './proposal.ts';
 import { getMode, setMode } from '../../ui/mode.ts';
@@ -35,6 +36,7 @@ import type { EasyState, LyricsStyle, SongTrim } from '../types.ts';
 import { isEasyDuration } from '../duration.ts';
 import { formatSuperEasyLrcErrors, validateSuperEasyLrc } from './lyrics.ts';
 import { mountAgentConsole } from '../agent-console.ts';
+import { projectNavigationTarget, renderProjectNavigation } from '../../project-gallery-navigation.ts';
 import { isVideoType, videoTypeMetadata, type VideoType } from './video-types.ts';
 import { createSongPreview, songPreviewMaster } from './song-preview.ts';
 import {
@@ -94,6 +96,8 @@ export interface SuperEasyMountOptions {
   onReviseNarration?(): void;
   /** Review the playable preview, then export from Studio. */
   onReview?(packageId: string | null): void;
+  reviewRepair?(): 'ready' | 'unavailable' | 'hidden';
+  onReviewRepair?(): void;
   /** Make the MP4 from the playable preview. Falls back to Review. */
   onExport?(packageId: string | null): void;
   /** Gauges and real collected media, when the caller knows more than the journal does. */
@@ -200,6 +204,10 @@ export function mountSuperEasy(options: SuperEasyMountOptions): SuperEasyMountHa
   let destroyed = false;
   let fontPending = false;
   let progressKeys: SuperEasyProgressKeys | null = null;
+  let currentGallery = buildGalleryModel(null);
+  const assetInspector = createAssetInspector({ root, gallery: () => currentGallery,
+    scope: () => `${options.state().packageId}|${options.state().productionId}|${currentSearch()}`,
+    fetch: options.previewFetch });
   let stopAgentConsole: (() => void) | null = null;
   let attachmentLoadKey: string | null = null;
   let renderedAttachmentList: HTMLElement | null = null;
@@ -240,6 +248,37 @@ export function mountSuperEasy(options: SuperEasyMountOptions): SuperEasyMountHa
     }
   }
 
+  const hostedInvite = new URLSearchParams(currentSearch()).get('demo') === '1';
+  let inviteReady = false;
+  let checkingInvite = false;
+  async function refreshInviteCredits(): Promise<void> {
+    if (!hostedInvite || destroyed || checkingInvite || !root.querySelector('[data-guest-credits]')) return;
+    checkingInvite = true;
+    let message = 'Invite unavailable. Return to the gallery and open your invite again.';
+    inviteReady = false;
+    try {
+      const response = await options.previewFetch?.('/api/invites/session');
+      if (!response?.ok) throw new Error('Invite unavailable');
+      const session = await response.json();
+      if (session.role !== 'guest' || session.backendId !== 'colab' || !Number.isFinite(session.budgetUnits)) throw new Error('Invite unavailable');
+      const credits = Math.max(0, session.budgetUnits);
+      inviteReady = ['active', 'exhausted'].includes(session.invite?.status);
+      message = `${credits.toLocaleString(undefined, { maximumFractionDigits: 3 })} invite credits available`;
+      if (session.invite?.status === 'exhausted' || credits === 0) message += ' · CPU work and agent edits available. New Google Colab generation is unavailable.';
+      else if (session.invite?.status !== 'active') message += ' · This invite is unavailable.';
+      else if (!session.spendEnabled) message += ' · Google Colab generation is paused. CPU work and agent edits remain available.';
+    } catch { /* Fail closed; the server also checks the invite at planning and dispatch. */ }
+    finally {
+      checkingInvite = false;
+      if (!destroyed) {
+        const status = root.querySelector<HTMLElement>('[data-guest-credits]');
+        if (status) status.textContent = message;
+        const generate = root.querySelector<HTMLButtonElement>('[data-super-easy-generate]');
+        if (generate) generate.disabled = !inviteReady || fontPending;
+      }
+    }
+  }
+
   function openEditor(): void {
     const packageId = options.state().packageId;
     if (options.onOpenEditor) {
@@ -269,6 +308,11 @@ export function mountSuperEasy(options: SuperEasyMountOptions): SuperEasyMountHa
 
   const onClick = (event: Event): void => {
     const closest = closestOf(event.target);
+    if (closest('[data-super-easy-review-repair]')) {
+      event.preventDefault();
+      if (options.reviewRepair?.() === 'ready') options.onReviewRepair?.();
+      return;
+    }
     if (closest('[data-super-easy-font-remove]')) {
       event.preventDefault();
       const status = root.querySelector<HTMLElement>('[data-super-easy-font-status]');
@@ -556,7 +600,9 @@ export function mountSuperEasy(options: SuperEasyMountOptions): SuperEasyMountHa
       }
       showLyricsError();
     }
-    const setup = options.setup?.() ?? DEFAULT_SUPER_EASY_SETUP;
+    if (hostedInvite && !inviteReady) { void refreshInviteCredits(); return; }
+    const savedSetup = options.setup?.() ?? DEFAULT_SUPER_EASY_SETUP;
+    const setup = hostedInvite ? { ...savedSetup, compute: 'colab' as const, confirmed: true } : savedSetup;
     if (setup.compute === 'colab' && !setup.confirmed) {
       options.onSetup?.();
       return;
@@ -645,6 +691,8 @@ export function mountSuperEasy(options: SuperEasyMountOptions): SuperEasyMountHa
       selectedVideoType = next;
       options.onVideoTypeChange?.(next);
       const metadata = videoTypeMetadata(next);
+      const typeSummary = root.querySelector<HTMLElement>('[data-super-easy-type-summary]');
+      if (typeSummary) typeSummary.textContent = metadata?.label ?? 'Custom';
       const prompt = root.querySelector<HTMLTextAreaElement>('#super-easy-prompt');
       if (prompt) prompt.placeholder = metadata?.promptPlaceholder ?? SUPER_EASY_EXAMPLE_PROMPT;
       const hint = root.querySelector<HTMLElement>('[data-super-easy-prompt-hint]');
@@ -711,6 +759,7 @@ export function mountSuperEasy(options: SuperEasyMountOptions): SuperEasyMountHa
       packageId: state.packageId,
       search: currentSearch(),
       previewReady: options.previewReady?.() === true,
+      reviewRepair: options.reviewRepair?.() ?? 'hidden',
       ...(failure === null
         ? {}
         : {
@@ -728,6 +777,7 @@ export function mountSuperEasy(options: SuperEasyMountOptions): SuperEasyMountHa
   function paintProgress(): void {
     const snapshot = options.snapshot?.() ?? null;
     const viewOptions = progressOptions(snapshot);
+    currentGallery = viewOptions.gallery ?? buildGalleryModel(snapshot);
     const mounted = root.querySelector('[data-super-easy-chrome]');
     if (!mounted) {
       const parts = superEasyProgressParts(snapshot, viewOptions);
@@ -735,6 +785,7 @@ export function mountSuperEasy(options: SuperEasyMountOptions): SuperEasyMountHa
       stopAgentConsole?.();
       stopAgentConsole = mountAgentConsole(root);
       progressKeys = parts.keys;
+      assetInspector.sync();
       return;
     }
     progressKeys = updateSuperEasyProgress(
@@ -743,6 +794,7 @@ export function mountSuperEasy(options: SuperEasyMountOptions): SuperEasyMountHa
       snapshot,
       viewOptions,
     );
+    assetInspector.sync();
   }
 
   function applyDirtyAttachmentNotes(row: HTMLElement): void {
@@ -890,11 +942,12 @@ export function mountSuperEasy(options: SuperEasyMountOptions): SuperEasyMountHa
     current = next;
     const proposal = options.proposal?.() ?? null;
     if (next !== 'progress' || proposal) {
+      assetInspector.clear();
       stopAgentConsole?.();
       stopAgentConsole = null;
     }
     if (next === 'progress' && proposal) {
-      root.innerHTML = renderSuperEasyProposal(proposal);
+      root.innerHTML = `<nav class="super-easy-project-navigation" aria-label="Projects and gallery">${renderProjectNavigation({ search: currentSearch(), baseURI: root.ownerDocument.baseURI })}</nav>${renderSuperEasyProposal(proposal)}`;
       progressKeys = null;
     } else if (next === 'progress') {
       paintProgress();
@@ -923,10 +976,35 @@ export function mountSuperEasy(options: SuperEasyMountOptions): SuperEasyMountHa
       syncAttachments();
       loadAttachments();
     }
+    if (hostedInvite) {
+      if (options.state().compute === 'cpu' && options.proposal?.()) {
+        const button = root.querySelector<HTMLButtonElement>('[data-super-easy-approve-proposal]');
+        if (button) button.textContent = 'Render on CPU';
+        const note = root.ownerDocument.createElement('p');
+        note.textContent = 'CPU mode · Agent edits remain available. Rendering reuses completed media and spends no Google Colab credits.';
+        root.prepend(note);
+      }
+      root.querySelectorAll('[data-super-easy-setup], [data-super-easy-more-control], [data-super-easy-open-studio], [data-super-easy-open-editor], [data-super-easy-review-edit-plan], [data-super-easy-review]').forEach(element => element.remove());
+      root.querySelectorAll('.super-easy-progress-mode-actions').forEach(element => element.remove());
+      const generate = root.querySelector<HTMLButtonElement>('[data-super-easy-generate]');
+      if (generate) generate.disabled = !inviteReady || fontPending;
+      void refreshInviteCredits();
+    }
+    if (hostedInvite && !root.querySelector('[data-project-navigation]')) {
+      const target = projectNavigationTarget({ search: currentSearch(), baseURI: root.ownerDocument.baseURI });
+      const gallery = root.ownerDocument.createElement('a');
+      gallery.dataset.projectNavigation = '';
+      if (hostedInvite) gallery.dataset.guestGallery = '';
+      gallery.className = 'btn btn-secondary';
+      gallery.textContent = target.label;
+      gallery.href = target.href;
+      root.prepend(gallery);
+    }
     root.dataset.superEasyView = next;
   };
 
   render();
+  const inviteTimer = hostedInvite ? setInterval(() => { void refreshInviteCredits(); }, 15000) : null;
   root.addEventListener('click', onClick);
   root.addEventListener('submit', onSubmit);
   root.addEventListener('change', onChange);
@@ -946,8 +1024,10 @@ export function mountSuperEasy(options: SuperEasyMountOptions): SuperEasyMountHa
     destroy() {
       if (destroyed) return;
       destroyed = true;
+      if (inviteTimer !== null) clearInterval(inviteTimer);
       unsubscribe();
       songPreview?.destroy();
+      assetInspector.destroy();
       root.removeEventListener('click', onClick);
       root.removeEventListener('submit', onSubmit);
       root.removeEventListener('change', onChange);

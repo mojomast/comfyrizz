@@ -224,6 +224,29 @@ type TurnRequest = { conversationId: string; turnId: string; message: string; mo
 const esc = (value: unknown) => String(value ?? '').replace(/[&<>"']/g, char => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[char]!);
 const STORAGE_KEY = 'comfyrizz.project-chat';
 
+export type ProjectChatBinding = {
+  packageId: string;
+  revision: number;
+  /** An explicit null means this project has no linked conversation yet. */
+  conversationId?: string | null;
+  owner?: boolean;
+};
+
+function chatStorageKey(packageId?: string | null): string {
+  return packageId ? `${STORAGE_KEY}:${encodeURIComponent(packageId)}` : STORAGE_KEY;
+}
+
+function savedChat(packageId?: string | null): string | null {
+  try { return localStorage.getItem(chatStorageKey(packageId)); } catch { return null; }
+}
+
+function storeChat(packageId: string | null, id: string | null): void {
+  try {
+    if (id) localStorage.setItem(chatStorageKey(packageId), id);
+    else localStorage.removeItem(chatStorageKey(packageId));
+  } catch { /* Storage may be unavailable; the host still receives the binding. */ }
+}
+
 /**
  * IP36: the explicit context attached to one chat turn.
  *
@@ -533,6 +556,8 @@ export type CreateProjectChatOptions = {
   adoptPackageId?: string;
   /** Read at send time: Super Easy may have opened a package after this chat mounted. */
   getEditContext?: () => { packageId: string; revision: number } | null;
+  /** Owner-only chat endpoints must never be called from a hosted guest shell. */
+  canUseOwnerApi?: () => boolean;
   /** Server snapshots only: fired before the host applies a built package. */
   onConversationChange?: (conversation: Conversation) => void;
   /** Optional live turn telemetry; tests and offline embeds may omit it. */
@@ -570,7 +595,42 @@ type ProjectChatControllerOptions = MountProjectChatOptions & {
 
 function mountProjectChatController(options: ProjectChatControllerOptions) {
   const panel = options.root;
-  const id = options.initialConversationId ?? (options.restoreSaved === false ? null : localStorage.getItem(STORAGE_KEY));
+  let binding: ProjectChatBinding | null | undefined;
+  let disposed = false;
+  let generation = 0;
+  let restoreFailed = false;
+  let newVideoFromPackage: string | null = null;
+  function ownerAllowed(): boolean {
+    return !disposed && binding?.owner !== false && options.canUseOwnerApi?.() !== false;
+  }
+  function editContext(): { packageId: string; revision: number } | null {
+    const live = options.getEditContext?.() ?? null;
+    if (binding === undefined) {
+      return live?.packageId === newVideoFromPackage ? null : live;
+    }
+    // A routing-selected package stays authoritative; the host's live package
+    // revision may only advance it (revisions never move backwards).
+    if (!binding || live?.packageId !== binding.packageId) {
+      return binding && binding.packageId !== newVideoFromPackage ? binding : null;
+    }
+    const revision = Math.max(binding.revision, live.revision);
+    if (revision !== binding.revision) binding = { ...binding, revision };
+    const context = binding;
+    return context.packageId === newVideoFromPackage ? null : context;
+  }
+  function packageScope(): string | null {
+    if (newVideoFromPackage !== null && !editContext()) return null;
+    return editContext()?.packageId ?? (binding === undefined ? options.expectedPackageId ?? options.adoptPackageId ?? null : null);
+  }
+  function checkpoint() {
+    const version = generation;
+    const packageId = packageScope();
+    const revision = editContext()?.revision;
+    return () => ownerAllowed() && generation === version && packageScope() === packageId
+      && editContext()?.revision === revision;
+  }
+  const id = options.initialConversationId ?? (options.restoreSaved === false ? null : savedChat(packageScope()));
+  let conversationScope = packageScope();
   let conversationId: string | null = id && /^chat_[A-Za-z0-9_-]+$/.test(id) ? id : null;
   let conversation: Conversation | null = null;
   let busy = false;
@@ -579,11 +639,6 @@ function mountProjectChatController(options: ProjectChatControllerOptions) {
   let conflict = false;
   let recovery: RecoveryConflict | null = null;
   let recoveryHint = '';
-  let newVideoFromPackage: string | null = null;
-  function editContext() {
-    const context = options.getEditContext?.() ?? null;
-    return context?.packageId === newVideoFromPackage ? null : context;
-  }
   const dismissedContextChipIds = new Set<string>();
   const readTurnContext = options.getTurnContext ?? options.turnContext;
 
@@ -686,6 +741,7 @@ function mountProjectChatController(options: ProjectChatControllerOptions) {
   }
 
   function render(): void {
+    if (disposed) return;
     const plan = conversation?.plan;
     const contextHtml = renderTurnContextChips(turnContextChips());
     const recoveryHtml = recovery ? recoveryPanelHtml(recovery, esc) : '';
@@ -799,7 +855,7 @@ function mountProjectChatController(options: ProjectChatControllerOptions) {
         if (id) dismissTurnContextChip(id);
       });
     });
-    panel.querySelectorAll<HTMLButtonElement>('button').forEach(button => { button.disabled = busy; });
+    panel.querySelectorAll<HTMLButtonElement>('button').forEach(button => { button.disabled = busy || !ownerAllowed(); });
   }
 
   function validateReplyPackage(reply: ChatReply, requestedPackageId?: string): void {
@@ -807,7 +863,7 @@ function mountProjectChatController(options: ProjectChatControllerOptions) {
     if (requestedPackageId && current && current !== requestedPackageId) {
       throw new Error('The open project changed while the agent was working. Reload its conversation.');
     }
-    const expected = requestedPackageId ?? current ?? options.expectedPackageId;
+    const expected = requestedPackageId ?? packageScope();
     if (!expected) return;
     const conversationPackage = reply.conversation?.projectId;
     const responsePackage = reply.project?.package?.id;
@@ -823,29 +879,37 @@ function mountProjectChatController(options: ProjectChatControllerOptions) {
   }
 
   function adopt(reply: ChatReply, built: boolean): void {
+    const version = generation;
     validateReplyPackage(reply);
     conversation = reply.conversation;
     conversationId = reply.conversation.id;
-    localStorage.setItem(STORAGE_KEY, conversationId);
+    conversationScope = reply.conversation.projectId ?? packageScope();
+    storeChat(reply.conversation.projectId ?? packageScope(), conversationId);
     // The host may synchronously publish a package/store change from
     // applyProject. Persist the server-returned chat binding first so that a
     // scope subscriber does not tear down this still-current conversation.
     notifyConversation();
+    if (disposed || generation !== version) return;
     const projectMoved = typeof reply.project?.revision === 'number'
       && reply.project.revision !== conversation?.projectRevision;
-    if (reply.project && (built || projectMoved)) options.applyProject(reply.project, built);
+    if (reply.project && (built || projectMoved)) applyReplyProject(reply.project, built);
+    if (disposed || generation !== version) return;
     try { void options.onCastChanged?.(conversation.cast ?? []); } catch { /* optional observer */ }
     render();
   }
 
   function reset(): void {
-    if (busy) return;
-    newVideoFromPackage = options.getEditContext?.()?.packageId ?? null;
+    if (busy || !ownerAllowed()) return;
+    generation += 1;
+    newVideoFromPackage = packageScope();
+    binding = undefined;
+    restoreFailed = false;
     conversationId = null;
     conversation = null;
+    conversationScope = null;
     pending = null; errorText = ''; conflict = false; recovery = null; recoveryHint = '';
     dismissedContextChipIds.clear();
-    localStorage.removeItem(STORAGE_KEY);
+    storeChat(null, null);
     options.replace([]);
     render();
     void options.onReset?.();
@@ -853,40 +917,98 @@ function mountProjectChatController(options: ProjectChatControllerOptions) {
   }
 
   async function load(): Promise<void> {
-    if (!conversationId) return;
+    if (!conversationId || !ownerAllowed()) return;
+    const current = checkpoint();
+    const requestedId = conversationId;
+    const scope = packageScope();
+    const version = generation;
+    restoreFailed = true;
     try {
-      const response = await options.apiFetch(`/api/agent/chat/${encodeURIComponent(conversationId)}`);
+      const response = await options.apiFetch(`/api/agent/chat/${encodeURIComponent(requestedId)}`);
       const body = await response.json();
+      if (!current()) return;
       if (response.status === 404) {
-        localStorage.removeItem(STORAGE_KEY);
+        storeChat(scope, null);
         conversationId = null;
+        conversation = null;
+        conversationScope = null;
+        restoreFailed = false; errorText = ''; conflict = false; recovery = null;
+        options.replace([]);
         return;
       }
       if (!response.ok) throw new Error(body.error ?? `HTTP ${response.status}`);
       const reply = body as ChatReply;
       validateReplyPackage(reply);
+      if (reply.conversation.id !== requestedId) throw new Error('The server returned a different conversation.');
       conversation = reply.conversation;
+      conversationScope = reply.conversation.projectId ?? scope;
+      restoreFailed = false;
+      storeChat(conversation.projectId ?? scope, conversation.id);
       pending = null; errorText = ''; conflict = false; recoveryHint = '';
       recovery = isRecoveryConflict(body) ? (body.recoveryConflict ?? {}) : null;
       dismissedContextChipIds.clear();
       options.replace(reply.conversation.messages);
       notifyConversation();
-      if (reply.project) options.applyProject(reply.project, reply.conversation.phase === 'built');
+      if (disposed || generation !== version) return;
+      if (reply.project) applyReplyProject(reply.project, reply.conversation.phase === 'built');
+      if (disposed || generation !== version) return;
       try { void options.onCastChanged?.(conversation.cast ?? []); } catch { /* optional observer */ }
       options.log(recovery
         ? 'Restored a conversation that needs a recovery decision'
         : `Restored conversation: ${reply.conversation.messages.length} messages`);
     } catch (error) {
+      if (!current()) return;
+      restoreFailed = true;
+      conflict = true;
+      errorText = `Could not restore the video conversation: ${(error as Error).message}`;
       options.log(`Could not restore the video conversation: ${(error as Error).message}`);
     } finally {
-      render();
+      if (!disposed) render();
     }
   }
-  const loaded = load();
+  let loaded = load();
+
+  function applyReplyProject(project: ChatProject, built: boolean): void {
+    const active = editContext();
+    // A restored conversation can lag behind edits made in another mode.
+    if (active?.packageId === project.package.id && project.revision < active.revision) return;
+    options.applyProject(project, built);
+  }
+
+  /** Rebind after a gallery/project selection. Revisions alone preserve the chat. */
+  async function setProjectContext(next: ProjectChatBinding | null): Promise<void> {
+    const previousScope = conversationScope;
+    const previousOwner = ownerAllowed();
+    if (next && binding?.packageId === next.packageId) {
+      next = { ...next, revision: Math.max(next.revision, binding.revision) };
+    }
+    const selectedId = next && Object.prototype.hasOwnProperty.call(next, 'conversationId')
+      ? next.conversationId ?? null
+      : next?.packageId === previousScope ? conversationId : savedChat(next?.packageId);
+    const changed = previousScope !== (next?.packageId ?? null) || selectedId !== conversationId
+      || restoreFailed
+      || previousOwner !== (!disposed && next?.owner !== false && options.canUseOwnerApi?.() !== false);
+    binding = next;
+    newVideoFromPackage = null;
+    if (!changed || disposed) return;
+    generation += 1;
+    conversationScope = next?.packageId ?? null;
+    conversationId = selectedId && /^chat_[A-Za-z0-9_-]+$/.test(selectedId) ? selectedId : null;
+    conversation = null;
+    pending = null; errorText = ''; conflict = false; recovery = null; recoveryHint = '';
+    restoreFailed = false; busy = false;
+    dismissedContextChipIds.clear();
+    options.replace([]);
+    options.setBusy(!ownerAllowed());
+    render();
+    loaded = load();
+    await loaded;
+  }
 
   function ensureConversationId(): string {
+    if (!ownerAllowed()) throw new Error('Project chat is only available to the project owner.');
     conversationId ??= `chat_${randomUUID()}`;
-    localStorage.setItem(STORAGE_KEY, conversationId);
+    storeChat(packageScope(), conversationId);
     return conversationId;
   }
 
@@ -962,6 +1084,9 @@ function mountProjectChatController(options: ProjectChatControllerOptions) {
    * composer gets an editable suggestion that is never sent automatically.
    */
   async function rejectWithoutBinding(kind: ProposalKind, proposalId: string): Promise<boolean> {
+    if (!ownerAllowed()) return false;
+    const current = checkpoint();
+    const version = generation;
     const stillPending = kind === 'reference'
       ? proposedAssignments().some(assignment => assignment.id === proposalId)
       : proposedCastProposals().some(proposal => proposal.id === proposalId);
@@ -978,28 +1103,32 @@ function mountProjectChatController(options: ProjectChatControllerOptions) {
           conversationId: ensureConversationId(),
           turnId: randomUUID(),
           baseRevision: conversation?.revision ?? 0,
+          ...(editContext() ? { expectedPackageId: editContext()!.packageId, expectedPackageRevision: editContext()!.revision } : {}),
           ...(kind === 'reference'
             ? { rejectAssignments: [proposalId] }
             : { rejectCastProposals: [proposalId] }),
         }),
       });
       const body = await response.json().catch(() => ({})) as ChatReply & { error?: string };
+      if (!current()) return false;
       if (!response.ok) throw new Error(body?.error ?? `HTTP ${response.status}`);
       if (body?.conversation) {
+        validateReplyPackage(body);
         options.replace(body.conversation.messages);
         adopt(body, Boolean(body.built));
+        if (generation !== version) return false;
       }
       prefillComposer(`Not this one: ${label}. `);
       options.log(`Rejected proposal ${proposalId}; the composer has an editable message`);
       if (kind === 'reference') void options.onReferencesChanged?.();
       return true;
     } catch (error) {
+      if (!current()) return false;
       errorText = `Could not reject proposal: ${(error as Error).message}`;
       options.log(`Could not reject proposal ${proposalId}: ${(error as Error).message}`);
       return false;
     } finally {
-      busy = false;
-      render();
+      if (!disposed && generation === version) { busy = false; render(); }
     }
   }
 
@@ -1070,10 +1199,12 @@ function mountProjectChatController(options: ProjectChatControllerOptions) {
     action: ProposalDecisionAction,
   ): Promise<boolean> {
     const id = trimText(proposalId);
-    if (!id || busy || (kind !== 'reference' && kind !== 'cast')
+    if (!ownerAllowed() || !id || busy || (kind !== 'reference' && kind !== 'cast')
       || (action !== 'accept' && action !== 'reject')) return false;
     await loaded;
-    if (busy) return false;
+    if (busy || recovery || restoreFailed || !ownerAllowed()) return false;
+    const current = checkpoint();
+    const version = generation;
     const binding = options.proposalCommands;
     if (!binding) {
       if (action === 'accept') return await legacyProposalAccept(kind, id);
@@ -1117,6 +1248,7 @@ function mountProjectChatController(options: ProjectChatControllerOptions) {
     render();
     try {
       await transmitProposalCommand(binding, command);
+      if (!current()) return false;
       markProposalDecided(kind, id, action);
       options.log(action === 'accept' ? `Accepted proposal ${id}` : `Rejected proposal ${id}`);
       if (kind === 'reference') void options.onReferencesChanged?.();
@@ -1125,19 +1257,24 @@ function mountProjectChatController(options: ProjectChatControllerOptions) {
       }
       return true;
     } catch (error) {
+      if (!current()) return false;
       errorText = `Could not ${action} proposal: ${(error as Error).message}`;
       options.log(`Could not ${action} proposal ${id}: ${(error as Error).message}`);
       return false;
     } finally {
-      busy = false;
-      render();
+      if (!disposed && generation === version) { busy = false; render(); }
     }
   }
 
   async function send(text: string, mode: 'plan' | 'express', action?: 'build' | 'authorizeClipProposals', confirm?: string[], confirmCast?: string[], confirmClip?: string[]): Promise<void> {
-    if (busy || recovery || !text.trim()) return;
+    if (!ownerAllowed() || busy || recovery || !text.trim()) return;
+    const version = generation;
     busy = true;
     await loaded;
+    if (version !== generation) return;
+    if (!ownerAllowed()) { busy = false; render(); return; }
+    if (recovery || restoreFailed) { busy = false; render(); return; }
+    const current = checkpoint();
     const turnContext = turnContextChips();
     options.append('user', text.trim());
     try {
@@ -1146,11 +1283,15 @@ function mountProjectChatController(options: ProjectChatControllerOptions) {
         throw new Error('The conversation belongs to a different project. Open the current project’s conversation before editing.');
       }
       const provider = await options.provider();
+      if (!current()) {
+        if (generation === version) { busy = false; render(); }
+        return;
+      }
       pending = { conversationId: ensureConversationId(), turnId: randomUUID(), message: text, mode,
         provider: provider.provider, model: provider.model,
         ...(editing ? { expectedPackageId: editing.packageId, expectedPackageRevision: editing.revision } : {}),
         ...(conversation ? { baseRevision: conversation.revision } : {}),
-        ...(options.adoptPackageId && !conversation?.projectId ? { adoptPackageId: options.adoptPackageId } : {}),
+        ...(packageScope() && !conversation?.projectId ? { adoptPackageId: packageScope()! } : {}),
         ...(action ? { action } : {}),
         ...(confirm?.length ? { confirmAssignments: confirm } : {}),
         ...(confirmClip?.length ? { confirmClipProposals: confirmClip } : {}),
@@ -1158,6 +1299,7 @@ function mountProjectChatController(options: ProjectChatControllerOptions) {
         ...(turnContext.length ? { turnContext } : {}) };
       await perform(pending);
     } catch (error) {
+      if (!current()) return;
       errorText = (error as Error).message;
       options.append('assistant', `I couldn't send that message: ${errorText}`);
       busy = false; render();
@@ -1167,24 +1309,33 @@ function mountProjectChatController(options: ProjectChatControllerOptions) {
   /** Apply a get-style recovery body without treating it as a new turn. */
   function applyRecoveryBody(body: RecoveryReply): void {
     if (!body || !body.conversation || typeof body.conversation !== 'object') return;
+    const version = generation;
     validateReplyPackage(body);
     conversation = body.conversation;
+    conversationScope = body.conversation.projectId ?? packageScope();
     if (typeof body.conversation.id === 'string' && body.conversation.id) {
       conversationId = body.conversation.id;
-      localStorage.setItem(STORAGE_KEY, conversationId);
+      storeChat(body.conversation.projectId ?? packageScope(), conversationId);
     }
     options.replace(Array.isArray(body.conversation.messages) ? body.conversation.messages : []);
     notifyConversation();
-    if (body.project) options.applyProject(body.project, body.conversation.phase === 'built');
+    if (disposed || generation !== version) return;
+    if (body.project) applyReplyProject(body.project, body.conversation.phase === 'built');
+    if (disposed || generation !== version) return;
     try { void options.onCastChanged?.(body.conversation.cast ?? []); } catch { /* optional observer */ }
   }
 
   async function resolveRecoveryChoice(choice: 'discard' | 'retry'): Promise<void> {
-    if (busy || !recovery) return;
+    if (!ownerAllowed() || busy || !recovery) return;
+    const current = checkpoint();
+    const version = generation;
     const target: RecoveryConflict = {
       ...recovery,
       ...(recovery.id || recovery.conversationId || !conversationId ? {} : { id: conversationId }),
     };
+    if ((target.id && target.id !== conversationId)
+      || (target.conversationId && target.conversationId !== conversationId)
+      || (target.projectId && packageScope() && target.projectId !== packageScope())) return;
     busy = true;
     errorText = ''; recoveryHint = '';
     options.setBusy(true, choice === 'discard' ? 'restoring the last good save…' : 'retrying the turn…');
@@ -1197,6 +1348,7 @@ function mountProjectChatController(options: ProjectChatControllerOptions) {
         body: JSON.stringify(request.body),
       });
       const body = await response.json().catch(() => ({})) as RecoveryReply;
+      if (!current()) return;
       if (!response.ok) {
         if (isRecoveryConflict(body)) {
           recovery = body.recoveryConflict ?? target;
@@ -1209,6 +1361,7 @@ function mountProjectChatController(options: ProjectChatControllerOptions) {
       recovery = null;
       conflict = false;
       applyRecoveryBody(body);
+      if (!disposed && generation !== version) return;
       pending = null;
       if (choice === 'retry') {
         const retry = body.retry;
@@ -1227,16 +1380,32 @@ function mountProjectChatController(options: ProjectChatControllerOptions) {
         options.log(body.restored ? 'Restored the last good save.' : 'Kept the newest save.');
       }
     } catch (error) {
+      if (!current()) return;
       errorText = (error as Error).message;
       options.log(`Could not resolve the conversation recovery: ${(error as Error).message}`);
     } finally {
-      busy = false;
-      options.setBusy(false);
-      render();
+      if (!disposed && generation === version) {
+        busy = false;
+        options.setBusy(!ownerAllowed());
+        render();
+      }
     }
   }
 
   async function perform(request: TurnRequest): Promise<void> {
+    if (!ownerAllowed()) return;
+    const editing = editContext();
+    if (request.conversationId !== conversationId
+      || (request.expectedPackageId && (request.expectedPackageId !== packageScope()
+        || request.expectedPackageRevision !== editing?.revision))) {
+      pending = null;
+      busy = false;
+      errorText = 'The open project changed. Send a new message against its current revision.';
+      render();
+      return;
+    }
+    const current = checkpoint();
+    const version = generation;
     busy = true;
     errorText = ''; conflict = false; render();
     options.setBusy(true, 'the agent is writing the next version…');
@@ -1250,9 +1419,10 @@ function mountProjectChatController(options: ProjectChatControllerOptions) {
       });
     }
     const pollProgress = async (): Promise<void> => {
-      if (!getProgress) return;
+      if (!getProgress || !current()) return;
       try {
-        publishAgentProgress(await getProgress(request.turnId));
+        const progress = await getProgress(request.turnId);
+        if (current()) publishAgentProgress(progress);
       } catch {
         // The response remains authoritative; telemetry retries on the next tick.
       }
@@ -1267,6 +1437,7 @@ function mountProjectChatController(options: ProjectChatControllerOptions) {
         body: JSON.stringify({ ...request, ...(options.brand?.() ? { brand: options.brand() } : {}) }),
       });
       const body = await response.json().catch(() => ({}));
+      if (!current()) return;
       if (!response.ok) {
         failureBody = body as RecoveryReply;
         conflict = response.status === 409;
@@ -1277,9 +1448,11 @@ function mountProjectChatController(options: ProjectChatControllerOptions) {
       pending = null;
       options.replace(reply.conversation.messages);
       adopt(reply, reply.built);
+      if (disposed || generation !== version) return;
       void options.onReferencesChanged?.();
       options.log(reply.built ? `Project updated: ${reply.project?.package.title ?? reply.conversation.plan?.title}` : 'Agent replied; project unchanged');
     } catch (error) {
+      if (!current()) return;
       if (failureBody && isRecoveryConflict(failureBody)) {
         recovery = failureBody.recoveryConflict ?? {};
         conflict = false;
@@ -1293,16 +1466,28 @@ function mountProjectChatController(options: ProjectChatControllerOptions) {
     } finally {
       if (progressTimer !== null) clearInterval(progressTimer);
       await pollProgress();
-      busy = false;
-      dismissedContextChipIds.clear();
-      options.setBusy(false);
-      render();
+      if (!disposed && generation === version) {
+        busy = false;
+        dismissedContextChipIds.clear();
+        options.setBusy(!ownerAllowed());
+        render();
+      }
     }
   }
 
   render();
   return {
-    ready: loaded,
+    get ready() { return loaded; },
+    setProjectContext,
+    /** Refresh on mode re-entry without reopening or replacing an in-flight turn. */
+    reload: () => {
+      if (!ownerAllowed() || busy) return loaded;
+      generation += 1;
+      loaded = load();
+      return loaded;
+    },
+    /** Invalidate pending loads/turns before removing or replacing this panel. */
+    dispose: () => { disposed = true; generation += 1; },
     send,
     ensureConversationId,
     confirmAssignments,
@@ -1363,8 +1548,8 @@ export function createProjectChat(host: HTMLElement, options: CreateProjectChatO
   };
 
   const setBusy = (busy: boolean): void => {
-    composer.disabled = busy;
-    sendButton.disabled = busy;
+    composer.disabled = busy || options.canUseOwnerApi?.() === false;
+    sendButton.disabled = composer.disabled;
     form.setAttribute('aria-busy', String(busy));
   };
 
@@ -1377,6 +1562,7 @@ export function createProjectChat(host: HTMLElement, options: CreateProjectChatO
     setBusy,
     composer: () => host.querySelector<HTMLTextAreaElement>('[data-project-chat-input]'),
   });
+  setBusy(false);
   const submit = (event: Event): void => {
     event.preventDefault();
     if (destroyed) return;
@@ -1398,6 +1584,7 @@ export function createProjectChat(host: HTMLElement, options: CreateProjectChatO
     destroy(): void {
       if (destroyed) return;
       destroyed = true;
+      controller.dispose();
       stopAgentConsole();
       form.removeEventListener('submit', submit);
       form.innerHTML = '';

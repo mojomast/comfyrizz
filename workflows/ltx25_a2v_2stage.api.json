@@ -196,13 +196,13 @@
   "class_type": "ImageScale",
   "inputs": {
    "crop": "center",
-   "height": 544,
+   "height": 288,
    "image": [
     "30",
     0
    ],
    "upscale_method": "lanczos",
-   "width": 960
+   "width": 512
   }
  },
  "32": {
@@ -376,9 +376,9 @@
   "class_type": "EmptyLTXVLatentVideo",
   "inputs": {
    "batch_size": 1,
-   "height": 272,
+   "height": 288,
    "length": 97,
-   "width": 480
+   "width": 512
   }
  }
 }

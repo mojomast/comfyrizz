@@ -11,6 +11,96 @@ const PRODUCTION_ID = 'prod_0123456789abcdef01234567';
 const PLAN_HASH = 'c'.repeat(64);
 const PROMPT = 'A friendly robot who learns to bake bread';
 
+function pendingFilm() {
+  return { id: 'pkg_1', revision: 59, title: 'Saved film', format: { fps: 30 },
+    scenes: [{ id: 's1', preferredFrames: 900, narration: 'Keep these exact words.', media: [{ asset: 'a_video' }] }],
+    assets: { a_video: { kind: 'video', status: 'pending', gen: { generator: 'fasth3-omni' } } } };
+}
+
+test('confirmed compute recovery preserves the saved creative package and refreshes only the execution plan on Retry', async () => {
+  const pkg = pendingFilm();
+  const { api, host, store, calls } = harness({ builtPackage: pkg });
+  host.editorStore.saveState = () => ({ status: 'saved', acknowledgedRevision: 59, editSequence: 0, acknowledgedSequence: 0 });
+  const session = createSuperEasySession({ api, host, store, go() {} });
+  await session.generate({ prompt: PROMPT, compute: 'cpu', lengthS: 30, proposalOnly: true });
+  const blocked = await session.approveProposal();
+  assert.equal(blocked.code, 'GENERATED_MEDIA_REQUIRES_COLAB');
+  const beforeCalls = calls.length;
+  const setup = { compute: 'colab', confirmed: true, spendCap: 9, motionModel: 'auto' };
+  assert.equal(session.configureCompute({ ...setup, confirmed: false }), false);
+  assert.equal(session.configureCompute(setup), true);
+  assert.equal(calls.length, beforeCalls, 'setup neither plans nor dispatches');
+  assert.deepEqual(host.getPackage(), pkg);
+  assert.equal(store.get().spendCap, 9);
+  api.proposeEasyPlan = async (_id, body) => {
+    assert.equal(body.compute, 'colab');
+    assert.equal(body.expectedPackageRevision, 59);
+    throw new Error('Stop at refreshed quote boundary');
+  };
+  await session.retry();
+  assert.equal(calls.filter(call => call.kind === 'build').length, 1, 'no second agent planning call');
+  assert.equal(calls.filter(call => call.kind === 'production').length, 1, 'same production');
+  assert.equal(calls.some(call => ['run', 'dispatch', 'spend-cap'].includes(call.kind)), false);
+  assert.deepEqual(host.getPackage(), pkg);
+});
+
+test('compute recovery refuses changed creative inputs, unacknowledged saves and changed revisions', async () => {
+  for (const change of ['input', 'save', 'revision']) {
+    const pkg = pendingFilm();
+    const { api, host, store } = harness({ builtPackage: pkg });
+    let saved = { status: 'saved', acknowledgedRevision: 59, editSequence: 0, acknowledgedSequence: 0 };
+    host.editorStore.saveState = () => saved;
+    const session = createSuperEasySession({ api, host, store, go() {} });
+    await session.generate({ prompt: PROMPT, compute: 'cpu', proposalOnly: true });
+    await session.approveProposal();
+    if (change === 'input') store.patch({ idea: { ...store.get().idea, text: 'Changed creative brief' } });
+    if (change === 'save') saved = { ...saved, status: 'pending' };
+    if (change === 'revision') host.getPackage().revision++;
+    const before = structuredClone(store.get());
+    assert.equal(session.configureCompute({ compute: 'colab', confirmed: true, spendCap: 9, motionModel: 'auto' }), false, change);
+    assert.deepEqual(store.get(), before, change);
+  }
+});
+
+test('reload recovers an unapproved CPU-blocked plan as review without planning or generation', async () => {
+  const pkg = pendingFilm();
+  const { api, host, store, calls } = harness({ builtPackage: pkg });
+  host.editorStore.saveState = () => ({ status: 'saved', acknowledgedRevision: 59, editSequence: 0, acknowledgedSequence: 0 });
+  const first = createSuperEasySession({ api, host, store, go() {} });
+  await first.generate({ prompt: PROMPT, compute: 'cpu', proposalOnly: true });
+  await first.approveProposal();
+  const snapshot = await api.getProduction(PRODUCTION_ID);
+  Object.assign(snapshot.production, { packageId: pkg.id, intent: 'active', actionIds: [] });
+  api.getPackage = async () => ({ package: pkg });
+  api.compilePackage = async () => ({ timeline: { durationInFrames: 900 } });
+  const second = createSuperEasySession({ api, host, store, go() {} });
+  await second.restoreComputeProposal(snapshot);
+  assert.equal(second.proposal().reviewedPackageRevision, 59);
+  assert.equal(second.phase(), 'proposal');
+  assert.equal(calls.filter(call => call.kind === 'build').length, 1);
+  assert.equal(calls.some(call => call.command?.kind === 'plan.approve' || ['run', 'dispatch'].includes(call.kind)), false);
+  assert.equal(second.configureCompute({ compute: 'colab', confirmed: true, spendCap: 9, motionModel: 'auto' }), true);
+  assert.deepEqual(host.getPackage(), pkg);
+});
+
+test('reload never recovers active work or races into a different project', async () => {
+  for (const change of ['action', 'intent', 'input', 'late']) {
+    const pkg = pendingFilm();
+    const { api, host, store } = harness({ builtPackage: pkg });
+    const first = createSuperEasySession({ api, host, store, go() {} });
+    await first.generate({ prompt: PROMPT, compute: 'cpu', proposalOnly: true });
+    await first.approveProposal();
+    const snapshot = await api.getProduction(PRODUCTION_ID);
+    Object.assign(snapshot.production, { packageId: pkg.id, intent: change === 'intent' ? 'paused' : 'active', actionIds: change === 'action' ? ['act_1'] : [] });
+    if (change === 'input') store.patch({ idea: { ...store.get().idea, text: 'Changed brief' } });
+    api.getPackage = async () => ({ package: pkg });
+    api.compilePackage = async () => { if (change === 'late') store.startNew(); return { timeline: {} }; };
+    const session = createSuperEasySession({ api, host, store, go() {} });
+    await session.restoreComputeProposal(snapshot);
+    assert.equal(session.proposal(), null, change);
+  }
+});
+
 test('revision error keeps the pinned package and allows an edited request through the mounted UI before approval', async () => {
   const pkg = { id: 'pkg_1', revision: 42, scenes: [{ id: 's1', layout: 'title', copy: { headline: 'Original' } }], assets: {} };
   const original = structuredClone(pkg);
@@ -259,25 +349,96 @@ function harness(options = {}) {
 
 test('hosted Super Easy uses the invite budget and dispatches only through the production outbox', async () => {
   const { api, host, calls, store } = harness({ hosted: true });
+  const forbidden = [];
+  for (const method of ['proposeActionPlan', 'startRun', 'colabStatus', 'getAgentProgress', 'cancelAgent', 'getRun', 'getRunVideo']) {
+    api[method] = async () => { forbidden.push(method); throw Error(`Owner API forbidden: ${method}`); };
+  }
+  host.aiSelection = async () => { throw new Error('Guests cannot read owner provider settings'); };
   const result = await runSuperEasy({ prompt: PROMPT, hostedInvite: true }, { api, host, store, go: () => {} });
   assert.equal(result.ok, true, JSON.stringify(result));
   assert.equal(store.get().compute, 'colab');
   assert.equal(store.get().spendCap, 1.2);
   assert.equal(calls.filter(call => call.kind === 'dispatch').length, 1);
   assert.equal(calls.some(call => call.kind === 'run' || call.kind === 'colab-status'), false);
+  assert.deepEqual(forbidden, [], 'server-authored hosted plans never enter the owner final-plan or run APIs');
 });
 
 test('hosted Super Easy refuses before planning when the invite session is unavailable', async () => {
-  const { api, host, calls, store } = harness({ session: { role: 'guest', backendId: 'colab', budgetUnits: 0 } });
+  const { api, host, calls, store } = harness({ session: { role: 'guest', backendId: 'colab', budgetUnits: 0, invite: { status: 'revoked' } } });
   const result = await runSuperEasy({ prompt: PROMPT, hostedInvite: true }, { api, host, store, go: () => {} });
   assert.equal(result.ok, false);
   assert.equal(result.code, 'INVITE_UNAVAILABLE');
   assert.deepEqual(kinds(calls), ['invite-session']);
 });
 
+test('hosted Super Easy uses available invite credits despite a stale local CPU setup and cap', async () => {
+  const { api, host, store } = harness({ hosted: true, session: { role: 'guest', backendId: 'colab', budgetUnits: 7.5, spendEnabled: true, invite: { status: 'active' } } });
+  store.patch({ compute: 'cpu', spendCap: 500 });
+  host.aiSelection = async () => { throw new Error('Owner settings must not be requested'); };
+  const result = await runSuperEasy({ prompt: PROMPT, compute: 'colab', setupConfirmed: false, hostedInvite: true }, { api, host, store, go: () => {} });
+  assert.equal(result.ok, true, JSON.stringify(result));
+  assert.equal(store.get().compute, 'colab');
+  assert.equal(store.get().spendCap, 7.5);
+});
+
+test('hosted Super Easy allows CPU work when spending is paused or the invite is exhausted', async () => {
+  for (const session of [
+    { role: 'guest', backendId: 'colab', budgetUnits: 7.5, spendEnabled: false, invite: { status: 'active' } },
+    { role: 'guest', backendId: 'colab', budgetUnits: 7.5, spendEnabled: true, invite: { status: 'exhausted' } },
+  ]) {
+    const { api, host, calls, store } = harness({ hosted: true, session });
+    const result = await runSuperEasy({ prompt: PROMPT, hostedInvite: true }, { api, host, store, go: () => {} });
+    assert.equal(result.ok, true, JSON.stringify(result));
+    assert.equal(store.get().compute, 'cpu');
+    assert.equal(store.get().spendCap, 0);
+    assert.equal(calls.some(call => call.kind === 'run' || call.kind === 'colab-status'), false);
+  }
+});
+
 function kinds(calls) {
   return calls.map((call) => call.kind);
 }
+
+test('hosted constructor preserves explicit CPU shared-film edits through revise, reload, failed approval and retry', async () => {
+  for (const invite of [
+    { role: 'guest', backendId: 'colab', budgetUnits: 7, spendEnabled: true, invite: { status: 'active' } },
+    { role: 'guest', backendId: 'colab', budgetUnits: 7, spendEnabled: false, invite: { status: 'active' } },
+    { role: 'guest', backendId: 'colab', budgetUnits: 0, spendEnabled: true, invite: { status: 'exhausted' } },
+  ]) {
+    const pkg = { id: 'pkg_shared', revision: 6, title: 'Shared film', format: { fps: 30 }, scenes: [{ id: 's1', preferredFrames: 90 }], assets: {} };
+    const { api, host, store, calls } = harness({ builtPackage: pkg, session: invite,
+      actions: [{ id: 'act_cpu_final', kind: 'final', upperBound: 0, backendId: 'cpu' }] });
+    const forbidden = [];
+    for (const method of ['proposeActionPlan', 'startRun', 'colabStatus', 'getAgentProgress', 'cancelAgent', 'getRun', 'getRunVideo']) {
+      api[method] = async () => { forbidden.push(method); throw Error(`Owner API forbidden: ${method}`); };
+    }
+    host.adoptBuiltPackage({ package: pkg });
+    host.aiSelection = async () => { throw Error('Owner provider settings are forbidden'); };
+    host.editorStore.saveState = () => ({ status: 'saved', acknowledgedRevision: host.getPackage().revision, editSequence: 0, acknowledgedSequence: 0 });
+    const create = () => createSuperEasySession({ hostedInvite: true, api, host, store, go() {}, watch: () => () => {} });
+    const session = create(); session.reviewExisting();
+    assert.equal(store.get().compute, 'cpu'); assert.equal(store.get().spendCap, 0);
+    const result = await session.reviseProposal('Update the title while reusing existing media.');
+    assert.equal(result.ok, true, JSON.stringify(result));
+    assert.equal(store.get().compute, 'cpu'); assert.equal(store.get().spendCap, 0);
+    api.getPackage = async () => ({ package: host.getPackage() });
+    api.compilePackage = async () => ({ timeline: { durationInFrames: 90 } });
+    const reopened = create(); await reopened.restoreProposal();
+    assert.equal(reopened.phase(), 'proposal');
+    const propose = api.proposeEasyPlan;
+    let first = true;
+    api.proposeEasyPlan = async (id, body) => { if (first) { first = false; throw Error('Quote connection lost'); } assert.equal(body.compute, 'cpu'); return propose(id, body); };
+    const failed = await reopened.approveProposal(); assert.equal(failed.ok, false);
+    const retried = await reopened.retry(); assert.equal(retried.ok, true, JSON.stringify(retried));
+    assert.equal(store.get().compute, 'cpu'); assert.equal(store.get().spendCap, 0);
+    assert.equal(calls.some(call => ['run', 'colab-status', 'final-plan'].includes(call.kind)), false);
+    assert.equal(calls.filter(call => call.kind === 'dispatch').length, 1);
+    assert.equal(calls.find(call => call.kind === 'dispatch').body.payload.actionId, 'act_cpu_final');
+    assert.equal(calls.some(call => call.kind === 'spend-cap' && call.body.ceiling > 0), false);
+    assert.deepEqual(forbidden, [], 'CPU edits, reload and retry stay within hosted permissions');
+    reopened.stop(); session.stop(); store.flush();
+  }
+});
 
 test('CPU approval generates local narration before opening the review preview', async () => {
   const pkg = { id: 'pkg_1', revision: 2, voice: { enabled: true, engine: 'kokoro' }, scenes: [{ id: 's1', narration: 'A line.' }], assets: {} };

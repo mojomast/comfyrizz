@@ -1,0 +1,8 @@
+.film-review-dialog { width: min(780px, calc(100vw - 32px)); max-height: 85dvh; overflow: auto; color: var(--text, #e8ebf3); background: var(--bg-1, #141822); border: 1px solid var(--border, #394052); border-radius: 16px; padding: 24px; }
+.film-review-dialog::backdrop { background: #050810bb; }
+.film-review-dialog code { overflow-wrap: anywhere; font-size: .85em; }
+.film-review-dialog pre { white-space: pre-wrap; overflow-wrap: anywhere; font-size: .85em; }
+.film-review-dialog section, .film-review-dialog fieldset { margin-block: 20px; padding: 16px; border: 1px solid var(--border, #394052); border-radius: 10px; }
+.film-review-dialog label { display: block; margin-block: 12px; }
+.film-review-dialog button { margin: 8px 8px 8px 0; }
+.film-review-dialog li { margin-block: 10px; }

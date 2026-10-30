@@ -585,7 +585,7 @@ export const step: EasyStepModule = {
         return;
       }
       const openEditor = target.closest('[data-easy-review-open-editor]');
-      if (openEditor && el.contains(openEditor)) ctx.host.openEditor();
+      if (openEditor && el.contains(openEditor)) ctx.host.openEditor(ctx.state.packageId);
     }
 
     function onKeyDown(event: KeyboardEvent): void {

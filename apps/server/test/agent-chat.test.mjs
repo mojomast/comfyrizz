@@ -133,7 +133,7 @@ test('chat builds a real project from conversation copy and storyboard', { timeo
     provider: 'custom', model: 'test-model', mode: 'plan',
   });
   assert.equal(second.status, 200, JSON.stringify(second.body));
-  assert.equal(second.body.built, true);
+  assert.equal(second.body.built, true, JSON.stringify({ reply: second.body.reply, error: second.body.error, warning: second.body.warning, stop: second.body.trace?.stop }).slice(0, 1500));
   const revised = second.body.project.package;
   assert.equal(revised.id, first.body.project.package.id, 'revisions stay in the same project');
   assert.equal(revised.revision, 2);

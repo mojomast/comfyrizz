@@ -36,12 +36,14 @@ const WORKFLOW_SHA = "c".repeat(64);
 
 // Captured from the planner at the pre-IP58 baseline for fixtures/package-pending.json. The literal
 // is deliberate: a package with no motion reference must keep a byte-identical cache key, not one
-// that a changed implementation happens to agree with itself about.
+// that a changed implementation happens to agree with itself about. The upscale
+// golden was deliberately updated for the valid uncropped 1920x1152 raster;
+// reusing the former 1920x1080 key would reuse an off-lattice generation.
 const GOLDEN_NO_MOTION = {
   "a_cutout.still": "1a96b4358ffb7ce9631246ea7ba62715df3435475b7df572c7750cba743380b4",
   "a_plate1_still.still": "d151fb1ae63f2c534a2634c9b7d127c0efa33ce3f37047599cd89cc4947e91a1",
   "a_plate1.plate": "ec2f8632ab503e4b7fab9fe372f8906bee1e70b68fec5bd8c13293ddccc3df6f",
-  "a_plate1.upscale": "4154882a940388d528103611b06c75ee2d4c0a363c85e2384a20b0e7ffbed7a5",
+  "a_plate1.upscale": "b8f222215f53a163ea345f4a0717dd2b8de7333ebcc043b1e17b5c84e886b4d7",
   "a_narr.audio": "728ace3192217249dc8dc5984863dd2ad95b4e3cc239e577cee02ecb84f4806a",
 };
 
@@ -183,6 +185,7 @@ test("the cache key carries both hashes and every excerpt parameter", () => {
 
 test("a package without a motion reference keeps its literal baseline cache keys", () => {
   const doc = planJobs(fixture("package-pending.json"));
+  assert.deepEqual(jobOf(doc, "a_plate1.upscale").dims, { width: 1920, height: 1152 });
   for (const [id, expected] of Object.entries(GOLDEN_NO_MOTION)) {
     assert.equal(jobOf(doc, id).cacheKey, expected, id);
     assert.equal(jobOf(doc, id).motionReference, undefined, id);

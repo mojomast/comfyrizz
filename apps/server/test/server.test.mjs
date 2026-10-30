@@ -2,7 +2,7 @@ import { test, before, after } from 'node:test';
 import assert from 'node:assert/strict';
 import { seedMockContribution, approveMockContribution } from './helpers/comfy-contribution.mjs';
 import { createServer, request as httpRequest, get as httpGet } from 'node:http';
-import { mkdtempSync, readFileSync, writeFileSync, rmSync } from 'node:fs';
+import { cpSync, mkdtempSync, readFileSync, writeFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createApp } from '../src/app.mjs';
@@ -46,6 +46,7 @@ before(async () => {
     },
   });
   seedMockContribution(app.store, JSON.parse(JSON.stringify(seed)));
+  cpSync(new URL('../../../examples/launch-demo/assets/', import.meta.url), join(app.store.dir, 'assets'), { recursive: true });
   approveMockContribution(app.takeStore, app.store.read(seed.id), app.store.dir);
   server = createServer(app.handler);
   await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));

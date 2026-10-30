@@ -92,7 +92,7 @@ test('Desk Reset: native panel labels and authored fit survive propose, edit, co
     assert.equal(image.source_aspect, '8:9');
     assert.match(image.caption, /8:9 composition for one 960x1080 comparison panel/);
     assert.doesNotMatch(image.caption, /wide 16:9 composition/);
-    assert.match(image.caption, /no text, no letters/);
+    assert.match(image.caption, /plain, unmarked surfaces/);
   }
   const { planJobs } = await import(new URL('packages/jobs/src/index.mjs', root).href);
   const plan = planJobs(get());

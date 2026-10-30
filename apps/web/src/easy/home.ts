@@ -1,6 +1,7 @@
 import { COPY } from './copy.ts';
 import { escapeHtml } from './components.ts';
 import { exampleHref, readRecent, videoHref, type RecentVideo } from './recent.ts';
+import { renderProjectNavigation } from '../project-gallery-navigation.ts';
 
 const EMPTY_HOME = 'No videos yet. Start your first one.';
 const NEW_VIDEO = 'New video';
@@ -66,6 +67,7 @@ export function renderHomeScreen(videos: readonly HomeVideo[]): string {
   const frame = `<div class="easy-shell easy-home-screen" data-easy-home-screen>
 <header class="easy-header">
 <a class="easy-logo" href="/"><span aria-hidden="true">◆</span> Comfyrizz</a>
+${renderProjectNavigation()}
 </header>
 <main class="easy-main">`;
   return frame + renderHome(videos) + '</main></div>';

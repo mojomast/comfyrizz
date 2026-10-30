@@ -82,7 +82,7 @@ export function requestsLiveActionLook(text: string): boolean {
 // extend "no loud music" to all music, or treat a story mentioning a negative
 // list as an instruction. clausePrefix also resets at "but add" / "and use".
 const SPEECH_ITEM = 'dialogue|narration|narrator|speech|speaking|spoken\\s+words?|voice[\\s-]?over|lyrics|singing|vocals?|(?:whispered\\s+)?voices|vocal\\s+samples';
-const AUDIO_LIST_ITEM = `(?:(?:any|additional|extra)\\s+)?(?:on[\\s-]screen\\s+(?:copy|text|captions?)|copy|text|captions?|subtitles?|titles?|logos?|people|humans?|characters?|photos?|photographs?|images?|footage|claims|tray|plate|hands|cuts|transitions|opener|outro|${SPEECH_ITEM}|music|soundtrack|score|instrumental(?:\\s+bed)?|BGM|sound\\s+effects?|SFX)`;
+const AUDIO_LIST_ITEM = `(?:(?:any|additional|extra)\\s+)?(?:on[\\s-]screen\\s+(?:copy|text|captions?)|copy|text|captions?|subtitles?|titles?|logos?|overlays?|people|humans?|characters?|photos?|photographs?|images?|footage|claims|tray|plate|hands|cuts|transitions|opener|outro|${SPEECH_ITEM}|music|soundtrack|score|instrumental(?:\\s+bed)?|BGM|sound\\s+effects?|SFX)`;
 const NEGATIVE_LIST_PREFIX = new RegExp(`^\\s*(?:please\\s+)?(?:(?:no|without|avoid|exclude)|(?:do\\s+not|don['’]t)\\s+(?:add|include|use))\\s+(?:${AUDIO_LIST_ITEM}(?:\\s*,\\s*(?:(?:and|or|nor)\\s+)?|\\s+(?:and|or|nor)\\s+))+(?:(?:any|additional|extra)\\s+)?$`, 'i');
 
 function prohibitedInList(text: string, subjects: string): boolean {
@@ -98,12 +98,13 @@ export function classifyAudioIntent(brief: string): AudioIntent {
   const text = instructionText(brief);
   // "The signal went silent" and "a silent room" describe the story. Silence
   // applies to the output only when requested as an audio/film directive.
-  const silent = positiveMatch(text, /(?:^|[.!?;\n])\s*(?:please\s+)?silent\b(?=\s*(?:[,;.!?\n]|$))|\bsilent\s+(?:(?:generated|native)\s+)?(?:film|video|sequence|short|title|output)\b|\b(?:make|keep|render)\s+(?:it|(?:the|this)\s+(?:film|video|audio|output))\s+(?:completely\s+)?silent\b|\b(?:full|complete|total)\s+silence\b|\b(?:film|video|output)\s+in\s+silence\b/i)
+  const silent = positiveMatch(text, /(?:^|[.!?;\n])\s*(?:please\s+)?(?:(?:fully|completely)\s+)?silent\b(?=\s*(?:[,;.!?\n]|$))|\bsilent\s+(?:(?:generated|native)\s+)?(?:film|video|sequence|short|title|output)\b|\b(?:make|keep|render)\s+(?:it|(?:the|this)\s+(?:film|video|audio|output))\s+(?:(?:fully|completely)\s+)?silent\b|\b(?:full|complete|total)\s+silence\b|\b(?:film|video|output)\s+in\s+silence\b/i)
     || /\b(?:no|without)\s+(?:any\s+)?(?:audio|sound)\b(?!\s+(?:effects?|design)\b)/i.test(text);
   const nativeSpeech = positiveMatch(text, /\b(?:dialogue|speech|speak(?:s|ing)?|talk(?:s|ing)?|conversations?)\b/i);
   // A character may speak while a separate narrator is explicitly forbidden.
   // Keep legacy "no narration" => wordless only when no native speech is asked for.
-  const prohibitedSpeech = nativeSpeech ? 'dialogue|speech|speaking|spoken\\s+words?|lyrics|singing|vocals?|(?:whispered\\s+)?voices|vocal\\s+samples' : SPEECH_ITEM;
+  // A prohibition on singing/lyrics does not cancel explicitly requested speech.
+  const prohibitedSpeech = nativeSpeech ? 'dialogue|speech|speaking|spoken\\s+words?|vocals?|(?:whispered\\s+)?voices|vocal\\s+samples' : SPEECH_ITEM;
   const wordless = silent || positiveMatch(text, /\bwordless\b/i)
     || new RegExp(`\\b(?:no|without)\\s+(?:any\\s+)?(?:${prohibitedSpeech})\\b`, 'i').test(text)
     || prohibitedInList(text, prohibitedSpeech);

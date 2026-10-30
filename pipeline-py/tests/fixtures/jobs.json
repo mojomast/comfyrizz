@@ -180,7 +180,7 @@
         "image": "a_plate1_still",
         "prompt": "slow drift through a soft blue nebula, no text, no letters, no words, no logos, no watermarks, static camera, gentle motion, no cuts",
         "width": 1920,
-        "height": 1080,
+        "height": 1152,
         "frames": 97,
         "fps": 24,
         "upscale": "x2+crop",
@@ -189,7 +189,7 @@
       "source": "assets/a_plate1.mp4",
       "dims": {
         "width": 1920,
-        "height": 1080
+        "height": 1152
       },
       "upscaleTarget": {
         "width": 1920,
@@ -206,7 +206,7 @@
       "fps": 24,
       "stage1Dims": {
         "width": 960,
-        "height": 540
+        "height": 576
       },
       "fileInputs": [
         {
@@ -228,7 +228,7 @@
           "because": "GPU test 2: the verified good i2v prompts used a static camera and no cuts; push-ins and orbits went wrong"
         }
       ],
-      "cacheKey": "4154882a940388d528103611b06c75ee2d4c0a363c85e2384a20b0e7ffbed7a5"
+      "cacheKey": "b8f222215f53a163ea345f4a0717dd2b8de7333ebcc043b1e17b5c84e886b4d7"
     },
     {
       "id": "a_narr.audio",
@@ -261,5 +261,5 @@
     }
   ],
   "warnings": [],
-  "hash": "e10311868dda341dfd05d13604abbe13289ce983f8517d3d29de7efcfc81cbb2"
+  "hash": "98e135e39b8dce294afadaa30e8d9d17be04fc731c1de0d0a04dbdfbd703a72e"
 }

@@ -61,7 +61,9 @@ test('compositions contain no network imports or calls', () => {
     assert.doesNotMatch(source, /\bfetch\s*\(/, `${file} calls fetch()`);
     assert.doesNotMatch(source, /XMLHttpRequest|from ['"]https?:\/\//, `${file} has a network reference`);
     // www.w3.org is the SVG namespace, not a request target.
-    assert.doesNotMatch(source, /https?:\/\/(?!www\.w3\.org)/, `${file} has an external URL`);
+    // The same namespace is also escaped in RegExp constructor source strings.
+    const urls = source.replaceAll('www\\\\.w3\\\\.org', 'www.w3.org');
+    assert.doesNotMatch(urls, /https?:\/\/(?!www\.w3\.org)/, `${file} has an external URL`);
   }
 });
 

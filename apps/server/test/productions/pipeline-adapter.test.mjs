@@ -23,6 +23,7 @@ import {
   mapPipelineStatus,
 } from '../../src/productions/pipeline-adapter.mjs';
 import { createProductionStore } from '../../src/productions/store.mjs';
+import { createCorrectionAdapter } from '../../src/productions/correction-adapter.mjs';
 import { createInviteProductionSpendGuard } from '../../src/invites/production-spend-guard.mjs';
 import { reconcileInvitePipeline } from '../../src/invites/production-reconcile.mjs';
 import { createDurableInviteLedger } from '../../../../packages/backends/src/durable-invite-ledger.mjs';
@@ -135,6 +136,7 @@ function fakeController() {
         : undefined;
       const run = {
         runId,
+        packageId: pkg.id,
         status: 'running',
         origin,
         runtimes: {},
@@ -257,6 +259,51 @@ test('concurrent invite dispatches reserve once and start one attributed run', a
   assert.equal(ledger.get(invite.id).remainingCu, 0.3);
 });
 
+for (const scenario of ['capacity', 'staging_error', 'unknown_error', 'legacy_409', 'wrong_origin', 'wrong_package', 'legacy_success']) {
+  test(`composed correction wrapper + invite spend guard admission boundary: ${scenario}`, async t => {
+    const { runtimeDir, store } = seed(t);
+    const ledger = createDurableInviteLedger({ path: join(runtimeDir, 'admission-ledger.sqlite') });
+    t.after(() => ledger.close());
+    const invite = ledger.mint({ cu: 1, maxFilms: 1, ttlDays: 1 }).invite;
+    const foreign = ledger.mint({ cu: 1, maxFilms: 1, ttlDays: 1 }).invite;
+    ledger.bindResource(invite.id, 'production', PRODUCTION_ID);
+    ledger.bindResource(foreign.id, 'production', 'prod_foreign');
+    ledger.reserveAction({ inviteId: foreign.id, productionId: 'prod_foreign', actionId: 'act_foreign', backendId: 'colab', units: 0.5 });
+    const controller = fakeController();
+    const foreignRun = { runId: 'pipe_foreign', packageId: PACKAGE.id, status: 'running', origin: { productionId: 'prod_foreign', actionId: 'act_foreign' }, runtimes: {} };
+    controller.runs.set(foreignRun.runId, foreignRun);
+    controller.start = async (_pkg, _input, _source, { origin }) => {
+      if (scenario === 'capacity') return { status: 409, holderRunId: foreignRun.runId, submission: 'not_submitted' };
+      if (scenario === 'staging_error') throw Object.assign(new Error('input staging failed'), { submission: 'not_submitted' });
+      if (scenario === 'unknown_error') throw new Error('connection lost after submission');
+      if (scenario === 'legacy_409') return { status: 409, runId: foreignRun.runId, run: foreignRun };
+      if (scenario === 'wrong_origin') return { status: 202, run: foreignRun };
+      const own = { ...foreignRun, runId: 'pipe_own', origin, packageId: scenario === 'wrong_package' ? 'pkg_foreign' : PACKAGE.id };
+      if (scenario === 'wrong_package') return { status: 202, run: own };
+      controller.runs.set(own.runId, own);
+      return own;
+    };
+    const adapter = createCorrectionAdapter({ store, runs: {}, pipeline: createPipelineAdapter({ store, controller }) });
+    const guard = createInviteProductionSpendGuard({ ledger, spendEnabled: () => true, adapter });
+    const result = await guard.admit({ productionId: PRODUCTION_ID, actionId: ACTION_ID, pkg: PACKAGE, input: { backendId: 'colab', budgetUnits: 0.7 }, sourceDir: '.' });
+    const definite = ['capacity', 'staging_error'].includes(scenario);
+    assert.equal(ledger.get(invite.id).committedEstimateCu, definite ? 0 : 0.7);
+    assert.equal(ledger.get(foreign.id).committedEstimateCu, 0.5, 'another invite reservation is never released');
+    assert.equal(currentAction(store)?.runId ?? null, scenario === 'legacy_success' ? 'pipe_own' : null);
+    if (scenario !== 'legacy_success') {
+      assert.equal(result.admitted, false);
+      assert.equal(result.status, definite ? 'blocked' : 'submission_unknown');
+      adapter.cancel({ productionId: PRODUCTION_ID, actionId: ACTION_ID });
+      assert.deepEqual(controller.cancellations, [], 'refused/ambiguous admission must not cancel a foreign run');
+    }
+    if (definite) {
+      // The action-specific zero settlement releases the film slot as well as CU.
+      assert.equal(ledger.reserveAction({ inviteId: invite.id, productionId: PRODUCTION_ID, actionId: 'act_retry_new_slot', backendId: 'colab', units: 1 }).ok, true);
+      assert.equal(ledger.get(invite.id).filmsCompleted, 0);
+    }
+  });
+}
+
 test('invite reservation survives an unknown submission and restart adopts without charging twice', async (t) => {
   const { runtimeDir, store } = seed(t);
   let ledger = createDurableInviteLedger({ path: join(runtimeDir, 'invites.sqlite') });
@@ -282,14 +329,72 @@ test('invite reservation survives an unknown submission and restart adopts witho
   assert.equal(adopted.started, false);
   assert.equal(adopted.adopted, true);
   assert.equal(controller.starts.length, 1);
-  const run = { ...controller.get('pipe_fake_1'), status: 'failed', packageId: PACKAGE.id };
+  const run = { ...controller.get('pipe_fake_1'), status: 'failed', packageId: PACKAGE.id,
+    runtimes: { media: { runId: 'pipe_fake_1', session: 'fixture-no-allocation', ownership: 'managed',
+      state: 'not_started', shutdownVerified: true, allocation: 'not_attempted',
+      costSource: 'verified_no_allocation', spentUnits: 0 } } };
   reconcileInvitePipeline({ ledger, run });
   reconcileInvitePipeline({ ledger, run });
-  assert.equal(ledger.get(invite.id).spentEstimateCu, 0.7);
+  // This fake run proves no allocation. Reconciliation releases its estimate;
+  // the reservation itself is not evidence of actual spend.
+  assert.equal(ledger.get(invite.id).spentEstimateCu, 0);
   assert.equal(ledger.get(invite.id).committedEstimateCu, 0);
   assert.equal(ledger.listGenerations(invite.id).length, 1);
   await assert.rejects(makeGuard().admit(args), /already settled/);
   assert.equal(controller.starts.length, 1);
+});
+
+test('real controller capacity counts a staging invite without attributing the running foreign invite', async t => {
+  const { runtimeDir, store } = seed(t);
+  const ledger = createDurableInviteLedger({ path: join(runtimeDir, 'capacity.sqlite') });
+  t.after(() => ledger.close());
+  const staged = [], workers = [];
+  const controller = createPipelineController({ runtimeDir, productionStore: store, maxConcurrent: 2,
+    parallelAdmission: ({ origin }) => Boolean(ledger.resourceOwner('production', origin?.productionId)),
+    stageInputs: () => new Promise(resolve => staged.push(resolve)),
+    launch: (_spec, receive, exit) => { const worker = { receive, exit, cancelled: false }; workers.push(worker); return { cancel() { worker.cancelled = true; }, kill() {} }; },
+  });
+  t.after(() => controller.close());
+  const adapter = createCorrectionAdapter({ store, runs: {}, pipeline: createPipelineAdapter({ store, controller }) });
+  const guard = createInviteProductionSpendGuard({ ledger, spendEnabled: () => true, adapter });
+  const args = [];
+  for (let index = 0; index < 3; index++) {
+    const productionId = index === 0 ? PRODUCTION_ID : `prod_capacity_${index}`;
+    const actionId = index === 0 ? ACTION_ID : `act_capacity_${index}`;
+    if (index) {
+      const production = { ...makeProduction(), id: productionId, actionIds: [actionId], conversationId: `conv_capacity_${index}` };
+      store.create(production);
+      store.commit(productionId, { commandId: `seed_${index}`, idempotencyKey: `seed_${index}`, baseRevision: 0,
+        events: [{ type: 'action.state_changed', data: { ...makeAction(), id: actionId, productionId } }] });
+    }
+    const invite = ledger.mint({ cu: 1, maxFilms: 1, ttlDays: 1 }).invite;
+    ledger.bindResource(invite.id, 'production', productionId);
+    const pkg = { ...structuredClone(PACKAGE), id: `pkg_capacity_${index}` };
+    collectMockContribution(pkg, join(runtimeDir, `fixture-${index}`));
+    args.push({ productionId, actionId, inviteId: invite.id, pkg, input: { backendId: 'colab', budgetUnits: 1 }, sourceDir: '.' });
+  }
+  const first = guard.admit(args[0]);
+  await new Promise(resolve => setImmediate(resolve));
+  staged.shift()();
+  const running = await first;
+  const second = guard.admit(args[1]);
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(staged.length, 1);
+  const refused = await guard.admit(args[2]);
+  assert.equal(refused.status, 'blocked');
+  assert.equal(refused.action.runId, null);
+  assert.equal(refused.run, null);
+  assert.equal(ledger.get(args[2].inviteId).committedEstimateCu, 0);
+  assert.equal(ledger.get(args[0].inviteId).committedEstimateCu, 1);
+  assert.equal(ledger.get(args[1].inviteId).committedEstimateCu, 1);
+  guard.cancel(args[2]);
+  assert.equal(workers[0].cancelled, false);
+  staged.shift()(); await second;
+  assert.equal(workers.length, 2);
+  controller.cancel(running.run.runId);
+  assert.equal(workers[0].cancelled, true);
+  assert.equal(workers[1].cancelled, false);
+  for (const worker of workers) { worker.receive({ kind: 'cancelled' }); worker.exit(1); }
 });
 
 test('admit journals dispatching before start, and a crash before the run write adopts the run', async (t) => {

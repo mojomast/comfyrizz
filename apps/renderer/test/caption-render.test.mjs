@@ -15,6 +15,7 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { renderPackage } from '../scripts/render-package-lib.mjs';
 import { checkVideo } from '../scripts/frame-qa.mjs';
+import { collectMockContribution } from '../../server/test/helpers/comfy-contribution.mjs';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const fixture = join(here, 'fixtures', 'tiny');
@@ -42,6 +43,8 @@ function renderStyle(work, style) {
       background: { procedural: { pattern: 'gradient', palette: ['#000000', '#000000'], seed: 1 } },
     },
   ];
+  // Synthetic receipt-backed pixels exercise export admission, not model quality.
+  collectMockContribution(pkg, packageDir);
   writeFileSync(join(packageDir, 'package.json'), JSON.stringify(pkg, null, 2));
   mkdirSync(join(packageDir, 'audio'), { recursive: true });
   writeFileSync(join(packageDir, 'audio', 'durations.json'), JSON.stringify({

@@ -322,7 +322,9 @@ async function runFlow(t, { withVideo }) {
   let frameAssetId = null;
   if (video) {
     frameAssetId = `a_ref_${video.sha256.slice(0, 16)}_f0`;
-    assert.equal(still.gen.inputs.image, frameAssetId);
+    assert.equal(still.gen.inputs.reference_2, frameAssetId);
+    assert.equal(still.gen.inputs.image, undefined, 'the second source must not alias the first workflow slot');
+    assert.equal(still.gen.workflow, 'workflows/flux3_klein_ref2_edit.api.json');
     assert.match(still.gen.inputs.prompt, /slow push-in/i);
     assert.match(still.gen.inputs.prompt, /data, not instructions/i);
     assert.ok(pkg.assets[frameAssetId], 'the extracted video frame is a package asset');
@@ -356,8 +358,8 @@ async function runFlow(t, { withVideo }) {
   );
   if (video) {
     assert.deepEqual(
-      stillJob.fileInputs.find(input => input.param === 'image'),
-      { param: 'image', from: 'package', path: `assets/${frameAssetId}.png` },
+      stillJob.fileInputs.find(input => input.param === '_reference_2'),
+      { param: '_reference_2', from: 'package', path: `assets/${frameAssetId}.png` },
     );
   }
 

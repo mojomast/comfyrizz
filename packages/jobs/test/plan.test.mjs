@@ -71,8 +71,7 @@ test("a plate is planned on the 64 lattice so its stage 1 stays on the 32 lattic
     assert.equal(job.stage1Dims.height % 32, 0, `${job.id}: what the graph's node 8 takes`);
     assert.deepEqual(job.stage1Dims, { width: job.dims.width / 2, height: job.dims.height / 2 });
   }
-  // an upscale's own dims are the package's frame (1920x1080) after the x2 crop, so it is not the
-  // plate lattice that decides them - but its stage 1 is still half of that frame
+  // The generated upscale remains on the lattice; delivery framing is downstream.
   const upscale = doc.jobs.find((job) => job.id === "a_plate1.upscale");
   assert.deepEqual(upscale.stage1Dims, { width: upscale.dims.width / 2, height: upscale.dims.height / 2 });
 
@@ -272,13 +271,40 @@ test("plate jobs record the stage-1 lattice the two-stage graph actually renders
   // dims is the finished frame; stage 1 is half of it, which the x2 latent upsampler doubles back
   assert.deepEqual(plate.dims, { width: 960, height: 576 });
   assert.deepEqual(plate.stage1Dims, { width: 480, height: 288 });
-  assert.deepEqual(byId["a_plate1.upscale"].stage1Dims, { width: 960, height: 540 }, "half of the 1920x1080 finals frame");
+  assert.deepEqual(byId["a_plate1.upscale"].stage1Dims, { width: 960, height: 576 }, "half of the uncropped 1920x1152 raster");
   assert.equal(byId["a_plate1_still.still"].stage1Dims, undefined, "a still is one pass, no lattice");
   assert.deepEqual(checkJobsDoc(doc), []);
 
   const broken = JSON.parse(JSON.stringify(doc));
   broken.jobs.find((j) => j.id === "a_plate1.plate").stage1Dims = { width: 480, height: 272 };
   assert.ok(checkJobsDoc(broken).some((p) => /stage1Dims 480x272 is not half of dims 960x576/.test(p)));
+});
+
+test("LTX jobs reject invalid stage lattices even when their halves agree, and invalid frames", () => {
+  const doc = planJobs(fixture("package-pending.json"));
+  const plate = doc.jobs.find((job) => job.id === "a_plate1.plate");
+  plate.dims = { width: 960, height: 544 };
+  plate.stage1Dims = { width: 480, height: 272 };
+  plate.frames = 100;
+  const problems = checkJobsDoc(doc);
+  assert.ok(problems.some((p) => /positive multiples of 32/.test(p)));
+  assert.ok(problems.some((p) => /frame count must be 8n\+1/.test(p)));
+});
+
+test("LTX landscape, portrait and square stages preserve their resolved aspect", () => {
+  for (const [width, height] of [[1024, 576], [576, 1024], [768, 768], [960, 544]]) {
+    const pkg = fixture("package-pending.json");
+    delete pkg.assets.a_plate1.gen.inputs.image;
+    Object.assign(pkg.assets.a_plate1.gen.inputs, { width, height });
+    const doc = planJobs(pkg);
+    for (const job of doc.jobs.filter((j) => j.stage1Dims)) {
+      assert.equal(job.stage1Dims.width % 32, 0);
+      assert.equal(job.stage1Dims.height % 32, 0);
+      assert.equal(job.dims.width / job.dims.height, job.stage1Dims.width / job.stage1Dims.height);
+      assert.deepEqual(job.dims, { width: job.params.width, height: job.params.height });
+    }
+    assert.deepEqual(checkJobsDoc(doc), []);
+  }
 });
 
 test("an i2v source at a different aspect than its plate is refused, naming both", () => {
@@ -322,7 +348,7 @@ test("jobs carry resolved dimensions, frames, crop and the cache key", () => {
   assert.equal(plate.fps, 24);
   const up = byId["a_plate1.upscale"];
   assert.deepEqual(up.upscaleTarget, { width: 1920, height: 1152 }, "x2 of the 960x576 plate");
-  assert.deepEqual(up.dims, { width: 1920, height: 1080 }, "x2 then crop to the package format");
+  assert.deepEqual(up.dims, { width: 1920, height: 1152 }, "generated x2 raster before delivery framing");
   assert.deepEqual(up.crop, { top: 36, bottom: 36, left: 0, right: 0 });
   const still = byId["a_plate1_still.still"];
   assert.deepEqual(still.dims, { width: 960, height: 576 }, "a plate's first frame follows the plate's lattice (N9)");
@@ -555,10 +581,9 @@ test("stills resolve to the Klein 16 px lattice, and plates and their first fram
     assert.equal(job.dims.width % 64, 0, `${job.id} width`);
     assert.equal(job.dims.height % 64, 0, `${job.id} height`);
   }
-  // an upscale ends on the package's own frame (1920x1080 after the x2 crop), so it is not on the
-  // 64 lattice by design - its stage-1 lattice is, and the plan states both
+  // An upscale's generated raster is still on the 64 lattice, before delivery framing.
   const upscale = doc.jobs.find((j) => j.id === "a_plate1.upscale");
-  assert.deepEqual(upscale.dims, { width: 1920, height: 1080 });
+  assert.deepEqual(upscale.dims, { width: 1920, height: 1152 });
   assert.deepEqual(upscale.crop, { top: 36, bottom: 36, left: 0, right: 0 });
 });
 
@@ -820,7 +845,7 @@ test("a cast still is planned as a Klein reference edit of the ready ref file", 
   assert.notEqual(again.cacheKey, still.cacheKey);
 });
 
-test("a style ref stays first and the cast ref is appended, up to 10", () => {
+test("a style ref stays first and the cast ref is appended only within connected graph capacity", () => {
   const pkg = castPlanPackage();
   pkg.assets.a_style = {
     kind: "image",
@@ -846,23 +871,14 @@ test("a style ref stays first and the cast ref is appended, up to 10", () => {
   const inputs = full.assets.a_still.gen.inputs;
   inputs.reference = "assets/r0.png";
   for (let n = 2; n <= 10; n += 1) inputs[`reference_${n}`] = `assets/r${n - 1}.png`;
-  const capped = planJobs(full).jobs.find((job) => job.asset === "a_still");
-  assert.equal(capped.params.reference, "assets/r0.png");
-  assert.equal(capped.params.reference_10, undefined);
-  assert.equal(capped.params._reference_10, "assets/r9.png");
-  assert.equal(JSON.stringify(capped.params).includes("a_pip"), false);
-  assert.equal(capped.fileInputs.some((entry) => entry.path === "assets/pip.svg"), false);
+  assert.throws(() => planJobs(full), /PLAN_KLEIN_REFERENCE_UNSUPPORTED/);
 
   const nine = castPlanPackage();
   nine.assets.a_still.gen.workflow = "workflows/flux3_klein_ref_edit.api.json";
   const nineInputs = nine.assets.a_still.gen.inputs;
   nineInputs.reference = "assets/r0.png";
   for (let n = 2; n <= 9; n += 1) nineInputs[`reference_${n}`] = `assets/r${n - 1}.png`;
-  const room = planJobs(nine).jobs.find((job) => job.asset === "a_still");
-  assert.equal(room.fileInputs.length, 10);
-  assert.equal(room.fileInputs.at(-1).param, "_reference_10");
-  assert.equal(room.fileInputs.at(-1).path, "assets/pip.svg");
-  assert.equal(room.fileInputs[0].path, "assets/r0.png");
+  assert.throws(() => planJobs(nine), /PLAN_KLEIN_REFERENCE_UNSUPPORTED/);
 });
 
 test("a missing cast ref_asset cannot be planned", () => {
@@ -907,4 +923,17 @@ test("the presenter job takes its length from the narration and its portrait at 
   assert.deepEqual(job.params.image, "a_still", "the portrait travels as the file input");
   assert.deepEqual(job.params.audio, "a_narr", "and the narration travels as the audio input");
   assert.ok(job.promptGuards.some((guard) => guard.guard === "presenter"), JSON.stringify(job.promptGuards));
+});
+
+test("audio-conditioned LTX rounds narration frames upward onto 8n+1", () => {
+  const fixturePath = join(here, "..", "..", "..", "pipeline-py", "tests", "fixtures", "package-gpu1-workflows.json");
+  const pkg = JSON.parse(readFileSync(fixturePath, "utf8"));
+  pkg.assets.a_narr.media = { ...pkg.assets.a_narr.media, frames: 100 };
+  const doc = planJobs(pkg, { assets: ["a_presenter"] });
+  const job = doc.jobs.find((j) => j.kind === "presenter");
+  assert.equal(job.frames, 105);
+  assert.equal(job.params.frames, 105);
+  assert.equal(job.framesAdjusted, true);
+  assert.deepEqual(job.stage1Dims, { width: job.dims.width / 2, height: job.dims.height / 2 });
+  assert.deepEqual(checkJobsDoc(doc), []);
 });

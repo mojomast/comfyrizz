@@ -1792,6 +1792,17 @@
           ],
           "unevaluatedProperties": false,
           "properties": {
+            "start_frame": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 7200,
+              "description": "Scene-local frame at which the overlay entrance starts; omitted uses the legacy frame 8."
+            },
+            "position": {
+              "type": "string",
+              "enum": ["top", "bottom"],
+              "description": "Bottom keeps a performance's face clear; omitted preserves the legacy top placement."
+            },
             "kicker": {
               "type": "string",
               "minLength": 1,

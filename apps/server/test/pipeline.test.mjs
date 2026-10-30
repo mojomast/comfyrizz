@@ -7,6 +7,9 @@ import { hostname } from 'node:os';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createPipelineController } from '../src/pipeline.mjs';
+import { createOperationCoordinator } from '../src/operations.mjs';
+import { startColabAuth } from '../src/colab-auth.mjs';
+import { EventEmitter } from 'node:events';
 import { planPipeline, selectedPresenterScenes, syncnetConfigured, syncnetDiagnostics } from '../src/pipeline-contract.mjs';
 import { correctionFor } from '../src/pipeline-media.mjs';
 import { progressLines } from '../../../packages/backends/src/progress-lines.mjs';
@@ -48,6 +51,124 @@ test('concurrent starts cannot both enter staging or allocate', async t => {
   const second = await f.controller.start(example, { backendId: 'cpu' }, '.');
   assert.equal(second.status, 409);
   release(); await first; f.exit(1);
+});
+
+test('bounded concurrent pipelines isolate workspaces, cancellation and capacity including staging', async t => {
+  const releases = [], workers = [];
+  const operations = createOperationCoordinator();
+  const f = fixture(t, { operations, maxConcurrent: 2, parallelAdmission: ({ pkg }) => pkg.id !== 'pkg_owner',
+    stageInputs: () => new Promise(resolve => releases.push(resolve)),
+    launch: (path, receive, done) => {
+      const worker = { spec: JSON.parse(readFileSync(path)), receive, done, cancelled: false };
+      workers.push(worker);
+      return { cancel() { worker.cancelled = true; }, kill() {} };
+    },
+  });
+  t.after(() => f.controller.close());
+  const secondPkg = { ...example, id: 'pkg_parallel_second' };
+  const first = f.controller.start(example, { backendId: 'cpu' }, '.');
+  assert.equal((await f.controller.start(example, { backendId: 'cpu' }, '.')).status, 409);
+  const second = f.controller.start(secondPkg, { backendId: 'cpu' }, '.');
+  assert.equal(releases.length, 2);
+  const full = await f.controller.start({ ...example, id: 'pkg_over_capacity' }, { backendId: 'cpu' }, '.');
+  assert.equal(full.status, 409);
+  assert.equal(full.submission, 'not_submitted');
+  assert.equal(full.runId, undefined);
+  assert.equal((await f.controller.start({ ...example, id: 'pkg_owner' }, { backendId: 'colab', budgetUnits: 1 }, '.')).status, 409);
+  assert.equal(operations.tryAcquire('export', 'export_during_staging').busy, true);
+  releases.forEach(release => release());
+  const [a, b] = await Promise.all([first, second]);
+  assert.equal(workers.length, 2);
+  const runningFull = await f.controller.start({ ...example, id: 'pkg_over_capacity' }, { backendId: 'cpu' }, '.');
+  assert.equal(runningFull.holderRunId, a.run.runId);
+  assert.equal(runningFull.runId, undefined);
+  assert.notEqual(workers[0].spec.workDir, workers[1].spec.workDir);
+  assert.notEqual(workers[0].spec.runDir, workers[1].spec.runDir);
+  f.controller.cancel(a.run.runId);
+  assert.equal(workers[0].cancelled, true);
+  assert.equal(workers[1].cancelled, false);
+  workers[0].receive({ kind: 'cancelled' }); workers[0].done(1);
+  assert.equal(f.controller.active(), true);
+  assert.equal(operations.tryAcquire('render', 'render_after_one_cancel').busy, true);
+  assert.equal((await f.controller.start({ ...example, id: 'pkg_owner' }, { backendId: 'colab', budgetUnits: 1 }, '.')).status, 409);
+  for (const stage of b.run.stages) workers[1].receive({ kind: 'stage', stageId: stage.id, status: 'completed' });
+  workers[1].receive({ kind: 'result', result: { files: [] } }); workers[1].done(0);
+  assert.equal(f.controller.get(a.run.runId).status, 'cancelled');
+  assert.equal(f.controller.get(b.run.runId).status, 'completed');
+  assert.equal(f.controller.active(), false);
+  assert.equal(operations.status().busy, false);
+});
+
+test('increasing capacity alone never enables owner parallelism, including owner staging', async t => {
+  let release;
+  const f = fixture(t, { maxConcurrent: 4, stageInputs: () => new Promise(resolve => { release = resolve; }) });
+  t.after(() => f.controller.close());
+  const pending = f.controller.start(example, { backendId: 'colab', budgetUnits: 1 }, '.');
+  const next = { ...example, id: 'pkg_second_owner' };
+  assert.equal((await f.controller.start(next, { backendId: 'colab', budgetUnits: 1 }, '.')).status, 409);
+  release(); await pending;
+  assert.equal((await f.controller.start(next, { backendId: 'colab', budgetUnits: 1 }, '.')).status, 409);
+  f.exit(1);
+});
+
+test('an exclusive owner excludes trusted invite work until its worker exits', async t => {
+  const f = fixture(t, { maxConcurrent: 4, parallelAdmission: ({ pkg }) => pkg.id === 'pkg_invite' });
+  t.after(() => f.controller.close());
+  await f.controller.start(example, { backendId: 'colab', budgetUnits: 1 }, '.');
+  assert.equal((await f.controller.start({ ...example, id: 'pkg_invite' }, { backendId: 'cpu' }, '.')).status, 409);
+  f.message({ kind: 'failed', message: 'failure before process close' });
+  assert.equal(f.controller.accountBusy(), true);
+  assert.equal((await f.controller.start({ ...example, id: 'pkg_invite' }, { backendId: 'cpu' }, '.')).status, 409);
+  f.exit(1);
+  assert.equal(f.controller.accountBusy(), false);
+});
+
+test('unconfirmed shutdown retains account and operation exclusion through close, restart and reconciliation', async t => {
+  const operations = createOperationCoordinator();
+  const f = fixture(t, { operations });
+  const { run } = await f.controller.start(example, { backendId: 'colab', budgetUnits: 1 }, '.');
+  f.message({ kind: 'runtime', runtime: 'media', value: { state: 'allocating', ownership: 'managed' } });
+  assert.equal(f.controller.accountBusy(), true);
+  const deniedAuth = () => startColabAuth({ isBusy: () => f.controller.accountBusy(), spawn() { throw new Error('must never spawn auth'); } });
+  assert.equal((await deniedAuth()).errorCode, 'COLAB_ACCOUNT_BUSY');
+  f.message({ kind: 'runtime', runtime: 'media', value: { state: 'running', ownership: 'managed' } });
+  assert.equal((await deniedAuth()).errorCode, 'COLAB_ACCOUNT_BUSY');
+  f.controller.close();
+  assert.equal(operations.status().busy, true, 'close only requests cancellation');
+  f.message({ kind: 'runtime', runtime: 'media', value: { state: 'stop_unconfirmed', ownership: 'managed' } });
+  f.message({ kind: 'cancelled' }); f.exit(1);
+  assert.equal(operations.status().busy, true);
+  const recoveredOperations = createOperationCoordinator();
+  const recovered = createPipelineController({ ...f.dependencies, operations: recoveredOperations });
+  t.after(() => recovered.close());
+  assert.equal(recovered.accountBusy(), true);
+  assert.equal(recoveredOperations.tryAcquire('export', 'blocked_export').busy, true);
+  assert.equal(recovered.reconcile(run.runId).status, 202);
+  assert.equal(recovered.accountBusy(), true);
+  assert.equal((await startColabAuth({ isBusy: () => recovered.accountBusy(), spawn() { throw new Error('must never spawn auth'); } })).errorCode, 'COLAB_ACCOUNT_BUSY');
+  f.exit(1);
+  assert.equal(recovered.accountBusy(), true, 'unsuccessful reconcile retains ownership');
+  assert.equal(recovered.reconcile(run.runId).status, 202);
+  f.message({ kind: 'runtime', runtime: 'media', value: { state: 'stopped', ownership: 'managed' } }); f.exit(0);
+  assert.equal(recovered.accountBusy(), false);
+  assert.equal(recoveredOperations.status().busy, false);
+});
+
+test('active auth prevents paid pipeline admission but allows zero-budget CPU work', async t => {
+  const f = fixture(t);
+  t.after(() => f.controller.close());
+  const child = new EventEmitter();
+  child.stdout = new EventEmitter(); child.stderr = new EventEmitter(); child.kill = () => {};
+  const pending = startColabAuth({ home: '/nonexistent-home', spawn: () => child });
+  try {
+    const paid = await f.controller.start(example, { backendId: 'colab', budgetUnits: 1 }, '.');
+    assert.equal(paid.code, 'COLAB_AUTH_BUSY');
+    assert.equal(paid.submission, 'not_submitted');
+    const cpu = await f.controller.start(example, { backendId: 'cpu', budgetUnits: 0 }, '.');
+    assert.equal(cpu.status, 202);
+    assert.equal(f.controller.accountBusy(), false);
+    f.exit(1);
+  } finally { child.emit('close', 0); await pending; }
 });
 
 test('cancellation remains cancelling until cleanup returns; never completes with a late result', async t => {

@@ -9,11 +9,83 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 
 import { COPY } from './copy.ts';
+import { buildGalleryModel } from './gallery-model.ts';
 import { createSuperEasySession } from './session.ts';
 import { proposalForPackage, renderSuperEasyProposal } from './proposal.ts';
 import { createEasyStore, planInputsHash } from '../store.ts';
 
 const PRODUCTION_ID = 'prod_0123456789abcdef01234567';
+
+test('cold proposal reload restores reviewed revision and original revision notes without running or approving', async () => {
+  const first = returnedProposalHarness();
+  await first.session.generate(first.input);
+  first.store.patch({ builtPackageInputsHash: planInputsHash(first.store.get()) });
+  const stored = JSON.stringify(first.store.get());
+  const store = createEasyStore({ key: 'test', storage: { getItem: () => stored, setItem() {}, removeItem() {} } });
+  let pkg = first.pkg, runs = 0;
+  const session = createSuperEasySession({ store, go() {},
+    api: { getPackage: async () => ({ package: pkg }), compilePackage: async body => { assert.equal(body.revision, 6); return { timeline: { durationInFrames: 360 } }; } },
+    host: { getPackage: () => pkg, adoptBuiltPackage: body => { assert.equal(body.timeline.durationInFrames, 360); assert.equal(body.revision, 6); pkg = body.package; }, editorStore: {} },
+    run: async input => { runs++; assert.equal(input.reviewedPackageRevision, 6); assert.deepEqual(input.revisionNotes, first.input.revisionNotes); return { ok: false, stage: 'compute', code: 'GOOGLE_COLAB_CONFIRM_REQUIRED', message: 'test boundary' }; },
+  });
+  await session.restoreProposal();
+  assert.equal(runs, 0);
+  assert.equal(session.phase(), 'proposal');
+  assert.equal(session.proposal().reviewedPackageRevision, 6);
+  assert.equal(session.proposal().basePrompt, first.input.basePrompt);
+  assert.deepEqual(session.proposal().revisionNotes, first.input.revisionNotes);
+  await session.approveProposal();
+  assert.equal(runs, 1, 'only the explicit Make this film gesture runs');
+  assert.equal(store.get().proposalCheckpoint, null);
+});
+
+test('cold hosted proposal approval retains invite routing without persisting invite authority', async () => {
+  const first = returnedProposalHarness();
+  await first.session.generate(first.input);
+  first.store.patch({ builtPackageInputsHash: planInputsHash(first.store.get()) });
+  let runs = 0;
+  const session = createSuperEasySession({ store: first.store, hostedInvite: true, go() {},
+    api: { getPackage: async () => ({ package: first.pkg }), compilePackage: async () => ({ timeline: { durationInFrames: 360 } }) },
+    host: { getPackage: () => first.pkg, adoptBuiltPackage() {}, editorStore: {} },
+    run: async input => {
+      runs++;
+      assert.equal(input.hostedInvite, true);
+      assert.equal(input.compute, 'colab');
+      assert.equal(input.reviewedPackageRevision, 6);
+      return { ok: false, stage: 'compute', code: 'INVITE_UNAVAILABLE', message: 'Invite validation boundary' };
+    },
+  });
+  await session.restoreProposal();
+  assert.equal(runs, 0, 'restoration does not plan, approve, or dispatch');
+  assert.equal(session.phase(), 'proposal');
+  assert.equal(Object.hasOwn(first.store.get().proposalCheckpoint, 'hostedInvite'), false);
+  await session.approveProposal();
+  assert.equal(runs, 1);
+});
+
+test('cold proposal checkpoints reject newer edits, changed inputs and existing production authority', async () => {
+  for (const change of ['revision', 'inputs', 'production', 'model', 'conversation', 'late']) {
+    const first = returnedProposalHarness();
+    await first.session.generate(first.input);
+    first.store.patch({ builtPackageInputsHash: planInputsHash(first.store.get()) });
+    const store = first.store;
+    if (change === 'inputs') store.patch({ idea: { ...store.get().idea, text: 'another idea' } });
+    if (change === 'production') store.patch({ productionId: PRODUCTION_ID });
+    if (change === 'model') store.patch({ motionModel: 'h3' });
+    if (change === 'conversation') store.patch({ chatId: 'chat_other' });
+    let release;
+    const session = createSuperEasySession({ store, go() {}, host: {},
+      api: { compilePackage: async () => { throw Error('Invalid checkpoint must not compile'); }, getPackage: async () => {
+        if (change === 'late') await new Promise(resolve => { release = resolve; });
+        return { package: { ...first.pkg, revision: change === 'revision' ? 7 : 6 } };
+      } }, run: () => { throw Error('Must not run'); },
+    });
+    const restored = session.restoreProposal();
+    if (change === 'late') { session.stop(); release(); }
+    await restored;
+    assert.equal(session.proposal(), null, change);
+  }
+});
 
 function returnedProposalHarness() {
   const store = createEasyStore({ storage: { getItem: () => null, setItem() {}, removeItem() {} } });
@@ -574,14 +646,18 @@ test('watch callbacks move the stages and fill the gallery', async () => {
   assert.notEqual(after, before);
   assert.match(after, /data-stage-status="running"/u);
   assert.match(after, /data-super-easy-gallery-item="character:char_mira"/u);
-  assert.match(after, /src="\/media\/mira\.png"/u);
+  assert.match(after, /<img\b[^>]*data-gallery-media="character:char_mira"/u);
+  assert.equal(buildGalleryModel(h.session.snapshot()).items.find(item => item.id === 'character:char_mira').url, '/media/mira.png');
+  assert.doesNotMatch(after, /src="\/media\//u, 'protected media must be hydrated through authenticated fetch');
   assert.match(after, /data-super-easy-gallery-item="shot:shot_1"/u);
   assert.equal(h.views.at(-1).html, after, 'the latest view is pushed to the progress sink');
 
   h.watchOptions().onState(nextSnapshot());
   const next = h.session.progressHtml();
   assert.match(next, /data-super-easy-gallery-item="shot:shot_2"/u);
-  assert.match(next, /src="\/media\/shot-2\.png"/u);
+  assert.match(next, /<img\b[^>]*data-gallery-media="shot:shot_2"/u);
+  assert.equal(buildGalleryModel(h.session.snapshot()).items.find(item => item.id === 'shot:shot_2').url, '/media/shot-2.png');
+  assert.doesNotMatch(next, /src="\/media\//u);
   assert.match(next, /aria-valuenow="60"/u);
   assert.notEqual(next, after);
 });
@@ -637,14 +713,17 @@ test('the final video marks the run done and stops the watch', async () => {
   const html = h.session.progressHtml();
   assert.equal(h.store.state.generate.status, 'done');
   assert.match(html, new RegExp(`>${COPY.done.title}<`, 'u'));
-  assert.match(html, /src="\/media\/final\.mp4"/u);
+  assert.match(html, /<video\b[^>]*data-gallery-media="final"/u);
+  assert.equal(buildGalleryModel(h.session.snapshot()).final.url, '/media/final.mp4');
+  assert.doesNotMatch(html, /<video\b[^>]*src="\/media\//u);
   assert.match(html, /data-super-easy-stage="render" data-stage-status="done"/u);
   assert.equal(h.stopCalls(), 1, 'the final frame ends polling');
   assert.equal(h.dones.length, 1);
 
   h.session.stop();
   assert.equal(h.stopCalls(), 1, 'a later Stop does not cancel twice');
-  assert.match(h.session.progressHtml(), /src="\/media\/final\.mp4"/u);
+  assert.equal(buildGalleryModel(h.session.snapshot()).final.url, '/media/final.mp4');
+  assert.match(h.session.progressHtml(), /<video\b[^>]*data-gallery-media="final"/u);
 });
 
 test('an already-final run marks done without starting a production watch', async () => {
@@ -709,7 +788,9 @@ test('the run finishing its preview does not mark the whole video done', async (
   assert.equal(h.store.state.generate.status, 'running', 'the production is still being watched');
   h.watchOptions().onState(finalSnapshot());
   assert.equal(h.store.state.generate.status, 'done');
-  assert.match(h.session.progressHtml(), /src="\/media\/final\.mp4"/u);
+  assert.equal(buildGalleryModel(h.session.snapshot()).final.url, '/media/final.mp4');
+  assert.match(h.session.progressHtml(), /<video\b[^>]*data-gallery-media="final"/u);
+  assert.doesNotMatch(h.session.progressHtml(), /<video\b[^>]*src="\/media\//u);
 });
 
 test('a failed run reports the error and never starts a watch', async () => {

@@ -36,14 +36,17 @@ documents the signature, both backends (Google Colab and BYO) and the spend gate
 - **Batch order** is always `stills → plates → upscales → audio`: every FLUX still in the
   package is submitted before any LTX plate, so one GPU session does the stills first
   (SPEC.md 6.4, one job at a time). Within a batch, jobs are ordered by scene, then asset id.
-- **LTX geometry**: plate/upscale width and height resolve to multiples of **32**
-  (`960×544` stays put; `961×545` becomes `960×544`), and frame counts resolve to **8n+1**
+- **LTX geometry**: two-stage plate/upscale output width and height resolve to multiples of **64**
+  (`960×544` becomes `960×576`), so the half-resolution base is divisible by **32**.
+  The default is exact 16:9: `512×288 → 1024×576`. Frame counts resolve to **8n+1**
   (100 → 97, 101 → 105; nearest, ties round up). Stills use multiples of **16**: Klein's VAE
   factor is 8 but its patch size is 2, so a still on the 8 lattice is padded or cropped by the
   model — GPU test 2 shipped 960×540 sample rasters and the verdict in `docs/GPU_TEST_2.md` was
   "use 960×544 or 1024×576".
-- **Upscale geometry**: `x2+crop` doubles the plate and records the crop that brings it back
-  to the package format (`960×544 → 1920×1088 → crop 4/4 → 1920×1080`).
+- **Upscale geometry**: `x2+crop` doubles the plate and records delivery-crop metadata
+  (`960×576 → 1920×1152`, crop 36/36 for a 1920×1080 composition). The generated file's
+  `dims` and graph parameters remain `1920×1152`; delivery framing is downstream of generation.
+  Sending the cropped height 1080 to the graph would create an invalid 540-pixel base height.
 - **Dependencies**: a plate depends on the still it uses as its first frame; an upscale
   depends on its plate. The runner refuses to run a job whose dependency failed.
 - **Cutout**: `cutout: true` on the asset or in `gen.inputs` is carried into the still job

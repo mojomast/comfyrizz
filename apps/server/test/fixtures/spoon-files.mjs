@@ -1,0 +1,25 @@
+// Exact frozen showcase brief, SHA256 with trailing newline:
+// e68c759dc728dbff64ff4e7adc60941136a88fbfc87d1fc123e41f47fc10b573.
+export const SPOON_BRIEF = `Create exactly 30 seconds of landscape video for a fictional deadpan comedy called THE SPOON FILES: a mock crime documentary about a missing office teaspoon. The joke is that the filmmaking treats an utterly trivial problem with enormous seriousness. Use five ordered beats of roughly six seconds each, accounting for transition overlaps so the finished video is exactly 30 seconds. Photographic natural materials, restrained teal-and-amber investigative lighting, cinematic framing and dry performances. All characters and events are fictional.
+Beat 1: A fictional adult office investigator, age 42, medium-brown skin, short salt-and-pepper hair, round glasses, navy cardigan and white shirt, sits at an ordinary break-room table. In a medium close-up she looks gravely into the camera and says exactly: "At nine-oh-three, the office spoon vanished." Use generated native character speech, not detached narration. Overlay only THE SPOON FILES with an elegant masked title reveal.
+Beat 2: A slow cinematic tracking shot into an open cutlery drawer. One lonely fork remains beside a conspicuously empty spoon-shaped space. Dust drifts in a shaft of office light. Overlay only ONE SPOON. ZERO ANSWERS. with a punchy but readable native entrance.
+Beat 3: A native two-panel suspect comparison using two original ComfyUI-generated still photographs: an empty office dishwasher on the left, and a completely ordinary potted fern on the right. Keep both photos fully visible with contained fit. Put the exact native label SUSPECT 01: DISHWASHER on the left panel and SUSPECT 02: FERN on the right panel. Reveal the panels with a short stagger, then hold both labels clearly readable. No labels baked into generated images and no extra headline.
+Beat 4: Return to the same investigator, with identical face, clothes, room and voice. She holds a single silver teaspoon clearly in view, looks at it, then looks sheepishly at the camera and says exactly: "It was in my pocket." A short embarrassed pause is the punchline. Use generated native character speech and a genuine visible performance. Overlay only CASE CLOSED. after the admission, leaving her face and spoon unobstructed.
+Beat 5: A cinematic macro motion shot of the teaspoon rotating slowly on the break-room table, treated like a priceless artifact. Finish with the native text COMFYRIZZ and SMALL PROBLEMS. BIG PRODUCTIONS. in a confident two-line composition, with a spring-settled entrance and a clear final hold.
+Use MiniMax H3/FastH3 Omni for the two speaking-character shots, LTX-2.5 for the two cinematic object/environment motion shots, and FLUX 3 Image Klein for reference images and the two suspect photographs. Reuse one stable identity/reference for the investigator. Preserve the exact dialogue and on-screen words above, no subtitles or additional copy. Keep native overlays editable and high contrast inside safe margins. Use a small coherent palette of directional wipe or shape-reveal transitions; do not cover the punchline with an effect. Quiet office room tone, subtle drawer/utensil sounds and a brief comic silence carry the soundtrack. No music, singing, voiceover narrator or other voices. The first and fourth beats must visibly and audibly speak their exact lines; the suspect beat is explicitly still photographs with native animation. Deliver an exact 30-second film with audio.
+`;
+
+export const SPOON_IDS = ['s1_speech', 's2_drawer', 's3_suspects', 's4_confession', 's5_macro'];
+export const SPOON_LABELS = ['SUSPECT 01: DISHWASHER', 'SUSPECT 02: FERN'];
+export const SPOON_LINES = ['At nine-oh-three, the office spoon vanished.', 'It was in my pocket.'];
+export const SPOON_PROPOSAL = { logline: 'A grave office investigator traces a missing teaspoon, suspects a dishwasher and fern, then confesses.', look: 'Photographic teal and amber; still-photo suspect comparison with native labels.', soundtrack: 'Native speech, quiet office room tone, utensil sounds and a comic silence; no music.' };
+export function spoonScenes() {
+  return SPOON_IDS.map((id, i) => ({ id, layout: i === 2 ? 'compare' : i === 3 ? 'list' : 'title', preferredFrames: i === 3 ? 168 : 156,
+    ...(i === 0 ? { copy: { headline: 'THE SPOON FILES' } } : i === 1 ? { copy: { headline: 'ONE SPOON. ZERO ANSWERS.' } }
+      : i === 2 ? { media: SPOON_LABELS.map(label => ({ procedural: { pattern: 'grid' }, label, fit: 'contain' })) }
+        : i === 3 ? { lower_third: { text: 'CASE CLOSED.' } } : { copy: { headline: 'COMFYRIZZ', sub: 'SMALL PROBLEMS. BIG PRODUCTIONS.' } }),
+    motion: { entry: 'maskRise', spring: 'settle', stagger: 'word' },
+    ...(i < 4 ? { transitionOut: { type: 'wipe', direction: 'right', frames: 12 } } : {}),
+  }));
+}
+export const SPOON_TIMING = { scenes: SPOON_IDS.map((scene_id, i) => ({ scene_id, preferredFrames: i === 3 ? 188 : 190, transitionOutFrames: i < 4 ? 12 : 0 })) };

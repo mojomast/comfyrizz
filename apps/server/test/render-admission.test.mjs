@@ -8,7 +8,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { createServer, request as httpRequest } from 'node:http';
 import { connect } from 'node:net';
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { cpSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createApp } from '../src/app.mjs';
@@ -59,6 +59,7 @@ async function setup(t, { render, renderScene } = {}) {
     render: render ?? stubRender(),
     renderScene: renderScene ?? stubRenderScene(),
   });
+  cpSync(new URL('../../../examples/launch-demo/assets', import.meta.url), join(app.store.dir, 'assets'), { recursive: true });
   seedMockContribution(app.store, structuredClone(seed));
   approveMockContribution(app.takeStore, app.store.read(PACKAGE_ID), app.store.dir);
   const server = createServer(app.handler);

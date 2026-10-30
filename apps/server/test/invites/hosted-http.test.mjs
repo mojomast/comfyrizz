@@ -6,6 +6,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createApp } from '../../src/app.mjs';
 import { createDurableInviteLedger } from '../../../../packages/backends/src/durable-invite-ledger.mjs';
+import { guestPlannerFixture } from './planner-fixture.mjs';
 
 test('hosted invite rejects alternate origins and paid guest bypasses, and survives server restart', async () => {
   const envKeys = ['COMFYRIZZ_ALLOWED_HOSTS', 'COMFYRIZZ_HOSTED_INVITES', 'COMFYRIZZ_INVITE_SPEND_ENABLED', 'COMFYRIZZ_DEMO_APP_PATH', 'COMFYRIZZ_ADMIN_HOST'];
@@ -20,7 +21,7 @@ test('hosted invite rejects alternate origins and paid guest bypasses, and survi
   let app, ledger, server, adminServer, base, adminBase;
   async function start() {
     ledger = createDurableInviteLedger({ path: join(dir, 'ledger.sqlite') });
-    app = createApp({ token, runtimeDir: join(dir, 'runtime'), inviteLedger: ledger, publicBaseUrl: 'https://comfy.rizz.click', render: async () => {}, renderScene: async () => {} });
+    app = createApp({ guestRunnerFactory: guestPlannerFixture, token, runtimeDir: join(dir, 'runtime'), inviteLedger: ledger, publicBaseUrl: 'https://comfy.rizz.click', render: async () => {}, renderScene: async () => {} });
     server = createServer(app.handler);
     adminServer = createServer(app.privateAdminHandler);
     await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
@@ -80,9 +81,9 @@ test('hosted invite rejects alternate origins and paid guest bypasses, and survi
     const built = await request('/api/agent', { method: 'POST', credential: guest, body: { brief: 'A short story about a cheerful planet', provider: 'custom', sessionId: 'someone-else' } });
     assert.equal(built.status, 200, await built.text());
     const builtBody = await built.json();
-    assert.equal(builtBody.provider, 'scripted');
+    assert.equal(builtBody.provider, 'fixture');
     assert.equal(ledger.resourceOwner('package', builtBody.package.id), data.invite.id);
-    assert.equal((await request(`/api/package/${builtBody.package.id}`, { credential: guest })).status, 403);
+    assert.equal((await request(`/api/package/${builtBody.package.id}`, { credential: guest })).status, 200);
     const created = await request('/api/productions', { method: 'POST', credential: guest, body: {
       kind: 'production.create', commandId: 'guest_create_1', idempotencyKey: 'guest_create_1',
       expected: { productionRevision: 0 }, payload: { packageId: builtBody.package.id, conversationId: null },

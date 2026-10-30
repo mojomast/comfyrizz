@@ -11,6 +11,7 @@ import { renderOnVm } from '../scripts/render-remote-entry.mjs';
 import { muxPackageAudio } from '../scripts/incremental-audio.mjs';
 import { normalizeMixLoudness, measureLoudness } from '../scripts/mix-loudness.mjs';
 import { hasMasterMusic, resolveAudioMix } from '../src/audio-mix-model.js';
+import { collectMockContribution } from '../../server/test/helpers/comfy-contribution.mjs';
 
 function run(command, args, options = {}) {
   const result = spawnSync(command, args, { maxBuffer: 16 * 1024 * 1024, ...options });
@@ -51,6 +52,7 @@ test('real full, incremental, remote-entry and pipeline exports preserve sole-ma
   // Omitted gain/fades exercise neutral master defaults in both renderer paths.
   pkg.audio = { music: { asset: 'a_song', trim: { startSeconds: 1, endSeconds: 3 } } };
   const packagePath = join(dir, 'package.json');
+  collectMockContribution(pkg, dir);
   writeFileSync(packagePath, JSON.stringify(pkg));
   const input = pcm(song);
   const fullPath = join(dir, 'full.mp4');

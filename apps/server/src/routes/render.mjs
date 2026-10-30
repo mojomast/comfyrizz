@@ -22,7 +22,7 @@ import { packageTimeline, timingChangeReason } from '../edit.mjs';
 import { measuredOptionsFromDir } from '../compile-package.mjs';
 import { loadCompositionManifest } from '../../../../packages/compositions/src/index.mjs';
 import { createDeliverySnapshot, preflightDelivery, stageDeliverySnapshot } from '../productions/delivery-snapshot.mjs';
-import { publishRenderArtifact, readRenderArtifact } from '../render-artifacts.mjs';
+import { publishRenderArtifact, readRenderArtifact, latestRenderArtifact } from '../render-artifacts.mjs';
 import { readEditor, validateEditor } from '../editor-sidecar.mjs';
 
 /**
@@ -1087,6 +1087,20 @@ export function createRenderRoutes(options = {}) {
       return false;
     }
     if (typeof pathname !== 'string') return false;
+    if (pathname === '/api/render/artifacts/latest' && request.method === 'GET') {
+      try {
+        const query = typeof url === 'string' ? new URL(url, 'http://127.0.0.1').searchParams : url.searchParams;
+        const packageId = query.get('packageId');
+        const pkg = typeof packageId === 'string' && /^pkg_[A-Za-z0-9_-]+$/.test(packageId) ? store.read(packageId) : null;
+        if (!pkg) {
+          sendJson(response, 404, { error: 'Saved project not found', code: 'ARTIFACT_MISSING' });
+          return true;
+        }
+        const saved = latestRenderArtifact({ packageId, revision: pkg.revision, rendersDir, receiptDir: store.dir });
+        sendJson(response, 200, saved.metadata);
+      } catch (error) { sendJson(response, error.status ?? 500, { error: error.message, code: error.code }); }
+      return true;
+    }
     const artifact = /^\/api\/render\/artifacts\/(r_[a-f0-9]{12})(\/video)?$/.exec(pathname);
     if (artifact && request.method === 'GET') {
       try {

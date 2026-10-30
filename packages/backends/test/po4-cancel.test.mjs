@@ -64,6 +64,8 @@ test('a cancel while `colab new` hangs stops the session it created before repor
   assert.equal(readState(fake.statePath).stopped, true, 'the VM must actually be stopped');
   const teardown = await backend.teardown('after cancel');
   assert.equal(teardown.state, 'not_owned', 'nothing left to own once the stop is confirmed');
+  assert.equal(teardown.shutdownVerified, true);
+  assert.equal(teardown.allocation, 'attempted', 'verified cleanup cannot prove a transient runtime was free');
 });
 
 test('an unconfirmed stop after a cancelled allocation keeps ownership and is not reported clean', async t => {

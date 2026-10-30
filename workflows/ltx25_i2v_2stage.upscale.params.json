@@ -2,7 +2,7 @@
   "v": 1,
   "generator": "ltx25",
   "kind": "upscale",
-  "note": "Finals pass (SPEC 6.4: stage 1 -> x2 latent upscale -> crop). A planned upscale job carries the plate's resolved parameters and this map declares where each lands, with the stage-2 controls (its own noise seed and the short sigma schedule) named explicitly. Geometry follows the same rule as the plate map (GPU test 2, issues 3 and 4): the planned size is the *final* size, so the stage-1 latent (8) and the i2v image scale (31) both take half of it - half of the upscale target is the plate's final size, which the x2 upsampler (21) then doubles. The upsampler node itself takes no scalar input; the crop that brings the result back to the package format lives on the job (dims/upscaleTarget/crop) and is applied by the renderer, not by the graph. A package that names gen.inputs.upscale_workflow gets that graph's own map instead - which is why the map has a name of its own. The start image is a local file the runner uploads ('files'). R1: 'strength' maps the stage-1 LTXVImgToVideoInplace (33) and 'stage2_strength' the stage-2 one (34), so a plan can hold a static frame (UI/diagram plates take strength 1.0; the graph's own default is 0.7).",
+  "note": "Finals pass reuses the two-stage i2v graph. Planned dims and width/height describe the UNCROPPED generated raster, divisible by 64; latent(8) and ImageScale(31) take half, divisible by 32. The x2 latent upsampler(21) restores that raster. Delivery-crop metadata is not a graph input: composition fits/crops the generated file downstream. Feeding a 1920x1080 delivery size to this graph would create an invalid 960x540 base. Frames remain 8n+1; fps reaches conditioning, empty audio and the output container. The runner uploads the start image. Stage-1 and stage-2 image strengths remain separate controls.",
   "files": [
     "image"
   ],
@@ -57,10 +57,7 @@
         "frames_number"
       ]
     ],
-    "fps": [
-      "7",
-      "frame_rate"
-    ],
+    "fps": [["7", "frame_rate"], ["9", "frame_rate"], ["42", "fps"]],
     "seed": [
       "11",
       "noise_seed"

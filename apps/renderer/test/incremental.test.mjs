@@ -16,6 +16,7 @@ import { fileURLToPath } from 'node:url';
 import { compileTimeline } from '../../../packages/planner/dist/src/index.js';
 import { inlineGeneratedAssets } from '../scripts/render-package-lib.mjs';
 import { planSegments, mergeScenes, renderPackageIncremental } from '../scripts/render-incremental.mjs';
+import { collectMockContribution } from '../../server/test/helpers/comfy-contribution.mjs';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const fixture = join(here, 'fixtures', 'tiny');
@@ -109,6 +110,9 @@ test('an unchanged incremental export reuses every segment and matches the timel
     const packageDir = join(work, 'tiny');
     cpSync(fixture, packageDir, { recursive: true });
     const packagePath = join(packageDir, 'package.json');
+    const source = JSON.parse(readFileSync(packagePath, 'utf8'));
+    collectMockContribution(source, packageDir, { sceneId: 's_outro' });
+    writeFileSync(packagePath, JSON.stringify(source));
     const cacheDir = join(work, 'cache');
     const outDir = join(work, 'out');
     mkdirSync(outDir, { recursive: true });

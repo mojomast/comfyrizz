@@ -10,6 +10,8 @@
  * @typedef {Object} LowerThirdContent
  * @property {string} [kicker]
  * @property {string} text
+ * @property {number} [start_frame]
+ * @property {'top'|'bottom'} [position]
  *
  * @typedef {Object} MediaSidecar
  * @property {Record<string, number>} [scrim] Per-scene dark overlay opacity 0..1.

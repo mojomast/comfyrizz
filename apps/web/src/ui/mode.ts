@@ -38,6 +38,8 @@ export interface ModeOptions {
   document?: Document;
   window?: Window;
   announce?: (message: string, mode: UiMode) => void;
+  /** The application can await project loading/saving before changing views. */
+  onRequestMode?: (mode: UiMode) => void;
 }
 
 export interface ModeController {
@@ -183,12 +185,17 @@ export function mountModeToggle(options: ModeOptions = {}): ModeController | nul
   });
 
   const choose = (mode: UiMode): UiMode => {
+    if (options.onRequestMode) {
+      options.onRequestMode(mode);
+      return readPrefs().mode;
+    }
     const prefs = writeMode(mode);
     render(prefs.mode, true);
     return prefs.mode;
   };
 
   const toggle = (): UiMode => {
+    if (options.onRequestMode) return choose(readPrefs().mode === 'easy' ? 'advanced' : 'easy');
     const prefs = writeToggle();
     render(prefs.mode, true);
     return prefs.mode;

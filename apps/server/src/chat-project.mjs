@@ -1,7 +1,8 @@
 import { mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
 import { plannedModelContribution, assertGenerationBrief, MODEL_CONTRIBUTION_MESSAGE } from '../../../packages/jobs/src/model-contribution.mjs';
 import { basename, dirname, isAbsolute, join } from 'node:path';
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
+import { KLEIN_REF_CAP, REF_EDIT_WORKFLOW, REF2_EDIT_WORKFLOW, kleinReferenceProblem } from '../../../packages/jobs/src/klein-references.mjs';
 import { isDeepStrictEqual as equal } from 'node:util';
 import { createToolset, conversationPlanSchema, STYLE_PRESET_DEFAULTS, brandTheme } from '../../../packages/agent/dist/src/index.js';
 import { sanitizeSvg, renderCheck, SANITIZER_VERSION } from '../../../packages/vector/dist/src/index.js';
@@ -205,6 +206,36 @@ function writeReferenceInputList(inputs, refs) {
     if (index === 0) inputs.reference = refId;
     else inputs[`reference_${index + 1}`] = refId;
   });
+}
+
+function connectAssignedKleinReferences(draft, used) {
+  const targets = new Set(used.flatMap(({ assignment }) => {
+    const scene = draft.scenes.find(item => item.id === assignment.sceneId);
+    return ['style_reference', 'subject_reference', 'start_frame', 'motion_reference'].includes(assignment.slot)
+      ? generatedAssetsFor(draft.assets, scene, assignment.slot) : [];
+  }));
+  for (const id of targets) {
+    const gen = draft.assets[id].gen;
+    if (gen.generator !== 'flux3-klein') continue;
+    const inputs = gen.inputs ?? {};
+    const refs = [...new Set([...referenceInputList(inputs), ...(inputs.image ? [inputs.image] : [])])];
+    if (!refs.length) continue;
+    if (refs.length > KLEIN_REF_CAP) throw Object.assign(new Error('Confirmed Klein assignments exceed two connected references; choose the intended sources explicitly.'), { code: 'PLAN_KLEIN_REFERENCE_UNSUPPORTED' });
+    if (gen.workflow && !['workflows/flux3_klein_t2i.api.json', 'workflows/flux3_klein_img2img.api.json', REF_EDIT_WORKFLOW, REF2_EDIT_WORKFLOW].includes(gen.workflow)) {
+      throw Object.assign(new Error('Reference assignment cannot replace an authored custom Klein workflow.'), { code: 'PLAN_KLEIN_REFERENCE_UNSUPPORTED' });
+    }
+    // Style/subject assignments retain their ordered reference slots. A motion
+    // frame joins slot two instead of aliasing the first slot via `image`.
+    if (inputs.reference) {
+      delete inputs.image;
+      writeReferenceInputList(inputs, refs);
+    }
+    const workflow = refs.length === 2 ? REF2_EDIT_WORKFLOW : REF_EDIT_WORKFLOW;
+    const problem = kleinReferenceProblem(inputs);
+    if (problem) throw Object.assign(new Error(problem), { code: 'PLAN_KLEIN_REFERENCE_UNSUPPORTED' });
+    gen.workflow = workflow;
+    gen.workflow_sha256 = createHash('sha256').update(readFileSync(new URL(`../../../${workflow}`, import.meta.url))).digest('hex');
+  }
 }
 
 function assetIdFromFile(file) {
@@ -431,6 +462,7 @@ function applyReferenceAssignments({ draft, references, runtimeDir }) {
   }
 
   if (!used.length) return null;
+  connectAssignedKleinReferences(draft, used);
   const sidecar = referenceSidecar({ pkg: draft, used, skipped });
   writeSidecarFile(referenceSidecarPath(runtimeDir, draft.id), sidecar);
   // Compatibility mirror for readers that still look beside the package files.

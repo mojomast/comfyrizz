@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import { readFileSync, mkdtempSync, rmSync } from 'node:fs';
 import { createServer } from 'node:http';
 import { join } from 'node:path';
+import { tmpdir } from 'node:os';
 import { test } from 'node:test';
 import { createApp } from '../src/app.mjs';
 import { createCpuAgentRunner } from '../src/agent-runner.mjs';
@@ -115,7 +116,7 @@ test('logline and user-supplied dataset note corrections preserve numerical data
 });
 
 test('deterministic provider revises logline and source note through the normal endpoint', async t => {
-  const root = mkdtempSync(join(new URL('../../../.tmp/', import.meta.url).pathname, 'proposal-notes-'));
+  const root = mkdtempSync(join(tmpdir(), 'proposal-notes-'));
   const pkg = fixture();
   pkg.proposal = { logline: 'Nineteen seasons and three podiums.', look: 'Dark', soundtrack: 'None' };
   pkg.datasets.d_starts.note = 'starts.csv — 24 DNF.';
@@ -138,7 +139,7 @@ test('deterministic provider revises logline and source note through the normal 
 });
 
 test('normal agent endpoint pins proposal revisions, reuses original source and rejects stale approval', async t => {
-  const root = mkdtempSync(join(new URL('../../../.tmp/', import.meta.url).pathname, 'proposal-revision-'));
+  const root = mkdtempSync(join(tmpdir(), 'proposal-revision-'));
   const pkg = fixture();
   const docs = createContextAttachmentStore({ rootDir: root, chatId: chat });
   docs.addFile({ bytes: Buffer.from('189 starts before the first win, on the 190th start.'), filename: 'source.txt', mime: 'text/plain' });
@@ -174,7 +175,7 @@ test('normal agent endpoint pins proposal revisions, reuses original source and 
 });
 
 test('a concurrent save while proposal revision runs is never overwritten', async t => {
-  const root = mkdtempSync(join(new URL('../../../.tmp/', import.meta.url).pathname, 'proposal-cas-'));
+  const root = mkdtempSync(join(tmpdir(), 'proposal-cas-'));
   const pkg = fixture();
   let app;
   app = createApp({ root: new URL('../../..', import.meta.url).pathname, runtimeDir: root, token,
@@ -198,7 +199,7 @@ test('a concurrent save while proposal revision runs is never overwritten', asyn
 });
 
 test('loopback revision repairs completed malformed JSON once, without applying partial calls or losing the pinned source', async t => {
-  const root = mkdtempSync(join(new URL('../../../.tmp/', import.meta.url).pathname, 'proposal-json-'));
+  const root = mkdtempSync(join(tmpdir(), 'proposal-json-'));
   const pkg = fixture();
   const docs = createContextAttachmentStore({ rootDir: root, chatId: chat });
   docs.addFile({ bytes: Buffer.from('Original pinned evidence.'), filename: 'source.txt', mime: 'text/plain' });

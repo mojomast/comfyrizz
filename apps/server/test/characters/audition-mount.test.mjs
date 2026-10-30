@@ -170,7 +170,9 @@ test('IP45W: without auditionSynth the route stays unavailable and never synthes
     calls += 1;
     return tinyWav('never');
   };
-  const { port } = await startApp(t);
+  // Hermetic: this machine may have kokoro_onnx installed, so prove the
+  // unavailable path through the same injectable probe production uses.
+  const { port } = await startApp(t, { auditionProbe: async () => false });
   const character = await createCharacter(port, KOKORO_VOICE);
 
   const response = await audition(port, character.id);

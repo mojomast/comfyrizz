@@ -22,6 +22,14 @@ export function createDurableInviteLedger({ path, now, publicBaseUrl } = {}) {
     units REAL NOT NULL, state TEXT NOT NULL, spent REAL,
     PRIMARY KEY (production_id, action_id)
   )`);
+  db.exec('BEGIN IMMEDIATE');
+  try {
+    const columns = new Set(db.prepare('PRAGMA table_info(invite_action_reservations)').all().map(row => row.name));
+    if (!columns.has('accounting')) db.exec('ALTER TABLE invite_action_reservations ADD COLUMN accounting TEXT');
+    if (!columns.has('film_completed')) db.exec('ALTER TABLE invite_action_reservations ADD COLUMN film_completed INTEGER NOT NULL DEFAULT 0');
+    db.exec('COMMIT');
+  } catch (error) { db.exec('ROLLBACK'); throw error; }
+  db.exec('CREATE TABLE IF NOT EXISTS invite_resource_details (kind TEXT NOT NULL, resource_id TEXT NOT NULL, details TEXT NOT NULL, PRIMARY KEY (kind, resource_id))');
   const read = db.prepare('SELECT state FROM ledger WHERE id = 1');
   const write = db.prepare('INSERT INTO ledger (id, state) VALUES (1, ?) ON CONFLICT(id) DO UPDATE SET state = excluded.state');
   const ledger = () => {
@@ -42,7 +50,7 @@ export function createDurableInviteLedger({ path, now, publicBaseUrl } = {}) {
     }
   };
   const result = {};
-  for (const name of ['mint', 'commit', 'settle', 'debit', 'revoke', 'recordGeneration']) result[name] = mutate(name);
+  for (const name of ['mint', 'commit', 'settle', 'debit', 'revoke', 'recordGeneration', 'recordVisit', 'recordGenerationModels']) result[name] = mutate(name);
   for (const name of ['redeem', 'get', 'list', 'listGenerations', 'showcase', 'ownerSummary']) {
     result[name] = (...args) => ledger()[name](...args);
   }
@@ -62,7 +70,8 @@ export function createDurableInviteLedger({ path, now, publicBaseUrl } = {}) {
       const existing = findResource.get(kind, resourceId);
       if (existing && existing.inviteId !== inviteId) throw new Error('resource already belongs to another invite');
       const invite = ledger().get(inviteId);
-      if (!invite || invite.status !== 'active') throw new Error('invite not active');
+      // Owning/editing local resources does not spend CU or consume a film slot.
+      if (!invite || ['expired', 'revoked'].includes(invite.status)) throw new Error('invite not active');
       if (!existing) insertResource.run(kind, resourceId, inviteId);
       db.exec('COMMIT');
       return { inviteId, kind, resourceId, created: !existing };
@@ -93,11 +102,22 @@ export function createDurableInviteLedger({ path, now, publicBaseUrl } = {}) {
     return findResource.get(kind, resourceId)?.inviteId ?? null;
   };
   result.resourcesForInvite = inviteId => listResources.all(inviteId);
-  const getAction = db.prepare(`SELECT invite_id AS inviteId, units, state, spent
+  result.setResourceDetails = (kind, resourceId, details) => {
+    validResource(kind, resourceId);
+    if (!findResource.get(kind, resourceId)) throw new Error('resource is not owned');
+    db.prepare('INSERT INTO invite_resource_details VALUES (?, ?, ?) ON CONFLICT(kind, resource_id) DO UPDATE SET details = excluded.details')
+      .run(kind, resourceId, JSON.stringify(details));
+  };
+  result.resourceDetails = (kind, resourceId) => {
+    validResource(kind, resourceId);
+    const row = db.prepare('SELECT details FROM invite_resource_details WHERE kind = ? AND resource_id = ?').get(kind, resourceId);
+    return row ? JSON.parse(row.details) : null;
+  };
+  const getAction = db.prepare(`SELECT invite_id AS inviteId, units, state, spent, accounting, film_completed AS filmCompleted
     FROM invite_action_reservations WHERE production_id = ? AND action_id = ?`);
   const insertAction = db.prepare(`INSERT INTO invite_action_reservations
     (production_id, action_id, invite_id, units, state) VALUES (?, ?, ?, ?, 'reserved')`);
-  const settleAction = db.prepare(`UPDATE invite_action_reservations SET state = 'settled', spent = ?
+  const settleAction = db.prepare(`UPDATE invite_action_reservations SET state = 'settled', spent = ?, accounting = ?, film_completed = ?
     WHERE production_id = ? AND action_id = ? AND state = 'reserved'`);
   result.reserveAction = ({ inviteId, productionId, actionId, backendId, units } = {}) => {
     validResource('production', productionId);
@@ -123,6 +143,12 @@ export function createDurableInviteLedger({ path, now, publicBaseUrl } = {}) {
         return { ok: true, duplicate: true, units: amount };
       }
       const current = ledger();
+      const invite = current.get(inviteId);
+      const pending = db.prepare("SELECT count(*) AS count FROM invite_action_reservations WHERE invite_id = ? AND state = 'reserved' AND film_completed = 0").get(inviteId).count;
+      if (invite?.maxFilms > 0 && invite.filmsCompleted + pending >= invite.maxFilms) {
+        db.exec('ROLLBACK');
+        return { ok: false, reason: 'film_limit', invite };
+      }
       const reserved = current.commit(inviteId, amount);
       if (!reserved.ok) {
         db.exec('ROLLBACK');
@@ -137,7 +163,7 @@ export function createDurableInviteLedger({ path, now, publicBaseUrl } = {}) {
       throw error;
     }
   };
-  result.settleAction = ({ productionId, actionId, spent, filmCompleted = false } = {}) => {
+  result.settleAction = ({ productionId, actionId, spent, filmCompleted = false, accounting = null } = {}) => {
     validResource('production', productionId);
     validResource('production', actionId);
     const amount = Number(spent);
@@ -156,11 +182,13 @@ export function createDurableInviteLedger({ path, now, publicBaseUrl } = {}) {
       if (amount > reservation.units) throw new Error('actual spend exceeds reservation; reconciliation required');
       const current = ledger();
       const settled = current.settle(reservation.inviteId, {
-        spent: amount, release: Math.round((reservation.units - amount) * 1000) / 1000, filmCompleted,
+        spent: amount, release: Math.round((reservation.units - amount) * 1000) / 1000,
+        filmCompleted: filmCompleted && !reservation.filmCompleted,
       });
       if (!settled.ok) throw new Error(`action settlement refused: ${settled.reason}`);
       write.run(JSON.stringify(current.exportState()));
-      settleAction.run(amount, productionId, actionId);
+      settleAction.run(amount, accounting ? JSON.stringify(accounting) : reservation.accounting,
+        reservation.filmCompleted || filmCompleted ? 1 : 0, productionId, actionId);
       db.exec('COMMIT');
       return { ok: true, duplicate: false, invite: settled.invite };
     } catch (error) {
@@ -168,10 +196,35 @@ export function createDurableInviteLedger({ path, now, publicBaseUrl } = {}) {
       throw error;
     }
   };
+  // Completion and billing are separate facts. A delivered film counts once
+  // even when its CU remains reserved pending attributable usage evidence.
+  result.recordActionAccounting = ({ productionId, actionId, accounting, filmCompleted = false } = {}) => {
+    validResource('production', productionId);
+    validResource('production', actionId);
+    if (!accounting || accounting.status !== 'unresolved') throw new TypeError('unresolved accounting required');
+    db.exec('BEGIN IMMEDIATE');
+    try {
+      const reservation = getAction.get(productionId, actionId);
+      if (!reservation) throw new Error('action reservation not found');
+      if (reservation.state === 'reserved') {
+        if (filmCompleted && !reservation.filmCompleted) {
+          const current = ledger();
+          const completed = current.settle(reservation.inviteId, { spent: 0, release: 0, filmCompleted: true });
+          if (!completed.ok) throw new Error('invite completion could not be recorded');
+          write.run(JSON.stringify(current.exportState()));
+        }
+        db.prepare('UPDATE invite_action_reservations SET accounting = ?, film_completed = ? WHERE production_id = ? AND action_id = ?')
+          .run(JSON.stringify(accounting), reservation.filmCompleted || filmCompleted ? 1 : 0, productionId, actionId);
+      }
+      db.exec('COMMIT');
+      return { ok: true };
+    } catch (error) { try { db.exec('ROLLBACK'); } catch { /* preserve original error */ } throw error; }
+  };
   result.actionReservation = (productionId, actionId) => {
     validResource('production', productionId);
     validResource('production', actionId);
-    return getAction.get(productionId, actionId) ?? null;
+    const row = getAction.get(productionId, actionId);
+    return row ? { ...row, filmCompleted: row.filmCompleted === 1, accounting: row.accounting ? JSON.parse(row.accounting) : null } : null;
   };
   result.close = () => db.close();
   // Fail startup rather than treat corrupt persisted state as an empty ledger.

@@ -5,6 +5,35 @@ import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { createDurableInviteLedger } from '../../../../packages/backends/src/durable-invite-ledger.mjs';
 import { createInviteProductionSpendGuard } from '../../src/invites/production-spend-guard.mjs';
+import { guestPlannerFixture } from './planner-fixture.mjs';
+
+test('exhausted invites admit zero-CU local work but reject remote execution and foreign packages', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'invite-cpu-guard-'));
+  const ledger = createDurableInviteLedger({ path: join(dir, 'ledger.sqlite') });
+  try {
+    const invite = ledger.mint({ cu: 1, ttlDays: 1 }).invite;
+    ledger.debit(invite.id, 1);
+    const { package: pkg } = await guestPlannerFixture({ runtimeDir: dir })({ brief: 'A CPU edit with existing media' });
+    for (const asset of Object.values(pkg.assets)) if (asset.status === 'pending') {
+      asset.status = 'ready'; asset.file = 'assets/ready.png'; asset.bytes = 1; asset.sha256 = 'a'.repeat(64);
+    }
+    ledger.bindResource(invite.id, 'production', 'prod_cpu');
+    ledger.bindResource(invite.id, 'package', pkg.id);
+    let calls = 0;
+    const guard = createInviteProductionSpendGuard({ ledger, spendEnabled: () => false, adapter: { admit: async () => { calls++; return { started: true }; } } });
+    const args = { productionId: 'prod_cpu', actionId: 'act_invite_cpu', pkg, input: { backendId: 'cpu', budgetUnits: 0 } };
+    assert.equal((await guard.admit(args)).started, true);
+    for (const patch of [{ narrationRuntime: 'colab' }, { renderLocation: 'colab' }, { comfyuiUrl: 'http://127.0.0.1:8188' }, { budgetUnits: 1 }]) {
+      await assert.rejects(guard.admit({ ...args, input: { ...args.input, ...patch } }), { code: 'INVITE_CPU_ONLY' });
+    }
+    await assert.rejects(guard.admit({ ...args, pkg: { ...pkg, id: 'pkg_foreign' } }), { code: 'INVITE_OWNERSHIP_REQUIRED' });
+    await assert.rejects(guard.admit({ ...args, input: { backendId: 'colab', budgetUnits: 1 } }), { code: 'INVITE_SPEND_DISABLED' });
+    assert.equal(calls, 1);
+    assert.equal(ledger.actionReservation('prod_cpu', 'act_invite_cpu'), null);
+    ledger.revoke(invite.id);
+    await assert.rejects(guard.admit(args), { code: 'INVITE_OWNERSHIP_REQUIRED' });
+  } finally { ledger.close(); rmSync(dir, { recursive: true, force: true }); }
+});
 
 test('outbox dispatch requires an enabled, owned Google Colab reservation before allocation', async () => {
   const dir = mkdtempSync(join(tmpdir(), 'invite-dispatch-'));

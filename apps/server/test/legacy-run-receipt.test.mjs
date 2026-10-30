@@ -83,6 +83,11 @@ async function harness(t, { source = 'trusted', render, runtime = null } = {}) {
       return app.runs.wait(started.runId);
     },
     download: runId => fetch(`http://127.0.0.1:${server.address().port}/api/run/${runId}/video`, { headers: { 'x-comfyrizz-token': TOKEN } }),
+    review: body => {
+      const origin = `http://127.0.0.1:${server.address().port}`;
+      return fetch(`${origin}/api/render-reviews`, { method: 'POST',
+        headers: { origin, 'x-comfyrizz-token': TOKEN, 'content-type': 'application/json' }, body: JSON.stringify(body) });
+    },
   };
 }
 
@@ -91,6 +96,29 @@ async function refused(h, runId) {
   assert.equal(response.status, 422);
   assert.equal((await response.json()).code, 'COMFY_RENDER_RECEIPT_REQUIRED');
 }
+
+test('fresh run publication is reviewable by its original run ID; missing historical input cannot be recreated', async t => {
+  const h = await harness(t);
+  const finished = await h.start();
+  assert.equal(finished.status, 'done', finished.renderError);
+  const pkg = h.app.store.read(fixture().id);
+  const body = { packageId: pkg.id, expectedRevision: pkg.revision, renderId: finished.runId };
+  const response = await h.review(body);
+  assert.equal(response.status, 200, await response.clone().text());
+  const report = await response.json();
+  assert.equal(report.artifact.renderId, finished.runId);
+  assert.equal(report.artifact.videoSha256, sha(VIDEO));
+  assert.equal(report.packageRevision, pkg.revision);
+  assert.equal(report.capabilities.renderProbe, 'unknown', 'synthetic bytes are not a decodable film');
+  assert.equal(report.acceptance, 'not_assessed');
+  const inputFile = join(h.directory, 'runs', finished.runId, 'render-input.json');
+  rmSync(inputFile);
+  const refused = await h.review(body);
+  assert.equal(refused.status, 404);
+  assert.equal((await refused.json()).code, 'ARTIFACT_MISSING');
+  assert.equal(existsSync(inputFile), false);
+  assert.equal(h.renderCalls(), 1, 'review never renders or recertifies historical output');
+});
 
 test('legacy completion records exact render bytes and frozen inputs; download survives edits and restart', async t => {
   let stagedPath;

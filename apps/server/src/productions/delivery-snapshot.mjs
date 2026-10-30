@@ -7,6 +7,7 @@ import { captionsToSrt, captionsToVtt, captionsToWordVtt } from '../../../../pac
 import { isAssetRedistributable } from '../../../../packages/sources/dist/src/index.js';
 import { measuredOptionsFromDir } from '../compile-package.mjs';
 import { workflowSidecars } from '../workflow.mjs';
+import { collectCompositionExtras } from '../../../../packages/compositions/src/index.mjs';
 import { finalRenderFormat } from '../../../renderer/scripts/render-package-lib.mjs';
 import { narrationAudio } from '../../../renderer/src/audio-model.js';
 import { verifyModelContribution, copyGenerationReceipts, MODEL_CONTRIBUTION_MESSAGE } from '../../../../packages/jobs/src/model-contribution.mjs';
@@ -150,6 +151,9 @@ function safeRelative(value, label) {
 
 function declaredInputNames(pkg, packageDir) {
   const names = new Set(OPTIONAL_INPUTS);
+  // Full renders consume the same editable composition source as exports.
+  // Validate it before admission and bind its bytes to the frozen snapshot.
+  for (const source of collectCompositionExtras(pkg, packageDir)) names.add(source.path);
   const narrationFile = pkg.assets?.a_narration?.file;
   if (typeof narrationFile === 'string' && /^audio\/generated\/[A-Za-z0-9_-]+\/narration\.norm\.wav$/.test(narrationFile)) names.add(`${dirname(narrationFile)}/durations.json`);
   for (const asset of Object.values(pkg.assets ?? {})) {
@@ -182,8 +186,12 @@ function declaredInputNames(pkg, packageDir) {
   return [...names].map((name) => safeRelative(name, 'input path')).sort();
 }
 
-function hashOptionalInput(root, name) {
-  const file = resolve(root, name);
+function deliveryInputPath(root, pkg, name) {
+  // Selected takes are owned by the package, while generated assets normally
+  // live at the shared packages root. A staged package uses flat relative paths.
+  const scoped = name.startsWith('takes/') && /^pkg_[A-Za-z0-9_-]+$/.test(pkg?.id ?? '')
+    ? resolve(root, pkg.id, name) : null;
+  const file = scoped && existsSync(scoped) ? scoped : resolve(root, name);
   if (file !== root && !file.startsWith(root + sep)) fail('INVALID_PATH', 'input escapes the package');
   let real;
   try {
@@ -193,6 +201,13 @@ function hashOptionalInput(root, name) {
     throw error;
   }
   if (real !== root && !real.startsWith(root + sep)) fail('INVALID_PATH', 'input escapes the package');
+  if (scoped && file === scoped && !real.startsWith(resolve(root, pkg.id) + sep)) fail('INVALID_PATH', 'take escapes its owning package');
+  return real;
+}
+
+function hashOptionalInput(root, pkg, name) {
+  const real = deliveryInputPath(root, pkg, name);
+  if (!real) return null;
   let stat;
   try {
     stat = statSync(real);
@@ -211,7 +226,7 @@ export function collectDeliveryInputs(pkg, packageDir) {
   }
   const root = realpathSync(packageDir);
   return declaredInputNames(pkg, root).map((path) => {
-    const found = hashOptionalInput(root, path);
+    const found = hashOptionalInput(root, pkg, path);
     return found === null
       ? { path, sha256: null, bytes: null }
       : { path, sha256: found.sha256, bytes: found.bytes };
@@ -401,6 +416,23 @@ export function preflightDelivery(snapshot, options = {}) {
   }
 
   const pkg = snapshot.package ?? {};
+  const used = new Set();
+  function collectUsed(value) {
+    if (!value || typeof value !== 'object') return;
+    for (const [key, child] of Object.entries(value)) {
+      if (['asset', 'assetId', 'narration_asset', 'narrationAsset', 'presenter_asset'].includes(key) && typeof child === 'string') used.add(child);
+      else if (child && typeof child === 'object') collectUsed(child);
+    }
+  }
+  collectUsed(snapshot.timeline);
+  collectUsed(pkg.audio);
+  for (const assetId of used) {
+    const asset = pkg.assets?.[assetId];
+    const input = (snapshot.inputs ?? []).find(item => item.path === asset?.file);
+    if (!asset?.file || !input?.sha256 || !(input.bytes > 0)) {
+      add('ACTIVE_MEDIA_MISSING', `Media used by this film is missing: ${assetId}`, { assetId });
+    }
+  }
   const narrated = !pkg.audio?.music?.trim && pkg.voice?.enabled === true && pkg.voice.engine !== 'none'
     && (pkg.scenes ?? []).some(scene => typeof scene.narration === 'string' && scene.narration.trim());
   if (narrated) {
@@ -477,8 +509,8 @@ export function stageDeliverySnapshot({ snapshot, packageDir, stagingDir = null 
   for (const input of snapshot.inputs ?? []) {
     if (input.sha256 === null) continue;
     const relativePath = safeRelative(input.path, 'input path');
-    const source = resolve(sourceRoot, relativePath);
-    if (!source.startsWith(sourceRoot + sep)) fail('INVALID_PATH', 'input escapes the package');
+    const source = deliveryInputPath(sourceRoot, snapshot.package, relativePath);
+    if (!source) fail('INPUT_CHANGED', `source disappeared after the snapshot was taken: ${relativePath}`);
     const sourceBytes = checkStagedHash(source, input.sha256);
     const target = join(stagedPackageDir, relativePath);
     mkdirSync(dirname(target), { recursive: true, mode: 0o700 });

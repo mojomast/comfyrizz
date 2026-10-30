@@ -75,6 +75,7 @@ test('R13: confirmed references are copied, wired into gen.inputs and the jobs p
   const styleAssetId = `a_ref_${style.sha256.slice(0, 16)}`;
   const productAssetId = `a_ref_${product.sha256.slice(0, 16)}`;
   assert.equal(still.gen.inputs.reference, styleAssetId);
+  assert.equal(still.gen.workflow, 'workflows/flux3_klein_ref_edit.api.json');
   assert.equal(still.gen.inputs.reference_2, undefined);
   assert.ok(pkg.assets[styleAssetId], 'the confirmed reference is a package asset');
   assert.equal(pkg.assets[styleAssetId].file, `assets/${styleAssetId}.png`);
@@ -153,6 +154,17 @@ test('R13: only confirmed assignments are applied and a build without references
   assert.equal(validatePackage(plain).valid, true);
 });
 
+test('three confirmed Klein sources fail closed rather than dropping an assignment', async t => {
+  const { runtimeDir, store } = setup(t);
+  const refs = [PNG_STYLE, PNG_PRODUCT, Buffer.concat([PNG_STYLE, Buffer.from('third fixture')])].map((bytes, index) => store.add({
+    bytes, filename: `source-${index}.png`, meta: { role: index === 0 ? 'style' : 'product', note: `Source ${index}`, width: 1, height: 1 },
+  }));
+  store.setAssignments(refs.map((ref, index) => ({ refId: ref.id, sceneId: 's_hero',
+    slot: ['style_reference', 'subject_reference', 'start_frame'][index], status: 'confirmed' })));
+  await assert.rejects(buildChatProject({ plan: makePlan(), runtimeDir, references: store }), { code: 'PLAN_KLEIN_REFERENCE_UNSUPPORTED' });
+  assert.equal(existsSync(join(runtimeDir, 'packages', 'references.json')), false, 'no successful lineage is published');
+});
+
 test('R13: a motion reference appends its hint and uses frame 0 as the start image', async t => {
   const { runtimeDir } = setup(t);
   const framesDir = join(runtimeDir, 'frames');
@@ -196,6 +208,7 @@ test('R13: a motion reference appends its hint and uses frame 0 as the start ima
   assert.match(still.gen.inputs.prompt, /first extracted frame/);
   assert.match(still.gen.inputs.prompt, /no video file/i);
   assert.equal(still.gen.inputs.image, frameAssetId);
+  assert.equal(still.gen.workflow, 'workflows/flux3_klein_ref_edit.api.json');
   assert.equal(still.gen.inputs.reference, undefined);
   assert.equal(pkg.assets[frameAssetId].file, `assets/${frameAssetId}.png`);
   assert.deepEqual(readFileSync(join(runtimeDir, 'packages', 'assets', `${frameAssetId}.png`)), frameBytes);

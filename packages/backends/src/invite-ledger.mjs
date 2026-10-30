@@ -274,7 +274,8 @@ export function createInviteLedger({ now = () => Date.now(), publicBaseUrl = DEF
     refreshStatus(row);
     if (row.status === "revoked") return { ok: false, reason: "revoked", invite: publicView(row) };
     if (row.status === "expired") return { ok: false, reason: "expired", invite: publicView(row) };
-    if (row.status === "exhausted") return { ok: false, reason: "exhausted", invite: publicView(row) };
+    // Exhausted links remain useful for viewing the gallery. Admission still
+    // refuses new spend through commit/reserveAction.
     return { ok: true, reason: "active", invite: publicView(row) };
   }
 
@@ -363,6 +364,21 @@ export function createInviteLedger({ now = () => Date.now(), publicBaseUrl = DEF
       const previous = generations.find(generation => generation.runId === entry.runId);
       if (previous) {
         if (previous.inviteId !== inviteId) throw new Error('generation run belongs to another invite');
+        if (['queued', 'running'].includes(previous.status) && entry.status && !['queued', 'running'].includes(entry.status)) {
+          Object.assign(previous, {
+            status: entry.status, showcase: entry.showcase === true,
+            spentEstimateCu: roundCu(Number(entry.spentEstimateCu ?? 0)) || 0,
+            details: { ...previous.details, ...entry.details }, finishedAt: now(),
+          });
+        }
+        // Shutdown/usage reconciliation can finish after the generation is
+        // terminal. Refresh only accounting; never resurrect or republish it.
+        if (entry.details?.accounting && (!['settled', 'legacy_estimate'].includes(previous.details?.accounting?.status)
+            || ['settled', 'legacy_estimate'].includes(entry.details.accounting.status))) {
+          previous.details = { ...previous.details, accounting: structuredClone(entry.details.accounting),
+            costSource: entry.details.costSource, actualSpendCu: entry.details.actualSpendCu };
+          previous.spentEstimateCu = roundCu(Number(entry.spentEstimateCu ?? 0)) || 0;
+        }
         return { ok: true, reason: 'already_recorded', generation: { ...previous } };
       }
     }
@@ -378,7 +394,7 @@ export function createInviteLedger({ now = () => Date.now(), publicBaseUrl = DEF
       details: entry.details && typeof entry.details === "object" ? entry.details : {},
       createdAt,
       spentEstimateCu: roundCu(Number(entry.spentEstimateCu ?? 0)) || 0,
-      status: entry.status === "failed" ? "failed" : "ready",
+      status: ['queued', 'running', 'failed', 'cancelled', 'interrupted'].includes(entry.status) ? entry.status : 'ready',
       showcase: entry.showcase !== false,
       runId: typeof entry.runId === "string" ? entry.runId : null,
     };
@@ -422,12 +438,18 @@ export function createInviteLedger({ now = () => Date.now(), publicBaseUrl = DEF
         acc.remainingCu = roundCu(acc.remainingCu + Math.max(0, inv.remainingCu));
         return acc;
       },
-      { ceilingCu: 0, spentEstimateCu: 0, committedEstimateCu: 0, remainingCu: 0, inviteCount: invites.length, generationCount: gens.length },
+      { ceilingCu: 0, spentEstimateCu: 0, committedEstimateCu: 0, remainingCu: 0, inviteCount: invites.length, generationCount: gens.length,
+        runningCount: gens.filter(g => ['queued', 'running'].includes(g.status)).length,
+        readyCount: gens.filter(g => g.status === 'ready').length,
+        failedCount: gens.filter(g => ['failed', 'cancelled', 'interrupted'].includes(g.status)).length,
+        visits: [...byId.values()].reduce((sum, row) => sum + (row.visits ?? 0), 0) },
     );
     return {
       totals,
       invites: invites.map((inv) => ({
         ...inv,
+        visits: byId.get(inv.id)?.visits ?? 0,
+        lastVisitAt: byId.get(inv.id)?.lastVisitAt ?? null,
         generations: gens.filter((g) => g.inviteId === inv.id),
       })),
       generations: gens,
@@ -437,6 +459,19 @@ export function createInviteLedger({ now = () => Date.now(), publicBaseUrl = DEF
   return {
     exportState: () => ({ version: 1, invites: [...byId.values()], generations, seq, genSeq }),
     mint,
+    recordVisit(inviteId) {
+      const row = byId.get(inviteId);
+      if (!row) return;
+      row.visits = (row.visits ?? 0) + 1;
+      row.lastVisitAt = now();
+    },
+    recordGenerationModels(runId, models) {
+      const generation = generations.find(row => row.runId === runId);
+      if (!generation || !Array.isArray(models)) return false;
+      // Host-only provenance enrichment never alters ownership, status or CU.
+      generation.details = { ...generation.details, models: structuredClone(models), modelEvidence: 'verified_pipeline' };
+      return true;
+    },
     redeem,
     commit,
     settle,

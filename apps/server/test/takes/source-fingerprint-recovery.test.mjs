@@ -21,7 +21,7 @@ const workflow = name => readFileSync(new URL(`../../../../workflows/${name}.api
 const write = (path, value) => { mkdirSync(dirname(path), { recursive: true }); writeFileSync(path, value); };
 const writeJson = (path, value) => write(path, JSON.stringify(value));
 
-function fixture(t, { legacy = true, reverse = false } = {}) {
+function fixture(t, { legacy = true, reverse = false, videoOnlyPreview = false } = {}) {
   const runtimeDir = mkdtempSync(join(tmpdir(), 'take-source-recovery-'));
   t.after(() => rmSync(runtimeDir, { recursive: true, force: true }));
   const packageDir = join(runtimeDir, 'packages');
@@ -85,17 +85,28 @@ function fixture(t, { legacy = true, reverse = false } = {}) {
   const store = createTakeStore({ runtimeDir, packageDir });
   // First preview has video1 and both dependencies. Video2 lands on the next
   // preview. Completion must never rewrite immutable takes to hide drift.
-  const preview = { ...manifest, complete: false, jobs: manifest.jobs.filter(entry => entry.job !== 'a_video2.plate') };
+  const preview = { ...manifest, complete: false, jobs: manifest.jobs.filter(entry => videoOnlyPreview ? entry.job === 'a_video1.plate' : entry.job !== 'a_video2.plate') };
   const args = { pkg: staged, jobsDoc, outputDir, store, runId, backend: 'colab', ...(legacy ? { references: staged } : {}) };
   ingestRun({ ...args, manifest: preview });
+  const previewDoc = store.read(staged.id);
   ingestRun({ ...args, manifest });
   const take = store.read(pkg.id).clips.a_video1.takes[0];
-  return { runtimeDir, packageDir, runDir, outputDir, runId, pkg, staged, manifest, jobsDoc, store, take,
+  return { runtimeDir, packageDir, runDir, outputDir, runId, pkg, staged, manifest, jobsDoc, store, take, previewDoc,
     prove: (overrides = {}) => recoverPendingReferenceFingerprint({ pkg, assetId: 'a_video1', take,
       runtimeDir, packageDir, takeRoot: store.packageRoot(pkg.id), ...overrides }) };
 }
 
 const state = (pkg, doc, assetId) => deriveClipState({ takes: doc.clips[assetId], assetGen: pkg.assets[assetId].gen, refs: pkg });
+
+test('video-only preview waits for conditioning identities before recording its immutable take', t => {
+  const ctx = fixture(t, { legacy: false, videoOnlyPreview: true });
+  assert.equal(ctx.previewDoc?.clips?.a_video1?.takes?.length ?? 0, 0);
+  const doc = ctx.store.read(ctx.pkg.id);
+  assert.equal(doc.clips.a_video1.takes.length, 1);
+  assert.equal(state(ctx.pkg, doc, 'a_video1'), 'review');
+  assert.equal(doc.clips.a_video1.takes[0].sourceGenFingerprintRecovery, undefined);
+  assert.equal(doc.clips.a_video1.takes[0].sourceGenFingerprint, genFingerprint(ctx.pkg.assets.a_video1.gen, ctx.pkg));
+});
 
 test('future previews fingerprint completed dependencies independent of manifest/completion order', t => {
   for (const reverse of [false, true]) {

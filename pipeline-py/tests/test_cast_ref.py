@@ -5,8 +5,9 @@ The TypeScript planner turns every still that names a cast member into
 runner against the local fake Comfy server. ``/upload/image`` receives the ref file's bytes,
 and LoadImage (node 10) is given the server-side name.
 
-When the still already names a style ref, that file stays image0 and the cast ref is still
-uploaded (``_reference_2``). Klein's cap is 10; this graph wires image0 only.
+When the still already names a style ref, that file stays image0 and the cast ref
+is connected as image1 in the two-reference graph. Local graphs support at most
+two connected references; uploading an unused source is not conditioning.
 
 No GPU and no Google Colab. Scripted fakes only.
 """
@@ -54,8 +55,10 @@ def stage_workflow(work: Path) -> None:
     workflows = work / "workflows"
     workflows.mkdir(parents=True, exist_ok=True)
     source = REPO_ROOT / "workflows"
-    shutil.copy(source / WORKFLOW, workflows / WORKFLOW)
-    shutil.copy(source / "flux3_klein_ref_edit.api.params.json", workflows / "flux3_klein_ref_edit.api.params.json")
+    for name in (WORKFLOW, "flux3_klein_ref2_edit.api.json"):
+        shutil.copy(source / name, workflows / name)
+        params = name.replace(".api.json", ".api.params.json")
+        shutil.copy(source / params, workflows / params)
 
 
 def runner_for(work: Path, fake) -> Runner:
@@ -112,7 +115,7 @@ def test_the_mascot_example_uploads_its_synthetic_sheet(tmp_path: Path, servers)
     assert all(name != "a_pip" for name in fake.submitted_input(LOADIMAGE))
 
 
-def test_a_style_ref_stays_on_node_10_and_the_cast_ref_is_still_uploaded(tmp_path: Path, servers):
+def test_style_and_cast_refs_condition_the_two_reference_graph_in_order(tmp_path: Path, servers):
     work = tmp_path / "styled"
     work.mkdir()
     stage_workflow(work)
@@ -188,6 +191,7 @@ def test_a_style_ref_stays_on_node_10_and_the_cast_ref_is_still_uploaded(tmp_pat
     still = next(job for job in doc["jobs"] if job["asset"] == "a_still")
     assert still["params"]["reference"] == "a_style"
     assert still["params"]["_reference_2"] == "a_pip"
+    assert still["workflow"] == "workflows/flux3_klein_ref2_edit.api.json"
     assert still["fileInputs"] == [
         {"param": "reference", "from": "package", "path": "assets/style.png"},
         {"param": "_reference_2", "from": "package", "path": "assets/pip.svg"},
@@ -199,4 +203,5 @@ def test_a_style_ref_stays_on_node_10_and_the_cast_ref_is_still_uploaded(tmp_pat
     uploads = {entry["sha256"] for entry in fake.upload_requests()}
     assert uploads == {sha256_file(style), sha256_file(pip)}
     assert fake.submitted_input(LOADIMAGE) == [server_name(style)]
+    assert fake.submitted_input("11") == [server_name(pip)]
     assert server_name(pip) not in fake.submitted_input(LOADIMAGE)

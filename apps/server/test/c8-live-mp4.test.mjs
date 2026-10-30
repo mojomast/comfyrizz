@@ -145,10 +145,19 @@ test('M2 edit loop persists a headline + chart value with a base revision', { ti
 
 test('export renders the edited revision to a real CPU MP4', { timeout: 900_000 }, async () => {
   const pkg = app.store.read(state.packageId);
-  collectMockContribution(pkg, app.store.dir);
+  // Complete the planned media using explicitly synthetic collection evidence;
+  // a different ready plate cannot stand in for a missing active source.
+  const pending = Object.entries(pkg.assets).filter(([, asset]) => asset.status === 'pending');
+  assert.ok(pending.length > 0);
+  for (const [id, asset] of pending) {
+    assert.equal(asset.kind, 'image');
+    collectMockContribution(pkg, app.store.dir, { id });
+    app.takeStore.addTake(pkg.id, id, { srcPath: join(app.store.dir, asset.file),
+      gen: asset.gen, media: asset.media, verdict: 'approved', verdictNote: 'Synthetic CPU contract fixture only' });
+  }
   app.store.write(pkg);
   state.revision = app.store.read(state.packageId).revision;
-  const response = await binaryRequest({ method: 'POST', path: '/api/render', body: { packageId: state.packageId, baseRevision: state.revision, override: { reason: 'CPU acceptance test uses a planned GPU placeholder' } } });
+  const response = await binaryRequest({ method: 'POST', path: '/api/render', body: { packageId: state.packageId, baseRevision: state.revision, intent: 'final' } });
   assert.equal(response.status, 200, response.buffer.toString('utf8').slice(0, 500));
   assert.equal(response.headers['content-type'], 'video/mp4');
   assert.equal(Number(response.headers['x-comfyrizz-revision']), state.revision);

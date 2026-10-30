@@ -1,8 +1,9 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { collectMockContribution, approveMockContribution } from '../helpers/comfy-contribution.mjs';
+import { writeStubSource } from '../helpers/stub-source.mjs';
 import { createServer } from 'node:http';
-import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { cpSync, existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { spawnSync } from 'node:child_process';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -208,6 +209,8 @@ test('PN04: approving s3 take 2 with a verified mocked plate makes the gate 5/5 
 
   const fixture = packageWithMedia();
   collectMockContribution(fixture, app.store.dir);
+  cpSync(new URL('assets/', exampleDir), join(app.store.dir, 'assets'), { recursive: true });
+  for (const [, id] of CLIP_ASSETS) writeStubSource(fixture, app.store.dir, id);
   app.store.seed(fixture);
   app.takeStore.write(pkg.id, takesDoc);
   approveMockContribution(app.takeStore, fixture, app.store.dir);

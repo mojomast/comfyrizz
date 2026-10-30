@@ -15,7 +15,24 @@ export function createCorrectionAdapter({ store, runs, pipeline }) {
     return { action, slot };
   }
   const isCorrection = fact => fact.slot?.executor === 'chat-correction-take';
+  function correctionRun(productionId, actionId, fact) {
+    if (!fact.action?.runId) return null;
+    const run = runs.get(fact.action.runId);
+    const packageId = store.read(productionId)?.packageId;
+    // A journaled runId alone cannot attribute a foreign take to this action.
+    // The take runner records the action plan separately from its backend plan.
+    return run && run.runId === fact.action.runId && run.productionId === productionId
+      && run.actionId === actionId && packageId && run.packageId === packageId
+      && (run.actionPlanHash ?? run.planHash) === fact.action.planHash ? run : null;
+  }
   return {
+    runForAction(productionId, actionId) {
+      const fact = facts(productionId, actionId);
+      // Preserve the pipeline's attributed lookup through this wrapper: the
+      // invite spend guard needs it before releasing proven non-submissions.
+      if (!isCorrection(fact)) return pipeline.runForAction(productionId, actionId);
+      return correctionRun(productionId, actionId, fact);
+    },
     async admit(args) {
       const { action, slot } = facts(args.productionId, args.actionId);
       if (!isCorrection({ slot })) return pipeline.admit(args);
@@ -44,13 +61,16 @@ export function createCorrectionAdapter({ store, runs, pipeline }) {
     async observe(args) {
       const fact = facts(args.productionId, args.actionId);
       if (!isCorrection(fact)) return pipeline.observe(args);
-      const run = fact.action?.runId ? runs.get(fact.action.runId) : null;
+      const run = correctionRun(args.productionId, args.actionId, fact);
       return { observed: Boolean(run), changed: false, action: fact.action, actionState: fact.action?.state,
         status: fact.action?.state, run, reconcileRequired: fact.action?.state === 'submission_unknown' };
     },
     cancel(args) {
       const fact = facts(args.productionId, args.actionId);
-      if (isCorrection(fact) && fact.action?.runId) runs.cancel(fact.action.runId);
+      if (isCorrection(fact)) {
+        const run = correctionRun(args.productionId, args.actionId, fact);
+        if (run) runs.cancel(run.runId);
+      }
       return pipeline.cancel(args);
     },
   };

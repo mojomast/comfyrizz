@@ -2,7 +2,7 @@
   "v": 1,
   "generator": "ltx25",
   "kind": "plate",
-  "note": "Stage 1 is half the final size: the latent upsampler (21) doubles the latent, so a planned 960x544 must be 480x272 in EmptyLTXVLatentVideo(8) or the output comes back 2x (GPU test 2, issue 3). The i2v image scale (31) is unmapped by default and then keeps its own 960x544 whatever the plan says (issue 4), so it takes the same halved value: the start image is then scaled and centre-cropped to exactly the stage-1 lattice it is injected into, which is the spatial relationship the GPU test 2 runs used (image 1:1 with stage 1, and stage 2's latent the doubled one). One planned value reaches both because a target carries a multiplier. The audio latent (9) carries its own frame count, so 'frames' maps to both. frame_rate is on LTXVConditioning(7). The planner already resolved width/height to multiples of 32 and frames to 8n+1. The start image is a local file: 'files' declares that the runner uploads it and injects the name the server returns (GPU test 2, issue 2). N3 (GPU test 3): the graph ends in CreateVideo(42) -> SaveVideo(43, mp4/h264) instead of SaveImage, because ComfyUI saved one PNG per frame and the runner then collected frame 0 as the plate's .mp4. 'fps' therefore reaches the conditioning node (7) and the container (42). R1: 'strength' maps the stage-1 LTXVImgToVideoInplace (33) and 'stage2_strength' the stage-2 one (34), so a plan can hold a static frame (UI/diagram plates take strength 1.0; the graph's own default is 0.7).",
+  "note": "Planned width/height are FINAL dimensions on a 64-pixel lattice. Stage 1 takes half in EmptyLTXVLatentVideo(8) and ImageScale(31), on LTX's 32-pixel lattice; the x2 upsampler(21) restores the final size. Default: 512x288 -> 1024x576, exact 16:9. A requested final 960x544 must first resolve to 960x576; 480x272 is invalid. ImageScale centre-crops the uploaded first frame to the base aspect. Frames must be 8n+1 and map to both video(8) and audio(9). FPS reaches conditioning(7), empty audio(9) and CreateVideo(42). The runner uploads 'image' and injects the server filename. CreateVideo(42) -> SaveVideo(43) produces MP4/h264. 'strength' controls stage-1 image conditioning(33); 'stage2_strength' controls stage 2(34). See docs/research/COMFY_LTX_QUALITY.md for primary-source geometry and schedule evidence.",
   "files": [
     "image"
   ],
@@ -65,6 +65,10 @@
       [
         "42",
         "fps"
+      ],
+      [
+        "9",
+        "frame_rate"
       ]
     ],
     "seed": [

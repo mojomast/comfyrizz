@@ -80,16 +80,16 @@ test('FLUX caption expansion is deterministic and suppresses text/logos', () => 
   assert.match(caption, /A rocket lifting off/);
   assert.match(caption, /#0d0f14, #6d8cff/);
   assert.match(caption, /transparent background/);
-  assert.match(caption, /no text, no letters, no words, no logos/);
+  assert.match(caption, /plain, unmarked surfaces/);
 });
 
 test('caption: text escape hatch, labelled static camera, aspect helpers', () => {
   const wanted = expandFluxCaption({ intent: 'A dashboard hero', text: true });
   assert.doesNotMatch(wanted, /no text/);
-  assert.match(wanted, /legible labels only/);
+  assert.match(wanted, /legible supplied lettering/);
   const labelled = expandFluxCaption({ intent: 'A solar flow diagram', labelled: true });
   assert.match(labelled, /static camera/);
-  assert.match(labelled, /legible labels only/);
+  assert.match(labelled, /legible supplied lettering/);
   assert.equal(aspectFromSize(1920, 1080), '16:9');
   assert.equal(aspectFromSize(1024, 1024), '1:1');
   assert.equal(aspectFromSize(1080, 1350), '4:5');
@@ -158,7 +158,7 @@ test('tools: propose + edit package, SVG result, planned FLUX job', async () => 
   const image = await tools['assets.generate_image'].run({ scene_id: 's1', intent: 'a nebula', cutout: true }) as any;
   assert.equal(image.requires_approval, 'spend');
   assert.equal(image.note, 'planned only; no GPU job was submitted');
-  assert.match(image.caption, /no text/);
+  assert.match(image.caption, /plain, unmarked surfaces/);
   assert.equal(image.asset.gen.model, 'flux-3-klein');
   assert.equal(image.asset.model_license.id, 'FLUX-Kommunity');
   assert.equal(image.asset.model_license.url, 'https://huggingface.co/black-forest-labs/flux-3-image-klein');
@@ -171,8 +171,8 @@ test('tools: propose + edit package, SVG result, planned FLUX job', async () => 
   assert.equal(refEdit.asset.gen.workflow, 'workflows/flux3_klein_ref_edit.api.json');
   assert.equal(refEdit.asset.gen.inputs.reference, svg.asset.id);
   assert.equal(refEdit.asset.gen.inputs.text, true);
-  assert.match(refEdit.asset.gen.inputs.prompt, /Restyle this restyle the flow diagram as clay/);
-  assert.match(refEdit.asset.gen.inputs.prompt, /Keep the exact layout, positions, colours and all labels exactly as written/);
+  assert.match(refEdit.asset.gen.inputs.prompt, /restyle the flow diagram\nRequested rendering style: clay/);
+  assert.match(refEdit.asset.gen.inputs.prompt, /Preserve supplied lettering verbatim/);
   assert.match(refEdit.asset.notes, /ReferenceMultiLatent/);
 
   const mismatched = await tools['assets.generate_image'].run({ scene_id: 's1', intent: 'a mascot', aspect: '1:1' }) as any;
@@ -219,8 +219,8 @@ test('C7: a styled diagram yields an SVG base plus a reference-edit image that p
   assert.equal(draft.assets[imageId].gen.workflow_sha256, workflowSha);
   assert.equal(draft.assets[imageId].gen.inputs.reference, svgId);
   assert.equal(draft.assets[imageId].gen.inputs.text, true);
-  assert.match(draft.assets[imageId].gen.inputs.prompt, /^Restyle this solar diagram as clay/);
-  assert.match(draft.assets[imageId].gen.inputs.prompt, /Keep the exact layout, positions, colours and all labels exactly as written/);
+  assert.match(draft.assets[imageId].gen.inputs.prompt, /^solar diagram\nRequested rendering style: clay/);
+  assert.match(draft.assets[imageId].gen.inputs.prompt, /Preserve supplied lettering verbatim/);
   assert.ok(draft.scenes[0].foreground.some((fg: any) => fg.asset === svgId), 'the SVG base is the visible CPU asset');
 
   const validation = schema.validatePackage(draft);

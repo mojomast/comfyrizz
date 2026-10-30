@@ -1,4 +1,6 @@
 import { COPY, fill } from './copy.ts';
+import { readGalleryAssetDetails, safeGalleryUrl, type GalleryAssetDetails } from './gallery-asset.ts';
+import { normalizedGallerySnapshot } from './gallery-snapshot.ts';
 
 export type GalleryItemKind = 'character' | 'shot' | 'voice' | 'final';
 export type GalleryItemState = 'empty' | 'loading' | 'ready' | 'error';
@@ -12,6 +14,8 @@ export interface GalleryItem {
   reason: string | null;
   highlighted: boolean;
   index: number;
+  /** Canonical snapshot fields only; optional for older productions. */
+  details?: GalleryAssetDetails;
 }
 
 export interface GalleryModel {
@@ -92,6 +96,7 @@ const VOICE_ARTIFACT_KINDS = new Set([
 
 const READY_STATES = new Set([
   'ready',
+  'review',
   'complete',
   'completed',
   'done',
@@ -108,6 +113,7 @@ const READY_STATES = new Set([
 
 const LOADING_STATES = new Set([
   'loading',
+  'pending',
   'queued',
   'queue',
   'dispatching',
@@ -206,14 +212,7 @@ function textField(record: RecordValue, keys: readonly string[]): string {
 }
 
 function safeUrl(value: unknown): string | null {
-  if (typeof value !== 'string') return null;
-  const text = value.trim();
-  if (text === '' || /[\u0000-\u001f\u007f]/u.test(text)) return null;
-  const scheme = /^([a-z][a-z0-9+.-]*):/iu.exec(text)?.[1]?.toLowerCase();
-  if (scheme === undefined) return text;
-  if (scheme === 'http' || scheme === 'https' || scheme === 'blob') return text;
-  if (scheme === 'data' && /^data:(?:image|audio|video)\//iu.test(text)) return text;
-  return null;
+  return safeGalleryUrl(value);
 }
 
 function readUrl(record: RecordValue, depth = 0): string | null {
@@ -301,9 +300,13 @@ function makeItem(
   rawId: string,
   label: string,
   records: readonly RecordValue[],
+  canonical?: RecordValue,
 ): Omit<GalleryItem, 'index' | 'highlighted'> {
-  const url = firstUrl(records);
-  const state = resolveState(records, url);
+  const details = readGalleryAssetDetails(canonical?.details);
+  const url = details ? safeUrl(canonical?.url) : firstUrl(records);
+  // A reference preview is not proof that its shot job completed. Canonical
+  // records carry status separately from preview availability.
+  const state = details ? statusKey(readStatus(canonical!)) ?? 'empty' : resolveState(records, url);
   return {
     id: itemId(kind, rawId),
     kind,
@@ -311,6 +314,7 @@ function makeItem(
     state,
     url,
     reason: state === 'error' ? failureReason(kind) : null,
+    ...(details ? { details } : {}),
   };
 }
 
@@ -520,7 +524,7 @@ function buildCharacterItems(
     }
     const label = pickLabel(withArtifacts) || `Character ${items.length + 1}`;
     labels.set(rawId, label);
-    items.push(makeItem('character', rawId, label, withArtifacts));
+    items.push(makeItem('character', rawId, label, withArtifacts, characterRecords.find(record => (characterIdOf(record) || textField(record, ['id'])) === rawId)));
   }
   return { items, labels };
 }
@@ -629,7 +633,7 @@ function buildShotItems(
     ];
     const label = pickLabel(shotRecords.get(shotId) ?? []) || `Shot ${index}`;
     labels.set(shotId, label);
-    items.push(makeItem('shot', shotId, label, records));
+    items.push(makeItem('shot', shotId, label, records, shotRecords.get(shotId)?.[0]));
   }
   return { items, labels };
 }
@@ -651,6 +655,7 @@ function buildVoiceItems(
   shotLabels: ReadonlyMap<string, string>,
 ): Array<Omit<GalleryItem, 'index' | 'highlighted'>> {
   const groups = new Map<string, RecordValue[]>();
+  const canonical = new Set<RecordValue>();
   const order: string[] = [];
   let fallback = 0;
   const add = (record: RecordValue): void => {
@@ -666,7 +671,7 @@ function buildVoiceItems(
   for (const value of valuesAt(root, production, ['voices', 'voiceItems', 'voice'])) {
     for (const entry of listOf(value)) {
       const record = asRecord(entry);
-      if (record !== null) add(record);
+      if (record !== null) { canonical.add(record); add(record); }
       else if (typeof entry === 'string') add({ id: entry });
     }
   }
@@ -694,7 +699,7 @@ function buildVoiceItems(
       || (shotLabel === undefined ? '' : `Voice for ${shotLabel}`)
       || (characterLabel === undefined ? '' : `Voice for ${characterLabel}`)
       || COPY.stages.voice;
-    items.push(makeItem('voice', key, label, records));
+    items.push(makeItem('voice', key, label, records, records.find(record => canonical.has(record))));
   }
   return items;
 }
@@ -743,11 +748,12 @@ function buildFinalItem(
     state,
     url,
     reason: state === 'error' ? failureReason('final') : null,
+    ...(chosen[0]?.details ? { details: readGalleryAssetDetails(chosen[0].details) } : {}),
   };
 }
 
 export function buildGalleryModel(snapshot: unknown): GalleryModel {
-  const root = unwrapSnapshot(snapshot);
+  const root = normalizedGallerySnapshot(unwrapSnapshot(snapshot));
   const production = productionOf(root);
   const events = collectEvents(root, production);
   const artifacts = collectArtifacts(root, production, events);

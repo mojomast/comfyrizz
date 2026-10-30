@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { readFileSync, mkdtempSync, rmSync } from 'node:fs';
 import { createServer } from 'node:http';
 import { join } from 'node:path';
+import { tmpdir } from 'node:os';
 import { createToolset } from '../../../packages/agent/dist/src/index.js';
 import { createApp } from '../src/app.mjs';
 import { createCpuAgentRunner } from '../src/agent-runner.mjs';
@@ -11,7 +12,7 @@ import { applyProposalRevision } from '../src/proposal-revision.mjs';
 import { replayProvider } from './fake-provider.mjs';
 
 test('explicitly rebinds an unbound chart to the original CSV through scoped revision', async t => {
-  const root = mkdtempSync(join(new URL('../../../.tmp/', import.meta.url).pathname, 'data-rebind-'));
+  const root = mkdtempSync(join(tmpdir(), 'data-rebind-'));
   const chat = 'chat_data_rebind01', token = 'data-rebind-test';
   const store = createContextAttachmentStore({ rootDir: root, chatId: chat });
   const { record } = store.addFile({ bytes: readFileSync(new URL('./fixtures/data-story-190.csv', import.meta.url)), filename: 'perez-first-190-starts.csv', mime: 'text/csv' });
@@ -61,7 +62,7 @@ test('explicitly rebinds an unbound chart to the original CSV through scoped rev
 });
 
 test('normal proposal revision replays CSV corrections on the pinned snapshot and rejects stale requests', async t => {
-  const root = mkdtempSync(join(new URL('../../../.tmp/', import.meta.url).pathname, 'data-revision-'));
+  const root = mkdtempSync(join(tmpdir(), 'data-revision-'));
   const chat = 'chat_data_revision01', token = 'data-revision-test';
   const store = createContextAttachmentStore({ rootDir: root, chatId: chat });
   const { record } = store.addFile({ bytes: readFileSync(new URL('./fixtures/data-story-190.csv', import.meta.url)), filename: 'campaign.csv', mime: 'text/csv' });
@@ -103,7 +104,7 @@ test('normal proposal revision replays CSV corrections on the pinned snapshot an
 });
 
 test('evidence-like scoped UI revision resolves the named original snapshot across revisions', async t => {
-  const root = mkdtempSync(join(new URL('../../../.tmp/', import.meta.url).pathname, 'data-wall-evidence-'));
+  const root = mkdtempSync(join(tmpdir(), 'data-wall-evidence-'));
   const chat = 'chat_data_wall_evidence01', token = 'data-wall-evidence-token';
   const store = createContextAttachmentStore({ rootDir: root, chatId: chat });
   const { record } = store.addFile({ bytes: readFileSync(new URL('./fixtures/data-story-190.csv', import.meta.url)), filename: 'perez-first-190-starts.csv', mime: 'text/csv' });
@@ -152,7 +153,7 @@ test('evidence-like scoped UI revision resolves the named original snapshot acro
 });
 
 test('proposal revision creates a wall from the pinned upload through the normal endpoint', async t => {
-  const root = mkdtempSync(join(new URL('../../../.tmp/', import.meta.url).pathname, 'data-wall-create-'));
+  const root = mkdtempSync(join(tmpdir(), 'data-wall-create-'));
   const chat = 'chat_data_wall_create01', token = 'data-wall-test-token';
   const store = createContextAttachmentStore({ rootDir: root, chatId: chat });
   const { record } = store.addFile({ bytes: readFileSync(new URL('./fixtures/data-story-190.csv', import.meta.url)), filename: 'campaign.csv', mime: 'text/csv' });
@@ -181,7 +182,7 @@ test('proposal revision creates a wall from the pinned upload through the normal
 });
 
 test('dataset label revisions preserve source-bound counts and reject ambiguous or unrequested edits', async t => {
-  const root = mkdtempSync(join(new URL('../../../.tmp/', import.meta.url).pathname, 'data-label-'));
+  const root = mkdtempSync(join(tmpdir(), 'data-label-'));
   const chat = 'chat_data_labels01', token = 'data-label-test-token';
   const store = createContextAttachmentStore({ rootDir: root, chatId: chat });
   const { record } = store.addFile({ bytes: readFileSync(new URL('./fixtures/data-story-190.csv', import.meta.url)), filename: 'campaign.csv', mime: 'text/csv' });

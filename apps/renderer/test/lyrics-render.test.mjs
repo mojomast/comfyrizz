@@ -8,6 +8,7 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { renderPackage } from '../scripts/render-package-lib.mjs';
 import { renderPackageIncremental } from '../scripts/render-incremental.mjs';
+import { collectMockContribution } from '../../server/test/helpers/comfy-contribution.mjs';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const tiny = JSON.parse(readFileSync(join(here, 'fixtures', 'tiny', 'package.json'), 'utf8'));
@@ -52,7 +53,7 @@ function project(work, style, width, height) {
     id: 's_picture',
     layout: 'title',
     variant: 'centered',
-    preferredFrames: 48,
+    preferredFrames: 72,
     copy: { headline: '.' },
     background: { procedural: { pattern: 'gradient', palette: ['#000000', '#000000'], seed: 1 } },
   }];
@@ -76,7 +77,7 @@ function project(work, style, width, height) {
     ],
     music: {
       asset: 'a_song',
-      trim: { startSeconds: 1, endSeconds: 3 },
+      trim: { startSeconds: 1, endSeconds: 4 },
       gain_db: -12,
       fade_in_seconds: 0,
       fade_out_seconds: 0,
@@ -84,6 +85,9 @@ function project(work, style, width, height) {
     },
   };
   const path = join(dir, 'package.json');
+  // Three seconds retain exact trim-owned timing and allow stable visibility
+  // of this synthetic receipt fixture after entry animation.
+  collectMockContribution(pkg, dir);
   writeFileSync(path, JSON.stringify(pkg, null, 2));
   return { dir, path, pkg };
 }
@@ -134,11 +138,11 @@ test('real CPU caption still/full/incremental exports share timing and lyric edi
 
   const fullPath = join(work, 'full.mp4');
   const full = renderPackage(path, fullPath, { normalizeLoudness: false });
-  assert.equal(full.frames, 48, 'trim owns the full export duration');
+  assert.equal(full.frames, 72, 'trim owns the full export duration');
   const incrementalPath = join(work, 'incremental.mp4');
   const cacheDir = join(work, 'cache');
   const incremental = renderPackageIncremental(path, incrementalPath, { cacheDir });
-  assert.equal(incremental.frames, 48);
+  assert.equal(incremental.frames, 72);
   assert.equal(incremental.rendered.length, 1);
   const fullPixels = pixels(fullPath, 640, 360, 12);
   const incrementalPixels = pixels(incrementalPath, 640, 360, 12);

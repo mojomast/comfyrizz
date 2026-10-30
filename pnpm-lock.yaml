@@ -138,6 +138,8 @@ importers:
 
   packages/backends: {}
 
+  packages/comfyrizz-mcp: {}
+
   packages/compositions: {}
 
   packages/jobs: {}

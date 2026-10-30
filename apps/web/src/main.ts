@@ -65,6 +65,9 @@ import { previewPackage, type PreviewClip } from './takes/preview-takes.ts';
 import { mountSceneTimeline, type SceneTimelineHandle } from './editor/timeline/mount';
 import type { ClipChip } from './editor/timeline/clip-state.ts';
 import { DEFAULT_PACKAGE_ID, openInitialProject, type OpenedProject } from './default-project.ts';
+import { createProjectNavigation } from './project-navigation.ts';
+import { mountProjectNavigation } from './project-gallery-navigation.ts';
+import { mountProjectsPageIfRequested } from './projects-boot.ts';
 import { assetRowHtml, hydrateAssetThumbs, type AssetThumbsHandle } from './assets/asset-row.ts';
 import { createThumbsClient, type ThumbsClient, type ThumbResult } from './thumbs/client.ts';
 import { mountAssetViewer } from './viewer/asset-viewer.ts';
@@ -84,6 +87,7 @@ const $ = <T extends HTMLElement>(id: string): T => document.getElementById(id) 
 // The C2 server prints http://127.0.0.1:4319/#token=...; the fragment never
 // leaves the browser. Strip it from the visible URL and keep it for API calls.
 const token = installSessionToken();
+const hostedInviteView = new URLSearchParams(globalThis.location?.search ?? '').get('demo') === '1';
 initShellLayout();
 
 /* Lifted from Orbit's Grok Bots shell (MIT): escape, then a tiny markdown subset. */
@@ -100,14 +104,14 @@ function md(value: string): string {
 // U2: the Google Colab settings card. It asks the server, never the CLI, and the server never reads a
 // credential on its behalf.
 const colabHost = document.getElementById('colab-card-host');
-if (colabHost) mountSettingsCard(colabHost, apiFetch);
+if (colabHost && !hostedInviteView) mountSettingsCard(colabHost, apiFetch);
 // Live gauges of Google Colab runs: the notebook's bars, polled from /api/colab/progress.
 const colabProgressHost = document.getElementById('colab-progress-host');
-if (colabProgressHost) mountRemoteGpuProgress(colabProgressHost, apiFetch);
+if (colabProgressHost && !hostedInviteView) mountRemoteGpuProgress(colabProgressHost, apiFetch);
 // The status bar keeps the Google Colab chip. The runs drawer button is not a second control.
 settleStatusChip();
 const colabHistoryHost = document.getElementById('colab-history-host');
-if (colabHistoryHost) mountRemoteGpuHistory(colabHistoryHost, colabHistoryJson);
+if (colabHistoryHost && !hostedInviteView) mountRemoteGpuHistory(colabHistoryHost, colabHistoryJson);
 
 function settleStatusChip(): void {
   const progressHost = document.getElementById('colab-progress-host');
@@ -872,6 +876,10 @@ async function hydratePreviewAudio(requests: PreviewAudioRequest[]): Promise<voi
 
 /** Every existing preview call goes through here so take swaps and audio sources are never lost. */
 function updatePreview(nextPkg: PackageV1, nextTimeline: Timeline, nextAssets?: Record<string, InlineAsset>): void {
+  // A paused Player need not emit frameupdate when a different project is
+  // adopted. Refresh its counter immediately instead of showing the demo's time.
+  const frame = Math.max(0, Math.min(player?.getCurrentFrame() ?? 0, nextTimeline.durationInFrames - 1));
+  $('time').textContent = `${formatTime(frame, nextTimeline.fps)} / ${formatTime(nextTimeline.durationInFrames, nextTimeline.fps)}`;
   resetPreviewMedia(nextPkg);
   const previewPackage = withTakePreview(nextPkg);
   const plan = previewMediaPlan(previewPackage, previewMediaSources);
@@ -992,6 +1000,7 @@ function mountProductionInspector(root: HTMLElement): void {
 
 /** Refresh the shared clips map from the take routes (called on load and clip.* SSE). */
 async function refreshClips(): Promise<void> {
+  if (hostedInviteView) return;
   if (!token) return;
   const packageId = String(pkg.id ?? '');
   if (!packageId) return;
@@ -2390,8 +2399,11 @@ function syncExportButton(): void {
   if (!button || button.dataset.exporting === 'true') return;
   const gate = clipStore.gate();
   const blocked = gate.total > 0 && !gate.ok;
-  button.disabled = blocked;
-  button.title = blocked ? `${gate.approved}/${gate.total} approved` : 'Export MP4';
+  // A blocked gate is not a dead end: beginExport opens the review drawer, so
+  // disabling the only action made today's blocker list unreachable.
+  button.disabled = false;
+  button.dataset.gate = blocked ? 'blocked' : 'ready';
+  button.title = blocked ? `${gate.approved}/${gate.total} approved — review clips before exporting` : 'Export MP4';
 }
 
 async function exportMp4(overrideReason?: string): Promise<void> {
@@ -2739,9 +2751,103 @@ function init(opened: OpenedProject): void {
   renderSpendCard();
   renderBrandKit();
 
-  const modeControl = mountModeToggle();
+  const navigation = createProjectNavigation({
+    search: () => window.location.search,
+    // A guest landing has no project yet. The bundled sample in editorStore is
+    // not an active gallery copy, so never present it as one.
+    packageId: () => hostedInviteView && !new URLSearchParams(window.location.search).has('package')
+      ? null
+      : String(editorStore.getState().doc.package.id ?? '') || null,
+    currentMode: () => getPrefs().mode,
+    flush: async () => { await autosave?.flush(); },
+    hasUnsavedChanges: () => editorStore.isDirty(),
+    load: async packageId => {
+      const params = new URLSearchParams(window.location.search);
+      params.set('package', packageId);
+      const loaded = await openInitialProject({
+        search: `?${params.toString()}`,
+        hasToken: Boolean(sessionToken()),
+        request: input => apiFetch(input),
+        onPackage: (next, editor) => {
+          // Validate/compile before replacing the current canonical document.
+          const candidate = createEditorStore({ package: next as never, editor: editor as EditorSidecar | undefined });
+          const compiled = candidate.getState().derived.timeline;
+          if (!compiled) throw new Error(`Could not compile project ${packageId}`);
+          adoptBuiltPackage({ package: next, editor, timeline: compiled, revision: next.revision });
+        },
+      });
+      seededChatId = loaded.chatId ?? null;
+    },
+    commit: (mode, search) => {
+      if (window.location.search !== search) window.history.pushState({}, '', `${window.location.pathname}${search}`);
+      setMode(mode);
+    },
+  });
+  const requestMode = async (mode: 'easy' | 'advanced', packageId?: string | null): Promise<void> => {
+    try {
+      await navigation.navigate(mode, packageId);
+    } catch (error) {
+      shellToasts.show({ tone: 'danger', text: `Could not switch views: ${(error as Error).message}` });
+    }
+  };
+  const modeControl = mountModeToggle({ onRequestMode: mode => { void requestMode(mode); } });
+
+  // One gallery entry point in every mode. The collection is a cold route, so a
+  // chosen project boots that exact package and never inherits the previous one.
+  const topbar = document.getElementById('topbar');
+  if (topbar) {
+    mountProjectNavigation(topbar);
+    const projectsLink = topbar.querySelector<HTMLElement>('[data-project-navigation]');
+    const settingsButton = document.getElementById('settings-open');
+    if (projectsLink && settingsButton) topbar.insertBefore(projectsLink, settingsButton);
+  }
+  // Shared gallery links are real URLs. Flush the debounced save first so a
+  // project switch cannot discard an acknowledged-or-pending edit.
+  document.addEventListener('click', event => {
+    if (event.defaultPrevented || event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+    const link = (event.target as Element | null)?.closest<HTMLAnchorElement>('a[data-project-navigation], a[data-project-open]');
+    const href = link?.getAttribute('href');
+    if (!link || !href) return;
+    event.preventDefault();
+    void (async () => {
+      try { await autosave?.flush(); } catch { /* the save status reports a failed flush */ }
+      globalThis.location.assign(href);
+    })();
+  });
+  if (new URLSearchParams(window.location.search).get('focus') === 'chat') {
+    requestAnimationFrame(() => document.getElementById('prompt')?.focus());
+  }
+
+  // Easy's in-document router owns same-project steps. A history entry naming
+  // another package must bootstrap that package before either shell is shown;
+  // reloading also restores its package-scoped Easy/session state.
+  let historyNavigation = 0;
+  window.addEventListener('popstate', event => {
+    const ticket = ++historyNavigation;
+    const requested = new URLSearchParams(window.location.search).get('package')?.trim();
+    if (!requested || requested === editorStore.getState().doc.package.id) {
+      document.documentElement.removeAttribute('data-app-loading');
+      return;
+    }
+    event.stopImmediatePropagation();
+    document.documentElement.setAttribute('data-app-loading', '');
+    void (async () => {
+      await autosave?.flush();
+      if (ticket !== historyNavigation) return;
+      if (editorStore.isDirty()) {
+        const params = new URLSearchParams(window.location.search);
+        params.set('package', String(editorStore.getState().doc.package.id));
+        if (getPrefs().mode === 'advanced') params.set('view', 'editor');
+        window.history.replaceState({}, '', `${window.location.pathname}?${params.toString()}`);
+        document.documentElement.removeAttribute('data-app-loading');
+        shellToasts.show({ tone: 'danger', text: 'Your changes have not saved yet. Save this project before opening another one.' });
+        return;
+      }
+      window.location.reload();
+    })();
+  }, true);
   document.getElementById('editor-back-to-studio')?.addEventListener('click', () => {
-    modeControl?.setMode('easy');
+    void requestMode('easy');
   });
   if (modeControl) {
     const renderSplit = document.getElementById('render-split-button');
@@ -2761,7 +2867,7 @@ function init(opened: OpenedProject): void {
     read: (productionId) => readIteration(productionId, { apiFetch }),
     set: (productionId, input, revision) => setIteration(productionId, input, revision, { apiFetch }),
     onActivity: logActivity,
-    onOpenAdvanced: () => modeControl?.setMode('advanced'),
+    onOpenAdvanced: () => { void requestMode('advanced'); },
   });
   window.addEventListener(MODE_CHANGE_EVENT, () => {
     void iterationLevelMount?.refresh();
@@ -2770,7 +2876,9 @@ function init(opened: OpenedProject): void {
   void iterationLevelMount.refresh();
   mountSettingsDialog(document.body);
 
-  agentSettings = mountAgentSettings(apiFetch, logActivity);
+  agentSettings = hostedInviteView
+    ? { ready: Promise.resolve(), selection: async () => ({ provider: 'none', model: '' }) }
+    : mountAgentSettings(apiFetch, logActivity);
   state.activity = [{ at: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }), text: opened.activity }];
   renderActivity();
 
@@ -2891,7 +2999,7 @@ function init(opened: OpenedProject): void {
       clips: () => clipStore.all(), subscribeClips: (listener: () => void) => clipStore.subscribe(() => listener()), takesApi,
       clipGate: () => studioClipGate(clipStore.all(), pkg.assets as never), applySceneChip: applySceneChipFlow, aiSelection: () => agentSettings.selection(),
       openAgentSettings: () => document.getElementById('agent-settings-open')?.dispatchEvent(new MouseEvent('click', { bubbles: true })),
-      openEditor: () => { setMode('advanced'); }, playerElement: () => $('player'),
+      openEditor: (packageId?: string | null) => requestMode('advanced', packageId), playerElement: () => $('player'),
       exportArtifactStorage: exportArtifactStorage(),
       resolveExportArtifact: async (record: { exportId: string; packageId: string; revision: number | null }) => {
         const { resolveRenderedArtifact } = await import('./easy/render-artifact-client.ts');
@@ -3046,7 +3154,7 @@ function init(opened: OpenedProject): void {
 
   openStudio?.addEventListener('click', () => {
     closeExportMenu(false);
-    modeControl?.setMode('easy');
+    void requestMode('easy');
   });
 
   document.addEventListener('click', event => {
@@ -3061,7 +3169,7 @@ function init(opened: OpenedProject): void {
     logActivity(`Composer mode: ${briefMode}`);
   });
 
-  if (token) {
+  if (token && !hostedInviteView) {
     const stream = new EventSource(`/api/events?token=${encodeURIComponent(token)}`);
     stream.addEventListener('package.updated', event => {
       const data = JSON.parse((event as MessageEvent).data) as { revision: number };
@@ -3301,7 +3409,10 @@ function init(opened: OpenedProject): void {
     getTurnContext: activeTurnContext,
     ...(opened.source === 'requested' ? {
       initialConversationId: opened.chatId,
-      restoreSaved: false,
+      // Restore this package's own saved conversation after reload. The scope
+      // key is the selected package, so a stale global/other-project chat can
+      // never be adopted here.
+      restoreSaved: true,
       expectedPackageId: opened.packageId ?? undefined,
     } : {}),
     root: $('project-plan-panel'),
@@ -3309,6 +3420,8 @@ function init(opened: OpenedProject): void {
     replace: replaceChatMessages,
     setBusy: (active, label) => setStreaming(active, label),
     applyProject: adoptChatProject,
+    // Hosted guests may open a private CPU copy, but agent/chat endpoints are owner-only.
+    canUseOwnerApi: () => !hostedInviteView,
     provider: () => agentSettings.selection(),
     brand: brandPayload,
     log: logActivity,
@@ -3339,6 +3452,28 @@ function init(opened: OpenedProject): void {
       prompt.focus();
       if (!prompt.value.trim()) prompt.value = 'Change the character placement: ';
     },
+  });
+
+  // Bind the conversation to the authoritative project. Opening a gallery
+  // project restores that package's saved chat; a different package creates its
+  // own scope instead of continuing the previous project's conversation.
+  let chatBoundPackage: string | null = opened.source === 'requested' ? pkg.id : null;
+  if (opened.source === 'requested') {
+    void projectChat.setProjectContext({
+      packageId: pkg.id,
+      revision: pkg.revision,
+      owner: !hostedInviteView,
+      ...(opened.chatId ? { conversationId: opened.chatId } : {}),
+    });
+  }
+  editorStore.subscribe(() => {
+    const current = editorStore.getState().doc.package;
+    const id = typeof current?.id === 'string' ? current.id : null;
+    if (!id || id === chatBoundPackage) return;
+    // A bare launch keeps its new-conversation behaviour until a real package exists.
+    if (chatBoundPackage === null && opened.source !== 'requested' && id === DEFAULT_PACKAGE_ID) return;
+    chatBoundPackage = id;
+    void projectChat.setProjectContext({ packageId: id, revision: typeof current.revision === 'number' ? current.revision : pkg.revision, owner: !hostedInviteView });
   });
 
   const referenceHost = document.createElement('div');
@@ -3424,20 +3559,34 @@ function init(opened: OpenedProject): void {
   });
 
   if (token) void refreshClips();
-  mountEditorCommandPalette(() => { modeControl?.setMode('easy'); });
+  mountEditorCommandPalette(() => { void requestMode('easy'); });
 }
 
-const openedProject = await openInitialProject({
-  search: globalThis.location?.search ?? '',
-  hasToken: Boolean(sessionToken()),
-  request: input => apiFetch(input),
-  onPackage: (nextPackage, nextEditor) => {
-    adoptEditorPackage(nextPackage, nextEditor as EditorSidecar | undefined);
-    const compiled = editorStore.getState().derived.timeline;
-    if (compiled) timeline = compiled as unknown as Timeline;
-  },
-  onError: error => console.error('package open failed', error),
-});
-seededChatId = openedProject.chatId ?? null;
-init(openedProject);
-void checkRecoveryOnBoot(openedProject);
+if (mountProjectsPageIfRequested()) {
+  // The collection owns this document; never boot a sample project behind it.
+} else try {
+  const openedProject = await openInitialProject({
+    search: globalThis.location?.search ?? '',
+    hasToken: Boolean(sessionToken()),
+    request: input => apiFetch(input),
+    onPackage: (nextPackage, nextEditor) => {
+      adoptEditorPackage(nextPackage, nextEditor as EditorSidecar | undefined);
+      const compiled = editorStore.getState().derived.timeline;
+      if (compiled) timeline = compiled as unknown as Timeline;
+    },
+    onError: error => console.error('package open failed', error),
+  });
+  seededChatId = openedProject.chatId ?? null;
+  init(openedProject);
+  document.documentElement.removeAttribute('data-app-loading');
+  void checkRecoveryOnBoot(openedProject);
+} catch (error) {
+  console.error('Studio startup failed', error);
+  const status = document.getElementById('app-launch-status');
+  const requested = new URLSearchParams(globalThis.location?.search ?? '').get('package')?.trim();
+  if (status) status.textContent = requested
+    ? `Could not open project ${requested}. ${(error as Error).message}. Reload to try again.`
+    : 'The studio couldn’t open. Please reload to try again.';
+  const retry = document.getElementById('app-launch-retry');
+  if (retry) retry.hidden = false;
+}
