@@ -1,0 +1,66 @@
+{
+  "v": 1,
+  "purpose": "SKILLS-PORT add-on lock, merged by packageModelLock only when a package needs it: Qwen Image Edit 2511 (ref-watch targeted_edit), BiRefNet (title-card cutouts) and the Fill-ChatterBox node pack (chatterbox narration). The default colab/models.lock.json stays Klein + LTX only.",
+  "authoringNotes": [
+    "Revisions and sizes from the read-only Hugging Face API on 2026-10-30, no token; all three repos are ungated. Comfy-Org/Qwen-Image-Edit and Comfy-Org/Qwen-Image are the canonical names (the *_ComfyUI names redirect to them).",
+    "Licences per model cards (unverified): Qwen-Image(-Edit) Apache-2.0, BiRefNet MIT, Chatterbox Multilingual weights MIT; Fill-ChatterBox node pack MIT per its README (Kyle accepted 2026-10-30)."
+  ],
+  "hosts": {
+    "qwenedit": {
+      "repo": "Comfy-Org/Qwen-Image-Edit",
+      "revision": "f68ace85e60b4a02a323e394253731947657b7d2",
+      "gated": false,
+      "localDir": "/content/hf/qwenedit",
+      "use": "refWatch"
+    },
+    "qwenimage": {
+      "repo": "Comfy-Org/Qwen-Image",
+      "revision": "1f12b17be14c89b026c51a91d67c32f84bb047bc",
+      "gated": false,
+      "localDir": "/content/hf/qwenimage",
+      "use": "refWatch"
+    },
+    "birefnet": {
+      "repo": "Comfy-Org/BiRefNet",
+      "revision": "884af709e9b795d89dafbf97f29c8d6a2386f5c6",
+      "gated": false,
+      "localDir": "/content/hf/birefnet",
+      "use": "titleCards"
+    }
+  },
+  "files": [
+    {
+      "host": "qwenedit",
+      "path": "split_files/diffusion_models/qwen_image_edit_2511_fp8mixed.safetensors",
+      "bytes": 20533762817,
+      "target": "diffusion_models/qwen_image_edit_2511_fp8mixed.safetensors"
+    },
+    {
+      "host": "qwenimage",
+      "path": "split_files/text_encoders/qwen_2.5_vl_7b_fp8_scaled.safetensors",
+      "bytes": 9384670680,
+      "target": "text_encoders/qwen_2.5_vl_7b_fp8_scaled.safetensors"
+    },
+    {
+      "host": "qwenimage",
+      "path": "split_files/vae/qwen_image_vae.safetensors",
+      "bytes": 253806246,
+      "target": "vae/qwen_image_vae.safetensors"
+    },
+    {
+      "host": "birefnet",
+      "path": "background_removal/birefnet.safetensors",
+      "bytes": 444473596,
+      "target": "background_removal/birefnet.safetensors"
+    }
+  ],
+  "customNodes": [
+    {
+      "name": "ComfyUI_Fill-ChatterBox",
+      "repo": "https://github.com/filliptm/ComfyUI_Fill-ChatterBox.git",
+      "revision": "f7d7a161",
+      "licence": "MIT (README; Kyle accepted 2026-10-30)",
+      "use": "chatterbox"
+    }
+  ]
+}

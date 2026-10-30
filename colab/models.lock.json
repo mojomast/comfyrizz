@@ -5,8 +5,7 @@
   "authoringNotes": [
     "Gated repos: the Hugging Face tree API masks LFS oids (sha256) and the pointer files need an authenticated call, so no per-file sha256 is recorded here. Sizes are the cross-check that does not need a token.",
     "The GPU test 3 setup cloned ComfyUI `master` (recorded below) instead of passing --comfyui-ref; pinning it is the fix, and the ref belongs here when the next run is set up.",
-    "Re-resolving a revision after a repo update would silently move the pin: change it only with a new GPU run that recorded the sizes.",
-    "Qwen Image Edit 2511: host revisions and file sizes were read from the read-only Hugging Face tree API on 2026-10-30 with no token. Edit host `f68ace85e60b4a02a323e394253731947657b7d2` is ungated; the text encoder and VAE are pinned from the separate Qwen-Image host `1f12b17be14c89b026c51a91d67c32f84bb047bc`, also ungated. Sizes: diffusion 20533762817 bytes, text encoder 9384670680 bytes, VAE 253806246 bytes."
+    "Re-resolving a revision after a repo update would silently move the pin: change it only with a new GPU run that recorded the sizes."
   ],
   "hosts": {
     "klein": {
@@ -24,20 +23,6 @@
       "gated": "auto",
       "localDir": "/content/hf/ltx",
       "measuredSeconds": 166.5
-    },
-    "qwenedit": {
-      "repo": "Comfy-Org/Qwen-Image-Edit_ComfyUI",
-      "revision": "f68ace85e60b4a02a323e394253731947657b7d2",
-      "revisionLastModified": "2026-09-23T08:05:05.000Z",
-      "gated": false,
-      "localDir": "/content/hf/qwenedit"
-    },
-    "qwenimage": {
-      "repo": "Comfy-Org/Qwen-Image_ComfyUI",
-      "revision": "1f12b17be14c89b026c51a91d67c32f84bb047bc",
-      "revisionLastModified": "2026-09-23T08:06:14.000Z",
-      "gated": false,
-      "localDir": "/content/hf/qwenimage"
     }
   },
   "files": [
@@ -94,24 +79,6 @@
       "path": "latent_upscale_models/ltx-2.5-latent-spatial-upscaler-x2-bf16-1.0.safetensors",
       "bytes": 995778752,
       "target": "latent_upscale_models/ltx-2.5-latent-spatial-upscaler-x2-bf16-1.0.safetensors"
-    },
-    {
-      "host": "qwenedit",
-      "path": "split_files/diffusion_models/qwen_image_edit_2511_fp8mixed.safetensors",
-      "bytes": 20533762817,
-      "target": "diffusion_models/qwen_image_edit_2511_fp8mixed.safetensors"
-    },
-    {
-      "host": "qwenimage",
-      "path": "split_files/text_encoders/qwen_2.5_vl_7b_fp8_scaled.safetensors",
-      "bytes": 9384670680,
-      "target": "text_encoders/qwen_2.5_vl_7b_fp8_scaled.safetensors"
-    },
-    {
-      "host": "qwenimage",
-      "path": "split_files/vae/qwen_image_vae.safetensors",
-      "bytes": 253806246,
-      "target": "vae/qwen_image_vae.safetensors"
     }
   ],
   "merge": [
@@ -125,14 +92,6 @@
       "target": "text_encoders/qwen3vl_4b_bf16.safetensors",
       "bytes": 8875719384,
       "operation": "safetensors load_file/save_file, shards deleted after"
-    }
-  ],
-  "customNodes": [
-    {
-      "name": "ComfyUI_Fill-ChatterBox",
-      "repo": "https://github.com/filliptm/ComfyUI_Fill-ChatterBox.git",
-      "revision": "f7d7a161",
-      "licence": "MIT (README; Kyle accepted 2026-10-30)"
     }
   ],
   "comfyui": {

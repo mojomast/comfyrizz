@@ -1330,6 +1330,13 @@ export function planJobs(pkg, opts = {}) {
     skipped,
     warnings,
   };
+  // SPW: package titleCards [{ asset, text, background? }] name a still asset; the ref-watch controller
+  // queues a BiRefNet cutout for each once its still is accepted (compositing/title-card.mjs).
+  const titleCards = (Array.isArray(pkg.titleCards) ? pkg.titleCards : []).flatMap((card) => {
+    const still = jobs.find((job) => job.kind === "still" && job.asset === card?.asset);
+    return still ? [{ stillJobId: still.id, text: String(card.text ?? ""), ...(card.background ? { background: card.background } : {}) }] : [];
+  });
+  if (titleCards.length > 0) doc.titleCards = titleCards;
   doc.hash = sha256Hex(canonical({ ...doc, hash: undefined }));
   return doc;
 }

@@ -98,7 +98,7 @@ test('CC01: constants describe the v1 character contract', () => {
   assert.deepEqual(IMAGE_SOURCES, ['upload', 'generated', 'reference']);
   assert.deepEqual(SHEET_STATUSES, ['none', 'proposed', 'ready']);
   assert.deepEqual(IDENTITY_METHODS, ['klein_ref', 'ip_adapter', 'pulid', 'lora']);
-  assert.deepEqual(VOICE_ENGINES, ['kokoro', 'qwen3-tts', 'none']);
+  assert.deepEqual(VOICE_ENGINES, ['kokoro', 'qwen3-tts', 'chatterbox', 'none']);
   assert.equal(LIMITS.nameChars, 80);
   assert.equal(LIMITS.images, 8);
   assert.equal(LIMITS.libraryCharacters, 50);

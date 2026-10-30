@@ -165,7 +165,7 @@ export function titleCardJobs({ jobsDoc, acceptedStills, titles } = {}) {
       params: spec.params,
       seed: keyArgs.seed,
       cacheKey: cacheKeyFor(keyArgs),
-      fileInputs: [{ param: 'image', from: 'job', job: stillJobId }],
+      fileInputs: [{ param: 'image', from: 'job', job: stillJobId, ...(textOf(stillJob.output) ? { path: stillJob.output } : {}) }],
     });
   }
 

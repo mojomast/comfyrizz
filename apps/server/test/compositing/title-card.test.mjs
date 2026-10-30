@@ -69,7 +69,7 @@ test('an accepted still becomes one BiRefNet title cutout job', () => {
   assert.equal(job.workflow, SUBJECT_CUTOUT_TRANSPARENT_WORKFLOW);
   assert.equal(job.output, 'assets/still_s03.cutout.png');
   assert.equal(job.outputKind, 'image');
-  assert.deepEqual(job.fileInputs, [{ param: 'image', from: 'job', job: 'still_s03.still' }]);
+  assert.deepEqual(job.fileInputs, [{ param: 'image', from: 'job', job: 'still_s03.still', path: 'assets/still_s03.png' }]);
   assert.deepEqual(job.deps, ['still_s03.still']);
   assert.deepEqual(job.params, { image: 'still_s03' });
   assert.equal(job.cacheKey, cacheKeyFor({
@@ -95,7 +95,7 @@ test('a still accepted by id is also honoured and an overridden still passes the
   assert.deepEqual(skipped, []);
   assert.equal(jobs.length, 1);
   assert.equal(jobs[0].output, 'assets/still_s04.cutout.png');
-  assert.deepEqual(jobs[0].fileInputs, [{ param: 'image', from: 'job', job: 'still_s04' }]);
+  assert.deepEqual(jobs[0].fileInputs, [{ param: 'image', from: 'job', job: 'still_s04', path: 'assets/still_s03.png' }]);
 });
 
 test('a still outside the ref-watch gate is skipped with a reason', () => {
