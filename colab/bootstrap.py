@@ -12,9 +12,11 @@ uploaded the Hugging Face token as a 0600 file (SPEC.md 6.7.2 step 4). Add
 3. download the pinned model files in parallel with `hf download` (519 MB/s measured), printing
    progress so the CLI's quiet-period timeout does not fire;
 4. merge the sharded Qwen3-VL text encoder, symlink the model files into ComfyUI/models;
-5. start ComfyUI on 127.0.0.1:8188 and comfy-api-proxy on 127.0.0.1:8189 with
+5. install the lock's custom node packs in the foreground (git clone, pinned checkout, filtered
+   requirements) before ComfyUI starts, because background installs have wedged the kernel;
+6. start ComfyUI on 127.0.0.1:8188 and comfy-api-proxy on 127.0.0.1:8189 with
    `Popen(start_new_session=True)` (background processes survive between execs — verified);
-6. write /content/comfyrizz/out/ready.json with versions, node types and free VRAM.
+7. write /content/comfyrizz/out/ready.json with versions, node types and free VRAM.
 
 Adapted from Kyle's `colab/g1_setup.py` (GPU test 1) and the Oct 16 test scripts s2–s4. The model
 files and revisions are pinned in `colab/models.lock.json` (H7, GPU test 3): this script reads that
@@ -136,6 +138,10 @@ VM_EXTRAS = (
     "jsonschema==4.25.1",
 )
 
+#: Keep Google Colab's CUDA torch: drop only the three torch distributions themselves, not
+#: torchsde or torchmetrics. The ComfyUI requirements step and every custom node share this.
+TORCH_REQUIREMENT_FILTER = r"^(torch|torchvision|torchaudio)([<>=~ ]|$)"
+
 
 def install_command(requirements: Path, wheelhouse: Path | None, *, offline: bool = False) -> str:
     """The `pip install` command this script runs (inlined from `colab/wheelhouse.py`).
@@ -234,6 +240,42 @@ def run(command: str, tag: str = "") -> int:
     process.wait()
     print(f"-> {tag} exit {process.returncode} in {time.time() - started:.1f}s", flush=True)
     return process.returncode
+
+
+def install_custom_nodes(lock: dict, comfy_dir: Path, run) -> dict[str, str]:
+    """Clone, pin and install every pack in `lock["customNodes"]`; return `{name: revision}`.
+
+    Runs in the foreground before ComfyUI starts: a background install has wedged the kernel.
+    The requirements filter is the ComfyUI one, so the image's CUDA torch survives. No list means
+    no-op. `run` is injected so the tests never touch git, pip or the network.
+    """
+    installed: dict[str, str] = {}
+    for node in lock.get("customNodes") or []:
+        name = node["name"]
+        revision = node["revision"]
+        target = Path(comfy_dir) / "custom_nodes" / name
+        target.parent.mkdir(parents=True, exist_ok=True)
+        clone = f"git clone -q {shlex.quote(node['repo'])} {shlex.quote(str(target))}"
+        if run(clone, f"custom-node-clone {name}") != 0:
+            raise SystemExit(f"custom node {name}: git clone failed")
+        checkout = f"git -C {shlex.quote(str(target))} checkout -q {shlex.quote(revision)}"
+        if run(checkout, f"custom-node-checkout {name}") != 0:
+            raise SystemExit(f"custom node {name}: checkout of {revision} failed")
+        requirements = target / "requirements.txt"
+        if requirements.is_file():
+            filtered = Path("/tmp") / f"comfyrizz-{name}-requirements.txt"
+            filter_command = (
+                f"cd {shlex.quote(str(target))} && "
+                f"grep -viE {shlex.quote(TORCH_REQUIREMENT_FILTER)} requirements.txt > {shlex.quote(str(filtered))} && "
+                f"grep -q . {shlex.quote(str(filtered))}"
+            )
+            if run(filter_command, f"custom-node-requirements {name}") != 0:
+                raise SystemExit(f"custom node {name}: filtering requirements.txt failed")
+            pip_command = f"cd {shlex.quote(str(target))} && pip install -q -r {shlex.quote(str(filtered))}"
+            if run(pip_command, f"custom-node-install {name}") != 0:
+                raise SystemExit(f"custom node {name}: installing requirements failed")
+        installed[name] = revision
+    return installed
 
 
 def read_token() -> str:
@@ -342,7 +384,7 @@ def main(argv: list[str] | None = None) -> int:
     # directory first; `--offline` refuses the index altogether. Whatever happens, the seconds are
     # recorded, so "a cache halves setup" becomes a measurement instead of a hope.
     requirements = Path("/tmp/req.txt")
-    if run(f"cd {COMFY} && grep -viE '^(torch|torchvision|torchaudio)([<>=~ ]|$)' requirements.txt > {requirements} && grep -q . {requirements}", "requirements-list") != 0:
+    if run(f"cd {COMFY} && grep -viE {shlex.quote(TORCH_REQUIREMENT_FILTER)} requirements.txt > {requirements} && grep -q . {requirements}", "requirements-list") != 0:
         raise SystemExit("writing the requirements list failed")
     install = {
         "requirements": str(requirements),
@@ -404,6 +446,11 @@ def main(argv: list[str] | None = None) -> int:
             destination.unlink()
         os.symlink(source, destination)
 
+    # foreground on purpose: a background install has wedged the kernel, and ComfyUI must not
+    # import a pack while pip is still writing it
+    custom_nodes = install_custom_nodes(lock, COMFY, run)
+    print(f"CUSTOM-NODES {json.dumps(custom_nodes)}", flush=True)
+
     # background processes persist between execs (verified Oct 16), so start both detached
     comfy_log = open("/content/comfyui.log", "w")  # noqa: SIM115 - intentionally kept open for the process
     subprocess.Popen(
@@ -439,6 +486,7 @@ def main(argv: list[str] | None = None) -> int:
         "proxy": None,
         "downloads": download,
         "install": install,
+        "customNodes": custom_nodes,
         "lock": {
             "path": str(args.lock),
             "revisions": {name: host.get("revision") for name, host in lock["hosts"].items()},
