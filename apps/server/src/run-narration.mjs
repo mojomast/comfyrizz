@@ -4,6 +4,7 @@ import { join } from 'node:path';
 import { compileTimeline } from '../../../packages/planner/dist/src/index.js';
 import { narrationOptions, repoRoot } from '../../renderer/scripts/render-package-lib.mjs';
 import { durationRangeText, durationWithinTarget } from './duration-policy.mjs';
+import { remoteNarrationPlan } from './pipeline-contract.mjs';
 
 function execute(command, args) {
   return new Promise((resolve, reject) => {
@@ -28,11 +29,39 @@ export function runNeedsNarration(pkg) {
     && (pkg.scenes ?? []).some(scene => typeof scene?.narration === 'string' && scene.narration.trim());
 }
 
+function assertChatterboxReports(workAudio) {
+  const reportPath = join(workAudio, 'take_report.json');
+  if (!existsSync(reportPath)) {
+    throw Object.assign(new Error('Chatterbox narration from Google Colab did not produce take_report.json; no Kokoro fallback is used.'), {
+      code: 'CHATTERBOX_NARRATION_INCOMPLETE', status: 502,
+    });
+  }
+  const durationsPath = join(workAudio, 'durations.json');
+  if (!existsSync(durationsPath)) {
+    throw Object.assign(new Error('Chatterbox narration from Google Colab did not produce durations.json; no Kokoro fallback is used.'), {
+      code: 'CHATTERBOX_NARRATION_INCOMPLETE', status: 502,
+    });
+  }
+  let report;
+  try {
+    report = JSON.parse(readFileSync(durationsPath, 'utf8'));
+  } catch (error) {
+    throw Object.assign(new Error(`Chatterbox narration from Google Colab produced unreadable durations.json; no Kokoro fallback is used. ${error.message}`), {
+      code: 'CHATTERBOX_NARRATION_INCOMPLETE', status: 502, cause: error,
+    });
+  }
+  if (report.engine !== 'chatterbox') {
+    throw Object.assign(new Error(`Chatterbox narration from Google Colab produced engine "${report.engine}"; no Kokoro fallback is allowed.`), {
+      code: 'CHATTERBOX_NARRATION_ENGINE_MISMATCH', status: 502,
+    });
+  }
+}
+
 /**
  * Add measured narration to a final legacy media run before its GPU planner runs.
  * The full-pipeline worker already has equivalent stages; Super Easy uses this path.
  */
-export async function prepareRunNarration({ pkg, workDir, outputDir, packageDir, runCommand = execute }) {
+export async function prepareRunNarration({ pkg, workDir, outputDir, packageDir, narrationRuntime = 'local', runCommand = execute }) {
   if (!runNeedsNarration(pkg)) return { voiced: false };
   const authoredTimeline = compileTimeline(pkg);
   const authoredFrames = Number(authoredTimeline.durationInFrames);
@@ -46,18 +75,36 @@ export async function prepareRunNarration({ pkg, workDir, outputDir, packageDir,
   if (alreadyMeasured) {
     cpSync(packageAudio, workAudio, { recursive: true });
   } else {
-    const qwen = pkg.voice.engine === 'qwen3-tts';
     const localPython = join(repoRoot, '.venv', 'bin', 'python');
     const defaultPython = existsSync(localPython) ? localPython : 'python3';
-    const python = qwen
-      ? process.env.COMFYRIZZ_QWEN_TTS_PYTHON || process.env.COMFYRIZZ_PYTHON || defaultPython
-      : process.env.COMFYRIZZ_PYTHON || defaultPython;
-    await runCommand(python, [join(repoRoot, 'packages/tts/py/synth.py'), '--package', join(workDir, 'package.json'), '--out', workAudio, '--padding', '0.5']);
-    if (qwen) {
-      await runCommand(process.env.COMFYRIZZ_QWEN_ASR_PYTHON || python, [join(repoRoot, 'packages/tts/py/qa_qwen.py'), '--package', join(workDir, 'package.json'), '--out', workAudio]);
+    if (pkg.voice.engine === 'chatterbox') {
+      const route = remoteNarrationPlan(pkg, { narrationRuntime });
+      if (!route.remoteVoice) {
+        throw Object.assign(new Error('Chatterbox narration requires narrationRuntime "colab" so the worker runs on Google Colab; no Kokoro fallback is used.'), {
+          code: 'CHATTERBOX_NARRATION_REQUIRES_COLAB', status: 422,
+        });
+      }
+      const python = process.env.COMFYRIZZ_PYTHON || defaultPython;
+      try {
+        await runCommand(python, [join(repoRoot, route.path), '--package', join(workDir, 'package.json'), '--out', workAudio]);
+      } catch (error) {
+        throw Object.assign(new Error(`Chatterbox narration failed in the Google Colab worker (${route.path}); no Kokoro fallback is used. ${error?.message ?? error}`), {
+          code: 'CHATTERBOX_NARRATION_FAILED', status: 502, cause: error,
+        });
+      }
+    } else {
+      const qwen = pkg.voice.engine === 'qwen3-tts';
+      const python = qwen
+        ? process.env.COMFYRIZZ_QWEN_TTS_PYTHON || process.env.COMFYRIZZ_PYTHON || defaultPython
+        : process.env.COMFYRIZZ_PYTHON || defaultPython;
+      await runCommand(python, [join(repoRoot, 'packages/tts/py/synth.py'), '--package', join(workDir, 'package.json'), '--out', workAudio, '--padding', '0.5']);
+      if (qwen) {
+        await runCommand(process.env.COMFYRIZZ_QWEN_ASR_PYTHON || python, [join(repoRoot, 'packages/tts/py/qa_qwen.py'), '--package', join(workDir, 'package.json'), '--out', workAudio]);
+      }
     }
   }
 
+  if (pkg.voice.engine === 'chatterbox') assertChatterboxReports(workAudio);
   if (!existsSync(durationsPath)) throw new Error('Narration preparation did not produce measured durations');
   const durations = JSON.parse(readFileSync(durationsPath, 'utf8'));
   const fps = Number(pkg.format?.fps) > 0 ? Number(pkg.format.fps) : 30;
