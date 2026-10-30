@@ -10,7 +10,8 @@
     ".": "./src/index.mjs",
     "./animation": "./src/animation.mjs",
     "./schema": "./package-v1.schema.json",
-    "./types": "./types.ts"
+    "./types": "./types.ts",
+    "./ref-review": "./src/ref-review.mjs"
   },
   "bin": {
     "comfyrizz-validate": "./bin/comfyrizz-validate.mjs"
