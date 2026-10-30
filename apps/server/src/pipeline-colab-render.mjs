@@ -10,6 +10,7 @@
 // every backend call has a deadline, so progress and status never wait on a promise that never
 // settles.
 import { existsSync, mkdirSync, readdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
+import { assertModelContribution, generationReceiptFiles } from '../../../packages/jobs/src/model-contribution.mjs';
 import { join } from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { compileTimeline } from '../../../packages/planner/dist/src/index.js';
@@ -184,10 +185,11 @@ export async function prepareRenderJob(workDir, { voiced = false, presenters = f
   const packagePath = join(workDir, 'package.json');
   const pkg = readJson(packagePath);
   const timeline = compileTimeline(pkg, narrationOptions(workDir));
+  assertModelContribution({ pkg, packageDir: workDir, timeline });
   writeFileSync(join(workDir, 'timeline.json'), JSON.stringify(timeline));
   const lists = projectTransferLists(pkg, workDir, await collectCompositionCacheExtras(pkg, workDir));
   const compositions = (loadCompositionManifest(workDir, pkg)?.scenes.length ?? 0) > 0;
-  const bundleFiles = listRenderBundleFiles(repoRoot);
+  const bundleFiles = [...listRenderBundleFiles(repoRoot), ...generationReceiptFiles(pkg, workDir)];
   if (!bundleFiles.some((file) => file.name === 'apps/renderer/package.json')) {
     throw new Error('The render bundle is missing the renderer package');
   }

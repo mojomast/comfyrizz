@@ -67,6 +67,10 @@ test('retained four-shot prompt is generated film; explicit procedural controls 
   const hybrid = classifyProductionIntent('Create a 20-second narrated generated film in 4 shots with Remotion motion graphics, kinetic typography and native foley.');
   assert.equal(hybrid.kind, 'generated-film');
   assert.equal(hybrid.wordless, false);
+  assert.equal(hybrid.narrationRequested, true);
+  assert.equal(classifyProductionIntent('Create a generated film. Music: instrumental bed. Narration: Kokoro voiceover.').musicRequested, true);
+  assert.equal(classifyProductionIntent('Create a wordless generated film with native soundscape and no dialogue or music.').musicRequested, false);
+  assert.equal(classifyProductionIntent('Create a generated film with no generated titles; use exact Remotion titles instead.').noCaptions, false);
   assert.equal(classifyProductionIntent('Create a narrated generated film in 4 shots with motion.cue_phrases copied from narration.').requiresNarrationCues, true);
   assert.equal(classifyProductionIntent('No SVG or charts. Create a generated film in 4 shots with a felt mascot and coastal sound.').kind, 'generated-film');
   const liveAction = classifyProductionIntent('A funny 2 minute video featuring people getting hurt falling over. Make it live action please.');
@@ -145,7 +149,7 @@ test('storyboard proposals and repairs retain narration-timed Remotion motion', 
   });
 });
 
-test('wordless H3 reuses real silent conditioning, preserves native soundscape and scene.media', async () => {
+test('wordless H3 reuses real silent conditioning, preserves native soundscape and visible background', async () => {
   const writes: Uint8Array[] = [];
   const { tools, getDraft, identity, composition } = await filmTools('h3', [shot('shot1'), shot('shot2')], (_id, wav) => writes.push(wav));
   const first = await tools['assets.generate_video'].run(direction(identity, composition, { motion_model: 'h3', wordless: true })) as any;
@@ -165,9 +169,9 @@ test('wordless H3 reuses real silent conditioning, preserves native soundscape a
   assert.equal(wav.length, 24044);
   assert.ok(wav.subarray(44).every(byte => byte === 0));
   assert.equal(pkg.assets[SILENT_CONDITIONING_ASSET_ID].media.durationSeconds, 0.5);
-  assert.equal(pkg.scenes[0].media[0].asset, first.asset.id);
-  assert.equal(pkg.scenes[1].media[0].asset, second.asset.id);
-  assert.ok(pkg.scenes.every((scene: any) => scene.background.asset === scene.media[0].asset && scene.media_only));
+  assert.equal(pkg.scenes[0].background.asset, first.asset.id);
+  assert.equal(pkg.scenes[1].background.asset, second.asset.id);
+  assert.ok(pkg.scenes.every((scene: any) => !scene.media && scene.media_only));
   assert.ok(pkg.scenes.every((scene: any) => !scene.copy && !scene.narration));
 
   const { jobs, schema } = await jobsAndSchema();
@@ -217,6 +221,23 @@ test('LTX uses pinned i2v, retains start-frame refs and requires finishing sound
   assert.ok(plan.jobs.some((job: any) => job.asset === composition));
 });
 
+test('full silence creates no finishing stem for LTX/Klein and mutes H3 native audio', async () => {
+  for (const model of ['ltx', 'klein', 'h3'] as const) {
+    const writes: string[] = [];
+    const { tools, getDraft, identity, composition } = await filmTools(model, undefined, id => writes.push(id), 'Create a silent generated film. No audio.');
+    const result = await tools['assets.generate_video'].run(direction(identity, composition, { motion_model: model })) as any;
+    const pkg = getDraft();
+    assert.equal(pkg.audio?.music, undefined);
+    assert.equal(pkg.assets.a_finishing_mix, undefined);
+    assert.ok(!writes.includes('a_finishing_mix'));
+    if (model === 'h3') {
+      assert.equal(result.asset.media.audio, 'muted');
+      assert.match(result.asset.gen.direction.soundscape, /Full silence/);
+    } else assert.match(result.finishing_sound, /Full silence/);
+    assert.throws(() => tools['assets.generate_video'].run(direction(identity, composition, { wordless: false, dialogue: { text: 'Hello', speaker: 'c1' } })), /brief prohibits speech/);
+  }
+});
+
 test('auto mixes camera-led LTX and character-action H3 without model fallback', async () => {
   const { tools, getDraft, identity, composition } = await filmTools('auto', [shot('shot1'), shot('shot2')]);
   const establishing = await tools['assets.generate_video'].run(direction(identity, composition, {
@@ -227,8 +248,8 @@ test('auto mixes camera-led LTX and character-action H3 without model fallback',
   assert.equal(establishing.motion_model, 'ltx');
   assert.equal(acting.motion_model, 'h3');
   const pkg = getDraft();
-  assert.equal(pkg.scenes[0].media[0].asset, establishing.asset.id);
-  assert.equal(pkg.scenes[1].media[0].asset, acting.asset.id);
+  assert.equal(pkg.scenes[0].background.asset, establishing.asset.id);
+  assert.equal(pkg.scenes[1].background.asset, acting.asset.id);
   assert.equal(pkg.assets[establishing.asset.id].media.audio, 'none');
   assert.match(pkg.assets[establishing.asset.id].notes, /Finishing sound plan/);
   assert.equal(pkg.assets[acting.asset.id].gen.inputs.audio, SILENT_CONDITIONING_ASSET_ID);
@@ -258,7 +279,7 @@ test('explicit Klein is stills + code motion only, with Remotion and finishing m
   assert.match(pkg.compliance.warnings.join(' '), /stills \+ code motion/);
   assert.ok(pkg.scenes[0].motion);
   assert.equal(pkg.scenes[0].foreground[0].anim, 'ken-burns');
-  assert.equal(pkg.scenes[0].media[0].asset, result.asset.id);
+  assert.equal(pkg.scenes[0].background.asset, result.asset.id);
   assert.ok(!Object.values(pkg.assets).some((asset: any) => ['fasth3-omni', 'ltx25'].includes(asset.gen?.generator)));
   const { jobs, schema } = await jobsAndSchema();
   assert.equal(schema.validatePackage(pkg).valid, true, JSON.stringify(schema.validatePackage(pkg).errors));
@@ -342,8 +363,8 @@ test('generated films gain editable Remotion bookends without changing shots, me
   const pkg = getDraft();
   assert.equal(pkg.scenes[0].media_only, false);
   assert.equal(pkg.scenes[2].media_only, false);
-  assert.equal(pkg.scenes[0].background.asset, pkg.scenes[0].media[0].asset);
-  assert.equal(pkg.scenes[2].background.asset, pkg.scenes[2].media[0].asset);
+  assert.equal(pkg.assets[pkg.scenes[0].background.asset].kind, 'video');
+  assert.equal(pkg.assets[pkg.scenes[2].background.asset].kind, 'video');
   assert.equal(pkg.scenes[0].copy.headline, 'THE ATLAS');
   assert.equal(pkg.scenes[2].copy.headline, 'HOME AGAIN');
   assert.equal(pkg.scenes.reduce((sum: number, scene: any) => sum + scene.preferredFrames, 0), 540);
@@ -361,7 +382,7 @@ test('generated-video attachment preserves independent editable vector overlays'
   const scene = getDraft().scenes[0];
   assert.ok(scene.foreground.some((item: any) => item.asset === vector.asset.id));
   assert.ok(scene.foreground.every((item: any) => item.asset !== scene.background.asset));
-  assert.equal(scene.media[0].asset, scene.background.asset);
+  assert.equal(scene.media, undefined);
 });
 
 test('explicit no-text films stay free of automatic editorial copy', async () => {

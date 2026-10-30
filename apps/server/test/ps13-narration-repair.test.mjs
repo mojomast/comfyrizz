@@ -107,8 +107,8 @@ test('PS13 narration-timed repair carries an exact brief-derived narration and v
   assert.equal(result.live, true);
 
   const initialPrompt = JSON.stringify(provider.requests[0].messages);
-  assert.match(initialPrompt, /picture-only audio/, 'no-native-dialogue is a sound constraint, not a narration ban');
-  assert.doesNotMatch(initialPrompt, /no native dialogue/, 'the planner never sees the false wordless trigger');
+  assert.match(initialPrompt, /no native dialogue/, 'the sound constraint stays in the brief now that audio classification distinguishes it from narration');
+  assert.equal(result.package.voice.enabled, true, 'no-native-dialogue must not suppress the separate narration');
 
   const repairRequest = provider.requests[2];
   const system = repairRequest.messages[0].content;

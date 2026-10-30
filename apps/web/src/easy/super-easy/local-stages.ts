@@ -26,6 +26,8 @@ export interface LocalStagesInput {
   phase: SuperEasyPhase;
   /** The run stopped at this phase with a visible failure. */
   failed?: boolean;
+  /** Measured narration failed before the video render started. */
+  narrationFailed?: boolean;
   /** The package the run built, once the plan has adopted it. */
   pkg?: unknown;
   /** The package id the run is following; a different package is ignored. */
@@ -121,9 +123,10 @@ export function localStageReadings(input: LocalStagesInput): LocalStageReadings 
   }
 
   if (input.failed === true) {
-    const active = order === 1 ? 'plan' : order >= 4 ? 'render' : null;
+    const active = order === 1 ? 'plan' : order >= 4 ? (input.narrationFailed ? 'voice' : 'render') : null;
     if (active !== null) {
       readings[active] = { status: 'error', fraction: readings[active]?.fraction ?? 0 };
+      if (active === 'voice') delete readings.render;
     }
   }
   return readings;

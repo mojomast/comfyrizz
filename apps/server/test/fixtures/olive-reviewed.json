@@ -1,0 +1,37 @@
+{
+  "$schema": "https://comfyrizz.example/schema/package-v1.json",
+  "schemaVersion": 1,
+  "revision": 10,
+  "id": "pkg_7c5a9a1761cc4b70",
+  "title": "OLIVE ON LINEN",
+  "createdAt": "2026-10-29T13:04:37.020Z",
+  "format": {"width": 1920, "height": 1080, "fps": 30},
+  "duration": {"mode": "target", "targetFrames": 180, "exact": true},
+  "theme": {"palette": ["#0d0f14", "#1b2440", "#6d8cff", "#e6e8ee"], "font": "Inter"},
+  "voice": {"enabled": false, "engine": "none"},
+  "datasets": {},
+  "scenes": [{
+    "id": "s__fa659831716", "layout": "list", "preferredFrames": 180,
+    "foreground": [{"x": 0.5, "y": 0.5, "w": 0.5, "anim": "fade-in", "asset": "a_img_5e53b789d50e2324"}],
+    "media_only": true,
+    "motion": {"entry": "none", "ease": "linear", "energy": "calm"},
+    "media": [{"asset": "a_vid_dda0ffcac81f83b1"}, {"asset": "a_vid_dda0ffcac81f83b1"}],
+    "background": {"asset": "a_vid_dda0ffcac81f83b1"},
+    "notes": "LTX finishing sound plan (picture has no native audio): Full silence; no audio."
+  }],
+  "assets": {
+    "a_img_5e53b789d50e2324": {
+      "kind": "image", "origin": "generated", "status": "pending", "license": {"id": "CC0-1.0"}, "redistributable": true,
+      "model_license": {"id": "FLUX-Kommunity", "url": "https://huggingface.co/black-forest-labs/flux-3-image-klein"},
+      "gen": {"generator": "flux3-klein", "workflow": "workflows/flux3_klein_t2i.api.json", "workflow_sha256": "e83ba017e5be8e16c72474af4702b862a286e94bf7947edaa2beac7afe967689", "model": "flux-3-klein", "backend": "colab:G4", "inputs": {"prompt": "Photorealistic live-action fictional human adults with natural skin and real-world materials. A single glossy green olive rests on flat ivory linen.", "width": 1920, "height": 1080, "seed": 48122}}
+    },
+    "a_vid_dda0ffcac81f83b1": {
+      "kind": "video", "origin": "generated", "status": "pending", "license": {"id": "CC0-1.0"}, "redistributable": true,
+      "model_license": {"id": "LTX-2.x-Community", "url": "https://huggingface.co/Lightricks/LTX-2.5"},
+      "media": {"audio": "none", "fps": 24, "frames": 145},
+      "gen": {"generator": "ltx25", "workflow": "workflows/ltx25_i2v_2stage.api.json", "workflow_sha256": "97e205ad993996ac937a9a65ef7040973260bdc939041a23c3109184dc48c5e3", "model": "ltx-2.5", "inputs": {"image": "a_img_5e53b789d50e2324", "prompt": "Photorealistic live-action fictional human adults with natural skin and real-world materials. Use the provided start image as the first frame. The olive rolls steadily from left to right, slows smoothly and comes completely to rest for the last two seconds. Locked-off static macro camera. One continuous shot, no cuts.", "width": 1920, "height": 1080, "frames": 145, "fps": 24, "seed": 48122, "strength": 0.85}}
+    }
+  },
+  "compliance": {"open_weights_only": true},
+  "renders": []
+}

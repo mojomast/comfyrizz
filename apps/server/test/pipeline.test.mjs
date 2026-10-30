@@ -1,4 +1,5 @@
-import { test } from 'node:test';
+import { test, after } from 'node:test';
+import { collectMockContribution } from './helpers/comfy-contribution.mjs';
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
 import { appendFileSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
@@ -11,6 +12,9 @@ import { correctionFor } from '../src/pipeline-media.mjs';
 import { progressLines } from '../../../packages/backends/src/progress-lines.mjs';
 
 const example = JSON.parse(readFileSync(new URL('../../../examples/launch-demo/package.json', import.meta.url)));
+const contributionRoot = mkdtempSync(join(tmpdir(), 'pipeline-receipt-'));
+collectMockContribution(example, join(contributionRoot, 'package'));
+after(() => rmSync(contributionRoot, { recursive: true, force: true }));
 function fixture(t, options = {}) {
   const runtimeDir = mkdtempSync(join(tmpdir(), 'pipeline-test-'));
   t.after(() => rmSync(runtimeDir, { recursive: true, force: true }));
@@ -77,6 +81,19 @@ test('paid approval binds voice, project content and allocation ceilings', () =>
   pkg.scenes[0].narration = 'Changed speech.';
   assert.notEqual(planPipeline(pkg, options).planHash, before.planHash);
   assert.notEqual(planPipeline(pkg, { ...options, budgetUnits: 5 }).planHash, before.planHash);
+});
+
+test('a configured music-only mix requires final audio verification', () => {
+  const pkg = structuredClone(example);
+  assert.equal(planPipeline(pkg, { backendId: 'cpu' }).requiresAudio, false);
+  pkg.assets.a_score = {
+    kind: 'audio', origin: 'generated', status: 'ready', file: 'assets/score.wav',
+    sha256: '0'.repeat(64), bytes: 44, media: { durationSeconds: 1 },
+    gen: { generator: 'procedural-audio', model: 'deterministic-pcm-v2', inputs: { plan: 'test score', seed: 1 } },
+    license: { id: 'CC0-1.0' }, redistributable: true,
+  };
+  pkg.audio = { music: { asset: 'a_score' } };
+  assert.equal(planPipeline(pkg, { backendId: 'cpu' }).requiresAudio, true);
 });
 
 test('render location defaults to local and is part of the approved plan', () => {

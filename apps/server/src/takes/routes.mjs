@@ -3,7 +3,7 @@ import { dirname, isAbsolute, relative, resolve, sep } from 'node:path';
 import { listClips } from './clips.mjs';
 import { finalGate } from './gate.mjs';
 import { buildCorrection } from './correction.mjs';
-import { MAX_NOTE_CHARS, TAKES_SCHEMA, VERDICTS, deriveClipState } from './model.mjs';
+import { MAX_NOTE_CHARS, TAKES_SCHEMA, VERDICTS, deriveClipState, genFingerprint } from './model.mjs';
 import { applyTakeToPackage, previousTakeId, revertTake, selectTake } from './select.mjs';
 import { redactForLog } from '../../../../packages/backends/src/colab-plan.mjs';
 
@@ -451,6 +451,21 @@ export function createTakeRoutes(options = {}) {
       && asset.sha256.toLowerCase() === take.sha256.toLowerCase();
   }
 
+  function unchangedTakeMedia(pkg, assetId, take) {
+    const asset = pkg?.assets?.[assetId];
+    if (!asset || !take) return false;
+    // Ingest/adoption keeps an immutable copy under takes/, but Keep on the
+    // current generated media need not rewrite its path or provenance. Use the
+    // gate's source fingerprint (resolved job inputs can differ from authored
+    // inputs), and still require the identical content hash and measured media.
+    return isPlainObject(asset.gen) && isPlainObject(take.gen)
+      && (take.sourceGenFingerprint ?? genFingerprint(take.gen, pkg.assets)) === genFingerprint(asset.gen, pkg.assets)
+      && JSON.stringify(asset.media) === JSON.stringify(take.media)
+      && typeof asset.sha256 === 'string'
+      && typeof take.sha256 === 'string'
+      && asset.sha256.toLowerCase() === take.sha256.toLowerCase();
+  }
+
   function selectionCommandFor(entry, commandId) {
     if (typeof commandId !== 'string' || commandId === '') return null;
     const record = isPlainObject(entry?.selectionCommand) ? entry.selectionCommand : null;
@@ -462,7 +477,7 @@ export function createTakeRoutes(options = {}) {
     if (expected.packageRevision !== undefined && pkg?.revision !== expected.packageRevision) {
       // A retry after a crash may legitimately find the package already holding the
       // requested take while the sidecar still lags. That is repairable, not a conflict.
-      if (!packageCarriesTake(pkg, assetId, take)) {
+      if (!packageCarriesTake(pkg, assetId, take) || effectiveSelected(entry) === take.takeId) {
         throw new RouteError(409, 'REVISION_CONFLICT', 'the package revision changed since it was read', {
           currentRevision: pkg.revision,
           baseRevision: expected.packageRevision,
@@ -481,7 +496,7 @@ export function createTakeRoutes(options = {}) {
   }
 
   function ensurePackageSelection(pkg, assetId, take) {
-    if (packageCarriesTake(pkg, assetId, take)) return pkg;
+    if (packageCarriesTake(pkg, assetId, take) || unchangedTakeMedia(pkg, assetId, take)) return pkg;
     const next = applyTakeToPackage(pkg, assetId, take);
     return savePackage(store, pkg, next);
   }
@@ -491,7 +506,8 @@ export function createTakeRoutes(options = {}) {
     const next = kind === 'select'
       ? selectTake(pkg, doc, assetId, take.takeId)
       : revertTake(pkg, doc, assetId);
-    const packageChanged = JSON.stringify(next) !== JSON.stringify(pkg);
+    const packageChanged = !(from === take.takeId && unchangedTakeMedia(pkg, assetId, take))
+      && JSON.stringify(next) !== JSON.stringify(pkg);
     const saved = packageChanged ? savePackage(store, pkg, next) : pkg;
     if (commandId) {
       entry.selectionCommand = {
@@ -549,6 +565,7 @@ export function createTakeRoutes(options = {}) {
 
   async function handleList(response, pkgId) {
     const pkg = readPackage(pkgId);
+    const binding = await productionBinding(pkg);
     adopt(pkg);
     const clips = await clipsFor(pkg);
     const doc = takeStore.read(pkgId) ?? emptyDoc(pkgId);
@@ -561,6 +578,7 @@ export function createTakeRoutes(options = {}) {
     return sendJson(response, 200, {
       packageId: pkgId,
       revision: pkg.revision ?? null,
+      productionId: binding?.productionId ?? null,
       clips: clips.map(clip => clipView(pkg, clip, doc)),
       references,
     });
@@ -568,6 +586,7 @@ export function createTakeRoutes(options = {}) {
 
   async function handleTakes(response, pkgId, clipId) {
     const pkg = readPackage(pkgId);
+    const binding = await productionBinding(pkg);
     adopt(pkg);
     const { clip } = await clipFor(pkg, clipId);
     const doc = takeStore.read(pkgId) ?? emptyDoc(pkgId);
@@ -575,6 +594,7 @@ export function createTakeRoutes(options = {}) {
     return sendJson(response, 200, {
       packageId: pkgId,
       revision: pkg.revision ?? null,
+      productionId: binding?.productionId ?? null,
       clip: clipView(pkg, clip, doc),
       assetId: clip.assetId,
       selected: effectiveSelected(entry),
@@ -914,9 +934,10 @@ export function createTakeRoutes(options = {}) {
     const body = await readJson(request);
     if (!isPlainObject(body)) throw new RouteError(400, 'INVALID_BODY', 'body must be an object');
     const pkg = readPackage(pkgId);
+    const binding = await productionBinding(pkg);
     const { clip } = await clipFor(pkg, clipId);
-    const identity = selectionIdentity(body);
-    const expected = callerExpected(body);
+    const identity = binding ? boundIdentity(body) : selectionIdentity(body);
+    const expected = binding ? boundExpected(body) : callerExpected(body);
     const doc = takeStore.read(pkgId);
     if (!doc) throw new RouteError(404, 'NOT_FOUND', 'takes document does not exist');
     const entry = isPlainObject(doc.clips?.[clip.assetId]) ? doc.clips[clip.assetId] : null;
@@ -953,6 +974,10 @@ export function createTakeRoutes(options = {}) {
 
     assertSelectionExpected({ pkg, entry, assetId: clip.assetId, take, expected, skip: Boolean(record) });
 
+    const result = binding ? binding.handler.execute(
+      boundEnvelope(binding, identity, expected, 'take.select', { clipId, assetId: clip.assetId, takeId: take.takeId }),
+      binding.context,
+    ) : null;
     const fastPath = Boolean(record);
     const applied = fastPath
       ? duplicateSelection({ pkg, assetId: clip.assetId, take })
@@ -979,6 +1004,7 @@ export function createTakeRoutes(options = {}) {
       revision: applied.saved.revision ?? null,
       clip: clipView(applied.saved, clip, doc),
       takeId: applied.takeId,
+      ...(binding ? { productionId: binding.productionId, productionRevision: result.revision, commandId: identity.commandId } : {}),
       ...(applied.duplicate ? { duplicate: true } : {}),
     });
   }
@@ -995,11 +1021,31 @@ export function createTakeRoutes(options = {}) {
       }
     }
     const pkg = readPackage(pkgId);
+    const binding = await productionBinding(pkg);
+    const identity = binding ? boundIdentity(body) : selectionIdentity(body);
+    const expected = binding ? boundExpected(body) : callerExpected(body);
     const { clip } = await clipFor(pkg, clipId);
     const current = takeStore.read(pkgId);
     const entry = isPlainObject(current?.clips?.[clip.assetId]) ? current.clips[clip.assetId] : null;
     const takeId = typeof body.takeId === 'string' && body.takeId ? body.takeId : effectiveSelected(entry);
     if (!takeId) throw new RouteError(409, 'NO_TAKE', 'clip has no take to review');
+    if (!takeById(entry, takeId)) throw new RouteError(404, 'UNKNOWN_TAKE', 'take is not in this clip');
+    if (expected.packageRevision !== undefined && expected.packageRevision !== pkg.revision) {
+      throw new RouteError(409, 'REVISION_CONFLICT', 'the package revision changed since it was reviewed');
+    }
+    if (Object.hasOwn(expected, 'selected') && expected.selected !== effectiveSelected(entry)) {
+      throw new RouteError(409, 'SELECTION_CONFLICT', 'the clip selection changed since it was reviewed');
+    }
+    // A verdict is its own explicit review command, after selection succeeds.
+    // It does not select or approve any other take as a side effect.
+    if (binding && body.verdict === 'unreviewed') {
+      throw new RouteError(400, 'INVALID_VERDICT', 'a production review must approve or reject a take');
+    }
+    const result = binding ? binding.handler.execute(
+      boundEnvelope(binding, identity, expected, body.verdict === 'approved' ? 'clip.approve' : 'clip.reject', {
+        clipId, assetId: clip.assetId, takeId, ...(body.note !== undefined ? { note: body.note } : {}),
+      }), binding.context,
+    ) : null;
     const doc = takeStore.setVerdict(pkgId, clip.assetId, takeId, body.verdict, body.note);
     publish(events, {
       type: 'clip.verdict', packageId: pkgId, clipId, assetId: clip.assetId, takeId, verdict: body.verdict,
@@ -1008,6 +1054,8 @@ export function createTakeRoutes(options = {}) {
     return sendJson(response, 200, {
       kind: 'verdict',
       packageId: pkgId,
+      revision: pkg.revision ?? null,
+      ...(binding ? { productionId: binding.productionId, productionRevision: result.revision, commandId: identity.commandId } : {}),
       clip: clipView(pkg, clip, doc),
       takeId,
       verdict: body.verdict,

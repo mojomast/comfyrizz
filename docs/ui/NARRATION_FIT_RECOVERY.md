@@ -1,0 +1,7 @@
+# Resuming a measured local narration failure
+
+For a Super Easy CPU production, a measured narration overflow is saved against the exact package revision and content, current approval, reviewed inputs and original source snapshot. Open the saved project with `?package=<package-id>&production=<production-id>` in Easy mode. The Voice error offers **Revise narration for this length**. That action uses the pinned source and changes narration only; it produces a new proposal for factual review. Approve that proposal explicitly before generating narration again. The new narration is measured again; an estimate is not a guarantee of fit.
+
+Recovery is unavailable if the package, plan, approval, or source snapshot has changed. If the original source snapshot or reviewed inputs are missing, the screen says to create a fresh proposal with the source. The record contains no provider credentials or subprocess output and is served through the authenticated API.
+
+The production `prod_c515dd19e2aedbe71a54e39e` from the 2026-10-29 Data Story investigation failed before this record existed. Its separately reproduced 1221-versus-1200-frame diagnostic is not an event from that production, and the saved journal contains no render admission or durable measured-fit record. It cannot be resumed through this path without a new, genuinely recorded failure and its reviewed inputs. No failure, proposal, or approval is backfilled from the diagnostic.

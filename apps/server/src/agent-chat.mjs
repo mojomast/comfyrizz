@@ -1,9 +1,10 @@
 import { existsSync, mkdirSync, readFileSync, readdirSync, renameSync, unlinkSync, writeFileSync } from 'node:fs';
+import { MODEL_CONTRIBUTION_PROMPT } from '../../../packages/jobs/src/model-contribution.mjs';
 import { join } from 'node:path';
 import { createHash, randomUUID } from 'node:crypto';
 import { isDeepStrictEqual } from 'node:util';
 import { withConversationLock } from './conversation-lock.mjs';
-import { runConversationTurn, brandTheme, CONVERSATION_PROMPT_VERSION, idMentions, manifestBlock as clipManifestBlock } from '../../../packages/agent/dist/src/index.js';
+import { runConversationTurn, brandTheme, conversationPlanSchema, CONVERSATION_PROMPT_VERSION, idMentions, manifestBlock as clipManifestBlock } from '../../../packages/agent/dist/src/index.js';
 import { createOpenAICompatibleModel } from '../../../packages/llm/dist/src/index.js';
 import { buildChatProject, chatPlanFromPackage, chatProjectResponse } from './chat-project.mjs';
 import { rebaseChatPlans } from './chat-state.mjs';
@@ -23,6 +24,9 @@ import { createCharacterStore } from './characters/store.mjs';
 import { addToProject, setCastOverrides } from './characters/cast.mjs';
 import { buildCastManifest, manifestBlock as castManifestBlock } from './characters/manifest.mjs';
 import { IterationScopeError, normalizeTargetSet, scopeIdKind, toPromptHint, validateIterationScope } from './productions/iteration-scope.mjs';
+import { PACKAGE_EDIT_TOOL, applyChatPackageEdit } from './chat-package-edit.mjs';
+import { guardOrdinaryMutation, runProductionTool } from '../../../packages/agent/dist/src/production-tools.js';
+import { compilePackage } from './compile-package.mjs';
 
 function fail(status, message, extra) { throw Object.assign(new Error(message), { status }, extra); }
 const clone = value => (value === undefined ? value : JSON.parse(JSON.stringify(value)));
@@ -454,7 +458,13 @@ export function createProjectChat({
   function read(id) {
     if (!validId(id)) fail(400, 'Invalid conversation ID');
     const file = join(dir, `${id}.json`);
-    return existsSync(file) ? JSON.parse(readFileSync(file, 'utf8')) : null;
+    if (!existsSync(file)) return null;
+    const session = JSON.parse(readFileSync(file, 'utf8'));
+    // Attachment conversations are created before project chat and have no
+    // chat revision or plan yet. Treat them as revision zero, including on GET
+    // and CAS, while retaining their existing metadata.
+    return { revision: 0, plan: null, phase: 'chatting', projectId: null, projectRevision: null, ...session,
+      revision: Number.isSafeInteger(session.revision) && session.revision >= 0 ? session.revision : 0 };
   }
   function writeAtomic(file, text) {
     const temp = `${file}.${randomUUID()}.tmp`;
@@ -463,6 +473,18 @@ export function createProjectChat({
   }
   function write(session) {
     writeAtomic(join(dir, `${session.id}.json`), `${JSON.stringify(session, null, 2)}\n`);
+  }
+  const sourceDir = join(runtimeDir, 'narration-revision-context');
+  function sourceContextFor(pkg, session) {
+    if (!pkg) return null;
+    try { return JSON.parse(readFileSync(join(sourceDir, `${pkg.id}.${pkg.revision}.json`), 'utf8')); }
+    catch (error) { if (error.code !== 'ENOENT') throw error; }
+    return session.sourceContext ?? null;
+  }
+  function preserveSourceContext(session, pkg) {
+    if (!session?.sourceContext || !pkg) return;
+    mkdirSync(sourceDir, { recursive: true });
+    writeAtomic(join(sourceDir, `${pkg.id}.${pkg.revision}.json`), JSON.stringify(session.sourceContext));
   }
   const intentPath = id => join(dir, `${id}.commit.json`);
   const journalPath = id => join(dir, `${id}.turns.jsonl`);
@@ -584,6 +606,7 @@ export function createProjectChat({
     const proven = ref?.afterRevision !== undefined && ref?.hash
       && pkg && pkg.revision === ref.afterRevision && packageHash(pkg) === ref.hash;
     if (proven && intent.session) {
+      preserveSourceContext(intent.session, pkg);
       applyTakeOps(intent.takesOps);
       const latest = read(id);
       const latestRevision = latest ? latest.revision : 0;
@@ -605,7 +628,7 @@ export function createProjectChat({
   }
   function response(session, built = false) {
     const pkg = session.projectId ? store.read(session.projectId) : null;
-    const { lastTurnId, lastTurnBuilt, previousPlan, adoptionPending, brand, ...conversation } = session;
+    const { lastTurnId, lastTurnBuilt, previousPlan, adoptionPending, brand, sourceContext, ...conversation } = session;
     if (Array.isArray(conversation.clipProposals)) {
       conversation.clipProposals = conversation.clipProposals.map(proposal => proposal?.status === 'approval_required' && !proposal?.planHash
         ? { ...proposal, status: 'proposed' }
@@ -909,9 +932,15 @@ export function createProjectChat({
       if (conflict) fail(409, 'RECOVERY_CONFLICT', { code: 'RECOVERY_CONFLICT', recoveryConflict: conflict });
       session = read(id);
       if (!session) fail(404, 'Conversation not found');
+      if (input.expectedPackageId && session.projectId !== input.expectedPackageId) {
+        fail(409, 'The conversation belongs to a different project.', { code: 'EDIT_PACKAGE_MISMATCH' });
+      }
       if (input.turnId && input.turnId === session.lastTurnId) {
         baseRevision = -1;
         return;
+      }
+      if (input.expectedPackageId && store.read(session.projectId)?.revision !== input.expectedPackageRevision) {
+        fail(409, 'The project changed before the edit. Reload before continuing.', { code: 'EDIT_PACKAGE_STALE' });
       }
       if (input.baseRevision !== undefined && input.baseRevision !== session.revision) {
         fail(409, 'Conversation changed in another tab. Reload before continuing.', { currentRevision: session.revision });
@@ -942,7 +971,7 @@ export function createProjectChat({
         try {
           result = await runs.start({
             backendId: 'colab', pkg: built.package, assets: [proposal.assetId], includeReady: true,
-            mode: 'take', corrections: { [proposal.assetId]: built.correction }, approved: true,
+            mode: 'take', corrections: { [proposal.assetId]: built.correction }, approved: false,
           });
         } catch (error) {
           if (!isBusyError(error)) throw error;
@@ -1011,6 +1040,14 @@ export function createProjectChat({
     if (input.adoptPackageId !== undefined && (typeof input.adoptPackageId !== 'string'
       || !/^[A-Za-z0-9_.-]{1,128}$/.test(input.adoptPackageId))) {
       fail(400, 'adoptPackageId must be a valid package ID', { code: 'INVALID_ADOPT_PACKAGE_ID' });
+    }
+    if (input.expectedPackageId !== undefined && (typeof input.expectedPackageId !== 'string'
+      || !/^[A-Za-z0-9_.-]{1,128}$/.test(input.expectedPackageId)
+      || !Number.isSafeInteger(input.expectedPackageRevision) || input.expectedPackageRevision < 0)) {
+      fail(400, 'An edit needs a valid package ID and revision.', { code: 'INVALID_EDIT_CONTEXT' });
+    }
+    if (input.expectedPackageRevision !== undefined && input.expectedPackageId === undefined) {
+      fail(400, 'An edit revision needs its package ID.', { code: 'INVALID_EDIT_CONTEXT' });
     }
     const iterationScope = normalizedIterationScope(input.iterationScope);
     const requestedTargets = normalizedTargets(input.targets);
@@ -1124,6 +1161,10 @@ export function createProjectChat({
         const conflict = recoverLocked(id);
         if (conflict) fail(409, 'RECOVERY_CONFLICT', { code: 'RECOVERY_CONFLICT', recoveryConflict: conflict });
         session = read(id) ?? { id, revision: 0, messages: [], plan: null, phase: 'chatting', projectId: null, projectRevision: null };
+        if (input.expectedPackageId && ((session.projectId && session.projectId !== input.expectedPackageId)
+          || (input.adoptPackageId && input.adoptPackageId !== input.expectedPackageId))) {
+          fail(409, 'The conversation belongs to a different project.', { code: 'EDIT_PACKAGE_MISMATCH' });
+        }
         if (input.turnId && input.turnId === session.lastTurnId) {
           replay = response(session, Boolean(session.lastTurnBuilt));
           return;
@@ -1142,13 +1183,14 @@ export function createProjectChat({
         }
         if (session.messages.length >= 1000 || JSON.stringify(session.messages).length > 4000000) fail(400, 'This conversation is full. Start a new chat to continue.');
         baseRevision = session.revision;
-        if (input.adoptPackageId !== undefined) {
+        const adoptionId = input.adoptPackageId ?? (!session.projectId ? input.expectedPackageId : undefined);
+        if (adoptionId !== undefined) {
           // Adoption is a one-way binding for a new or still-unbound conversation.
           // Replay is handled above, so a retried committed turn remains idempotent.
           if (session.projectId) {
             fail(409, 'This conversation is already bound to a package.', { code: 'PACKAGE_ADOPTION_NOT_ALLOWED' });
           }
-          const adopted = store.read(input.adoptPackageId);
+          const adopted = store.read(adoptionId);
           if (!adopted) fail(404, 'The package to adopt was not found.', { code: 'PACKAGE_NOT_FOUND' });
           session = {
             ...session,
@@ -1164,7 +1206,17 @@ export function createProjectChat({
         // the next turn, so only the conversation revision is a concurrency lock.
         // PackageStore.save still compare-and-swaps capturedPackageRevision below.
         current = session.projectId ? store.read(session.projectId) : null;
+        if (session.projectId && !current) {
+          fail(404, 'The bound package was not found; an edit cannot create a replacement.', { code: 'PACKAGE_NOT_FOUND' });
+        }
+        if (input.expectedPackageId && current?.revision !== input.expectedPackageRevision) {
+          fail(409, 'The project changed before the edit. Reload before continuing.', {
+            code: 'EDIT_PACKAGE_STALE', currentRevision: current?.revision,
+          });
+        }
         capturedPackageRevision = current ? current.revision : null;
+        const sourceContext = sourceContextFor(current, session);
+        if (sourceContext) session.sourceContext = sourceContext;
         simCurrent = current;
         clipProposals = Array.isArray(session.clipProposals)
           ? clone(session.clipProposals).map(proposal => proposal?.status === 'approval_required' && !proposal?.planHash
@@ -1271,6 +1323,15 @@ export function createProjectChat({
         }
 
         rebased = rebaseChatPlans(session.plan, session.previousPlan, simCurrent);
+        if (!rebased.plan && simCurrent) {
+          // Saved proposals can be bound before a chat draft exists. Projection
+          // is optional: video-only scenes need not satisfy draft copy rules.
+          // Never invent brief/audience metadata to force a full replan.
+          const projected = chatPlanFromPackage(simCurrent, session.plan);
+          const parsed = conversationPlanSchema.safeParse(projected);
+          if (parsed.success) rebased.plan = parsed.data;
+          if (!session.previousPlan) session.adoptionPending = true;
+        }
       });
       if (replay) return replay;
 
@@ -1305,11 +1366,8 @@ export function createProjectChat({
           proposal.correction = built.correction;
           const bound = production?.findBound?.(simCurrent) ?? null;
           if (bound && typeof production?.proposeCorrection === 'function') {
-            const saved = store.save(simCurrent.id, built.package, capturedPackageRevision);
-            simCurrent = saved;
-            capturedPackageRevision = saved.revision;
             proposal.status = 'plan_pending';
-            boundCorrections.push({ proposal, productionId: bound.id });
+            boundCorrections.push({ proposal, productionId: bound.id, staged: built.package, baseline: simCurrent });
             continue;
           }
           let result;
@@ -1363,8 +1421,10 @@ export function createProjectChat({
         try {
           const planned = await production.proposeCorrection({
             productionId,
-            pkg: simCurrent,
+            pkg: boundCorrections[0].staged,
+            baseline: boundCorrections[0].baseline,
             sceneIds: boundCorrections.map(item => correctionSceneId(simCurrent, item.proposal)),
+            corrections: boundCorrections.map(item => ({ assetId: item.proposal.assetId, correction: item.proposal.correction })),
             commandId: `cmd_chat_${input.turnId ?? randomUUID()}`,
             userEventId: `ue_${input.turnId ?? randomUUID()}`,
           });
@@ -1543,9 +1603,43 @@ export function createProjectChat({
         ? modelFactory({ id, config, input })
         : createOpenAICompatibleModel(config);
       const brand = input.brand ? prepareBrand(input.brand, { assetsDir: join(runtimeDir, 'packages', 'assets') }) : session.brand ?? null;
-      if (input.action === 'build' && !session.plan) fail(400, 'Write a draft before building');
+      if (input.action === 'build' && !session.plan && !session.packageEdit) fail(400, 'Stage package edits or write a draft before building');
 
       let pendingBuild = null;
+      const drawingEdits = new Map();
+      const drawing = simCurrent?.scenes?.some(scene => scene.drawing) ? {
+        read(sceneId) {
+          const scene = simCurrent.scenes.find(item => item.id === sceneId);
+          if (!scene?.drawing) throw new Error(`Scene ${sceneId} has no procedural drawing`);
+          return { sceneId, preferredFrames: scene.preferredFrames, drawing: clone(drawingEdits.get(sceneId) ?? scene.drawing) };
+        },
+        edit(sceneId, replacements) {
+          const scene = simCurrent.scenes.find(item => item.id === sceneId);
+          if (!scene?.drawing) throw new Error(`Scene ${sceneId} has no procedural drawing`);
+          if (scene.locked) throw new Error(`Scene ${sceneId} is locked`);
+          // A drawing element is not yet mapped to the viewer's spatial, time,
+          // or preserve constraints. Refuse rather than broaden that scope.
+          if (iterationScope) throw new Error('Drawing edits are not available with an element-scoped request; remove the scope or use an unscoped chat.');
+          if (production?.findBound?.(simCurrent.id) && !productionContext) throw new Error('A production-bound drawing edit requires an available production and a turn ID');
+          if (requestedTargets && !requestedTargets.shotIds.includes(sceneId)) throw new Error(`Scene ${sceneId} is outside the requested shot targets`);
+          const next = clone(drawingEdits.get(sceneId) ?? scene.drawing);
+          const seen = new Set();
+          for (const { index, element } of replacements) {
+            if (seen.has(index)) throw new Error(`Duplicate drawing element index ${index}`);
+            seen.add(index);
+            const old = next.elements[index];
+            if (!old) throw new Error(`Drawing element ${index} does not exist`);
+            if (!element || element.type !== old.type) throw new Error(`Drawing element ${index} must retain its type`);
+            next.elements[index] = clone(element);
+          }
+          const candidate = clone(simCurrent);
+          candidate.scenes.find(item => item.id === sceneId).drawing = next;
+          const validation = validatePackage(candidate);
+          if (!validation.valid) throw new InvalidPackageError(validation.errors);
+          drawingEdits.set(sceneId, next);
+          return { ok: true, staged: true, sceneId, indices: [...seen], instruction: 'Call project_build to apply these changes.' };
+        },
+      } : null;
       const predictedRevision = () => (simCurrent ? simCurrent.revision + 1 : ((pendingBuild?.revision ?? 1)));
       const user = {
         role: 'user',
@@ -1556,13 +1650,67 @@ export function createProjectChat({
         ? { role: 'user', content: iterationScopeBlock(iterationScope) }
         : null;
       const signal = AbortSignal.timeout(120000);
+      let packageEdit = session.packageEdit ?? null;
+      let packageEditApplied = false;
+      const validatePackageEditTiming = candidate => {
+        const timing = pkg => {
+          const timeline = compilePackage(pkg, join(runtimeDir, 'packages'));
+          return { fps: timeline.fps, frames: timeline.durationInFrames,
+            scenes: timeline.scenes.map(scene => [scene.id, scene.from, scene.durationInFrames, scene.transitionInFrames, scene.transitionOutFrames]) };
+        };
+        if (!isDeepStrictEqual(timing(simCurrent), timing(candidate))) throw new Error('These focused package edits would change the compiled shot timing. Review timing separately before applying.');
+      };
+      const guardPackageEdit = async (candidate, tool) => {
+        if (iterationScope) throw new Error('Saved-package edits require shot targets or an unscoped request; element-scoped playback edits are not supported.');
+        if (production?.findBound?.(simCurrent.id) && !productionContext) throw new Error('A production-bound package edit requires an available production and a turn ID.');
+        if (requestedTargets) {
+          const changedScenes = candidate.scenes.filter(scene => !isDeepStrictEqual(scene, simCurrent.scenes.find(old => old.id === scene.id)));
+          if (changedScenes.some(scene => !requestedTargets.shotIds.includes(scene.id)) || !isDeepStrictEqual(candidate.voice, simCurrent.voice)) throw new Error('The package edit is outside the requested shot targets.');
+        }
+        // Keep the shared production read memory on this same context, but use
+        // the real package baseline for its structural/global/shot diff.
+        if (productionContext) {
+          const prior = productionContext.builtPlan;
+          productionContext.builtPlan = simCurrent;
+          try {
+            const refusal = await guardOrdinaryMutation(productionContext, { tool, before: simCurrent, after: candidate, turnStart: simCurrent });
+            if (refusal) throw Object.assign(new Error(refusal.message), { code: refusal.code, policyRefusal: true });
+          } finally { productionContext.builtPlan = prior; }
+        }
+      };
+      const packageEditor = simCurrent ? {
+        tool: PACKAGE_EDIT_TOOL,
+        pending: Boolean(packageEdit),
+        build: () => build(null),
+        stage: async args => {
+          const edited = applyChatPackageEdit(simCurrent, args);
+          await guardPackageEdit(edited.package, 'project_patch_plan');
+          validatePackageEditTiming(edited.package);
+          packageEdit = { request: clone(args), diff: edited.diff };
+          return { ok: true, staged: true, packageId: simCurrent.id, expectedRevision: simCurrent.revision, diff: edited.diff, instruction: 'Review this exact diff. Call project_build only when the user requested applying/saving the changes; otherwise leave it staged for review.' };
+        },
+      } : null;
       const build = async plan => {
+        if (packageEdit) {
+          const edited = applyChatPackageEdit(simCurrent, packageEdit.request);
+          if (input.action === 'build' && productionContext) {
+            const read = await runProductionTool({ id: 'reviewed_package_read', name: 'production_read', args: { production_id: productionContext.productionId } }, productionContext);
+            if (!read.ok) throw new Error(read.error);
+          }
+          await guardPackageEdit(edited.package, 'project_build');
+          validatePackageEditTiming(edited.package);
+          pendingBuild = edited.package;
+          packageEditApplied = true;
+          return { packageId: pendingBuild.id, revision: predictedRevision(), diff: edited.diff, preserved: ['assets', 'generation inputs', 'format', 'duration', 'source context'] };
+        }
         const castBuild = cast.length ? {
           cast,
           placements: castPlacements,
           files: characterFilesForBuild(libraryStore, cast),
         } : null;
-        const candidate = await buildChatProject({
+        // A drawing-only edit must not recompile the draft: doing so can
+        // normalize an existing package's duration and unrelated metadata.
+        const candidate = drawingEdits.size && simCurrent && isDeepStrictEqual(plan, rebased.plan) ? clone(simCurrent) : await buildChatProject({
           plan,
           previous: simCurrent,
           previousPlan: lastBuiltPlan,
@@ -1573,6 +1721,14 @@ export function createProjectChat({
           ...(referenceStore ? { references: referenceStore } : {}),
           ...(castBuild ? { characters: castBuild } : {}),
         });
+        for (const [sceneId, editedDrawing] of drawingEdits) {
+          const scene = candidate.scenes.find(item => item.id === sceneId);
+          if (!scene?.drawing || scene.locked) throw new Error(`Drawing scene ${sceneId} is missing or locked`);
+          scene.drawing = clone(editedDrawing);
+        }
+        if (simCurrent && candidate.id !== simCurrent.id) {
+          fail(409, 'An edit cannot replace the bound package.', { code: 'EDIT_PACKAGE_MISMATCH' });
+        }
         signal.throwIfAborted();
         // The store validates on write; validate the candidate here so an invalid
         // package fails inside the turn instead of after the model reports success.
@@ -1598,8 +1754,9 @@ export function createProjectChat({
       // The explicit UI action applies the reviewed draft without another creative generation.
       const result = input.action === 'build' ? await (async () => {
         await build(rebased.plan);
-        return { plan: rebased.plan, built: true, reply: `Built “${rebased.plan.title}” into the project. You can preview it or keep chatting to revise it. Narration is a script; audio, GPU generation and export are separate steps.`, trace: { promptVersion: CONVERSATION_PROMPT_VERSION, skills: [], steps: 0, repairs: 0, usage: { input: 0, output: 0 }, tools: [{ name: 'project_build', ok: true }], omittedMessages: 0, elapsedMs: 0, stop: 'explicit-build' } };
+        return { plan: rebased.plan, built: true, reply: packageEditApplied ? 'Applied the reviewed package edits. Existing media and timing were preserved.' : `Built “${rebased.plan.title}” into the project. You can preview it or keep chatting to revise it. Narration is a script; audio, GPU generation and export are separate steps.`, trace: { promptVersion: CONVERSATION_PROMPT_VERSION, skills: [], steps: 0, repairs: 0, usage: { input: 0, output: 0 }, tools: [{ name: 'project_build', ok: true }], omittedMessages: 0, elapsedMs: 0, stop: 'explicit-build' } };
       })() : await runConversationTurn({
+        systemSuffix: MODEL_CONTRIBUTION_PROMPT + (simCurrent ? ' The current saved package is authoritative, including when draft is null. For native source audio, disabling detached voiceover, removing narration, exact copy/kicker/lower-third edits or removing foreground placements use project_edit_package, then project_build when asked to save/apply. Never create a fresh draft to repair missing chat context. Preserve existing timing/fps and all generated media/conditioning. Unsupported edits must be reported rather than silently omitted. Production-bound edits still require production_read before build. Show the changed fields in your summary.' : ' In project_update_plan/project_patch_plan, use mediaType:image with a relevant visual direction for at least one visible scene/plate.') + ' A draft/build is not approved GPU generation or a final export.',
         model, sessionId: id, signal, skillsEnabled,
         mode: input.mode, messages: [...session.messages, ...(scopeMessage ? [scopeMessage] : []), user], plan: rebased.plan,
         brandContext: brand?.kit,
@@ -1608,16 +1765,23 @@ export function createProjectChat({
         references,
         clips,
         characters,
+        drawing,
+        packageEditor,
         ...(productionContext ? { production: productionContext } : {}),
         projectContext: simCurrent ? {
           id: simCurrent.id, revision: simCurrent.revision, title: simCurrent.title, format: simCurrent.format,
           theme: simCurrent.theme, datasets: simCurrent.datasets ?? {},
+          duration: simCurrent.duration, voice: simCurrent.voice, audio: simCurrent.audio,
+          assets: simCurrent.assets, proposal: simCurrent.proposal,
+          pendingPackageEdit: packageEdit,
+          originalSourceContext: session.sourceContext ?? null,
           manuallyEditedSinceLastBuild: simCurrent.revision !== session.projectRevision,
           scenes: simCurrent.scenes.map(scene => ({
             id: scene.id, layout: scene.layout, copy: scene.copy, narration: scene.narration,
             visual: scene.notes, locked: scene.locked, seconds: scene.preferredFrames / simCurrent.format.fps,
             data: scene.data, code: scene.code, media: scene.media, background: scene.background,
-            motion: scene.motion, transitionOut: scene.transitionOut, foreground: scene.foreground,
+            motion: scene.motion, transitionOut: scene.transitionOut, foreground: scene.foreground, lower_third: scene.lower_third,
+            ...(scene.drawing ? { drawing: { renderedInsteadOfLayoutCopy: true, labels: (scene.drawing.elements ?? []).filter(element => element.type === 'text').map(element => element.text) } } : {}),
           })),
         } : null,
         build,
@@ -1628,7 +1792,9 @@ export function createProjectChat({
       const nextSession = {
         ...session, revision: baseRevision + 1,
         messages: [...session.messages, user, { role: 'assistant', content: providerSettings.redact(result.reply) }],
-        plan: result.plan, phase: result.built ? 'built' : draftChanged && result.plan ? 'draft' : session.phase,
+        plan: result.plan, phase: result.built ? 'built' : packageEdit || (draftChanged && result.plan) ? 'draft' : session.phase,
+        packageEdit: packageEditApplied ? null : packageEdit,
+        ...(packageEditApplied ? { lastPackageEdit: { ...packageEdit, appliedRevision: predictedRevision() } } : {}),
         provider: input.provider, model: config.model,
         brand, trace: JSON.parse(providerSettings.redact(JSON.stringify(result.trace))),
         warning: result.warning ? providerSettings.redact(result.warning) : null,
@@ -1638,7 +1804,7 @@ export function createProjectChat({
         ...(cast.length || Array.isArray(session.cast) ? { cast } : {}),
         ...(castPlacements.length || Array.isArray(session.castPlacements) ? { castPlacements } : {}),
         ...(castProposals.length || Array.isArray(session.castProposals) ? { castProposals } : {}),
-        ...(pendingBuild ? { projectId: pendingBuild.id, projectRevision: predictedRevision(), previousPlan: result.plan } : {}),
+        ...(pendingBuild ? { projectId: pendingBuild.id, projectRevision: predictedRevision(), ...(!packageEditApplied ? { previousPlan: result.plan } : {}) } : {}),
       };
       if (pendingBuild) delete nextSession.adoptionPending;
 
@@ -1713,6 +1879,7 @@ export function createProjectChat({
               writtenPackage = store.write(finalPackage);
             }
             packageWritten = true;
+            preserveSourceContext(commitSession, writtenPackage);
           }
           // The intent becomes complete as soon as the package effect is proven,
           // before any secondary side effect. Recovery can then roll it forward.

@@ -100,6 +100,17 @@ test('cross-phase usage keeps the initial plan when repair reports its own total
   assert.equal(progress.snapshot().usage.total, progress.snapshot().usage.input + progress.snapshot().usage.output);
 });
 
+test('SVG usage survives phase totals and distinguishes missing provider usage', () => {
+  const progress = createAgentProgress('svg-usage');
+  progress.update({ type: 'model_result', phase: 'initial', usage: { input: 10, output: 5, cacheRead: 8, reasoningTokens: 2 } });
+  progress.update({ type: 'svg_generation_usage', usage: { input: 13, output: 7, cacheRead: 6, cacheWrite: 4 } });
+  progress.update({ type: 'svg_generation_usage', usage: null });
+  progress.update({ type: 'done', phase: 'initial', usage: { input: 10, output: 5, cacheRead: 8, reasoningTokens: 2 } });
+  progress.update({ type: 'model_result', phase: 'repair', usage: { input: 2, output: 3 } });
+  progress.update({ type: 'done', phase: 'repair', usage: { input: 2, output: 3 } });
+  assert.deepEqual(progress.snapshot().usage, { input: 25, output: 15, total: 40, cacheRead: 14, cacheWrite: 4, reasoningTokens: 2, svg: { input: 13, output: 7, cacheRead: 6, cacheWrite: 4, requests: 2, reportedRequests: 1 } });
+});
+
 test('schema failures include actionable validation details, not a generic placeholder', () => {
   const problems = packageSchemaProblems({});
   assert.ok(problems.length > 0);

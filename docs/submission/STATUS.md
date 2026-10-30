@@ -1,6 +1,64 @@
 # Hackathon submission status
 
+**Current 2026-10-29 deadline triage:** see [Super Easy 24-hour reliability plan](SUPER_EASY_24H_PLAN.md) for the current keep/cut candidates, reduced prompts, live-test criteria and remaining blockers. The dated verification and four-route campaign below are historical; they do not establish current end-to-end mode readiness. The newer eight-film campaign has its own 60-credit ledger and must not be combined with the older 40-credit campaign described below.
+
 Updated 2026-10-27 on `feat/hackathon-submission` / draft PR #53.
+
+## 2026-10-29 update
+
+- **Default managed Colab inference:** the README, setup guide and
+  [Colab feature guide](../features/google-colab.md) now explain deployment of
+  ComfyUI, dependencies and pinned models, job execution, collection and confirmed
+  shutdown for users without a local GPU. They cite current Google AI Pro/Colab
+  allowances and distinguish runtime units from agent API charges.
+- **Pi production migration:** Pi 1.4 owns the model/tool loop for planning, chat,
+  revisions and repairs; Node 22.19.0+ is required. Configured DeepSeek Flash routes
+  now receive a 65,536-token output allowance.
+- **Final-video contribution gate:** visible eligible ComfyUI output and trusted
+  generation/render receipts are required, including cached exports and final
+  pipeline downloads. CPU-only films are historical development evidence.
+- **Duration:** custom whole-second targets from 1–120 seconds are supported,
+  retaining the existing presets and exact-duration validation.
+- **Delivered generated film:** Neon After Rain completed actual UI planning,
+  native transition correction, explicit re-review/approval, Colab generation,
+  render and Download. It is exactly 12 seconds at 1920×1080/30 fps, silent, with
+  three LTX motion shots, native animated headlines and wipe/push transitions.
+  Six generation receipts and the byte-bound render receipt match the downloaded
+  movie. Actual account delta was 1.14 credits; runtime shutdown was confirmed.
+  Full 1× player execution and sampled visual inspection are recorded, not
+  continuous human viewing. Local evidence is linked from the reliability plan;
+  a private Tailscale link is not a judge-accessible public artifact.
+- **Presentation fixes:** exact-duration repair, measured H3 dialogue conditioning,
+  production-bound Keep requests and historical take-freshness recovery are
+  implemented. Neon now passes actual browser Keep → Export → Download → reload
+  with its revised caption, a trusted final receipt and durable artifact.
+  Reopened Download returns identical bytes without another render. The accepted
+  revised film is 12.000 seconds, 1080p/30 fps, silent; all six generated-media
+  hashes and saved r14 remain unchanged. The private Tailscale share is verified.
+- **45-second show films:** credits now plan exactly 45 seconds and all 12 image/
+  video outputs were generated and collected with matching hashes. Three missing
+  workflow sidecars initially blocked import/export. Explicit CPU-only recovery
+  from verified embedded MP4 workflow metadata now completed actual render,
+  Download and fresh-browser reopen. THE LAST SIGNAL has all six motion shots and
+  credits, an instrumental soundtrack, 12 generation receipts and a final render
+  receipt. Video is exactly 45.000 seconds; AAC/container is 45.100 seconds.
+  Recovery used zero additional GPU credits. Human listening quality remains
+  unassessed, and brief credit overlap at circular transition midpoints is noted.
+  Bundled collection is implemented for subsequent multi-shot runs. The latest
+  speaking plan prepared real conditioning and seven H3 shots but was stopped
+  before spending because native audio remained muted, detached narration was
+  enabled and saved-project correction failed. Those paths are being fixed;
+  45 seconds at 24 fps is valid and is not itself a brief failure. The speaking
+  film is not yet generated.
+- **Verification:** full agent/web/server checks passed **578 / 1,645 / 2,132**
+  tests, with one web and four server skips. Bundled collection separately passed
+  **230 backend tests**, one Windows-only skip. Later recovery/export UI changes
+  need their own checks. Public-demo validation, full audiovisual acceptance and
+  submission packaging remain outstanding; details and source boundaries are in
+  the reliability log.
+
+Current details and artifact placeholders: [Deadline handoff](DEADLINE_HANDOFF.md).
+The sections below retain the earlier implementation/verification snapshot.
 
 ## Implemented
 

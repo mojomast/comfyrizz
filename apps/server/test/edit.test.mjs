@@ -26,7 +26,7 @@ import { replayProvider } from './fake-provider.mjs';
 
 const TOKEN = 'c13-token-0123456789abcdef';
 const BRIEF =
-  'Make a calm launch video with an icon, a diagram, a dot pattern and animated bars, plus one nebula illustration to plan for GPU later.';
+  'Icon, diagram, pattern, bars; nebula launch.';
 const WARM_PALETTE = ['#2a1206', '#4a1f08', '#ffb37b'];
 const EDIT = {
   name: 'storyboard.edit',
@@ -42,7 +42,7 @@ const state = { packageId: null };
 
 before(async () => {
   runtime = mkdtempSync(join(tmpdir(), 'comfyrizz-c13-'));
-  provider = await replayProvider(defaultCpuScript(BRIEF));
+  provider = await replayProvider(defaultCpuScript(BRIEF), { svgText: '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100"><rect width="100" height="100" fill="#f2f2f2"/><text x="10" y="60" fill="#050505">Launch</text></svg>' });
   app = createApp({
     token: TOKEN,
     runtimeDir: runtime,
@@ -196,7 +196,7 @@ function ffprobeFrames(file) {
 }
 
 function renderEdited(packageId) {
-  return binaryRequest('/api/render/edited', { packageId });
+  return binaryRequest('/api/render/edited', { packageId, intent: 'draft' });
 }
 
 function request({ method = 'GET', path = '/', body } = {}) {

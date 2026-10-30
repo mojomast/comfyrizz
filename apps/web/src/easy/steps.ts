@@ -8,7 +8,7 @@ export function stepIndex(id: StepId): number {
 }
 
 export function deriveStep(state: EasyState, facts: StepFacts): StepId {
-  if (state.idea.text.trim().length < 10) return 'idea';
+  if (state.idea.text.trim().length < 10 && !(facts.hasPackage && facts.planApproved)) return 'idea';
   if (!facts.hasPackage) {
     return state.questionsAsked || state.questions.length === 0 ? 'characters' : 'idea';
   }
@@ -20,6 +20,7 @@ export function deriveStep(state: EasyState, facts: StepFacts): StepId {
 
 export function reachable(step: StepId, state: EasyState, facts: StepFacts): boolean {
   if (step === 'export' && !facts.planApproved) return false;
+  if (step === 'export' && facts.hasPackage && facts.planApproved && facts.allShotsKept && !facts.actionsActive && state.plan.status !== 'stale') return true;
   // Review stays listed after the words change. The plan step shows "Needs update".
   // A finished This-computer generation keeps Review open even before the
   // server journal has been read back.

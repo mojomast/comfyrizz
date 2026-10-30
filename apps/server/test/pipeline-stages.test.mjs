@@ -1,10 +1,26 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { executePipeline } from '../src/pipeline-worker.mjs';
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
-import { join } from 'node:path';
+import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { dirname, join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { fixture } from './pipeline-fixture.mjs';
+import { collectMockContribution } from './helpers/comfy-contribution.mjs';
+
+test('worker reports that music background auditions have no automatic sync diagnostic even with SyncNet configured', async t => {
+  const f = fixture(t);
+  const file = join(f.spec.workDir, 'package.json');
+  const pkg = JSON.parse(readFileSync(file));
+  const scene = pkg.scenes[0];
+  pkg.audio = { music: { asset: 'a_song', trim: { startSeconds: 0, endSeconds: 10 } } };
+  pkg.assets.a_audition = { kind: 'video', origin: 'generated', status: 'pending', gen: { generator: 'ltx25-a2v', inputs: { audio: 'a_excerpt' } } };
+  scene.background = { asset: 'a_audition' };
+  writeFileSync(file, JSON.stringify(pkg));
+  await executePipeline(f.spec, f.adapters);
+  const warning = f.events.find(event => event.code === 'MUSIC_AUDITION_SYNC_UNSUPPORTED');
+  assert.equal(warning?.sceneId, scene.id);
+  assert.match(warning.message, /do not run/);
+});
 
 test('all nine stages enforce voice → measured timing → media shutdown → sync → render → export', async t => {
   const f = fixture(t);
@@ -179,7 +195,9 @@ function enableRemote(f, { teardownState = 'stopped' } = {}) {
   f.spec.plan.remoteRender = true;
   f.spec.plan.options = { backendId: 'colab', renderLocation: 'colab' };
   const pkg = JSON.parse(readFileSync(join(f.spec.workDir, 'package.json')));
+  const remoteDir = join(f.spec.runDir, 'mock-remote', 'out');
   f.adapters.colabFactory = () => ({
+    id: 'colab',
     preflight: async () => ({ ok: true, ready: true }),
     estimate: async () => ({ gpuMinutes: 1 }),
     usage: async () => ({ balance: 100 }),
@@ -187,9 +205,18 @@ function enableRemote(f, { teardownState = 'stopped' } = {}) {
     runPackage: async (_pkg, opts) => {
       f.calls.push(`hold:${opts.teardownMode}`);
       f.calls.push('media');
-      return { ok: true, package: pkg, teardown: { state: 'stopped' } };
+      const { manifest, jobsDoc } = collectMockContribution(pkg, remoteDir, { sceneId: 's_plate' });
+      return { ok: true, package: pkg, manifest, jobsDoc, teardown: { state: 'stopped' } };
     },
-    downloadListed: async () => { f.calls.push('presenter-files'); },
+    downloadListed: async (files, destination) => {
+      f.calls.push('presenter-files');
+      for (const relative of files) {
+        const source = join(remoteDir, relative);
+        if (!existsSync(source)) continue;
+        mkdirSync(dirname(join(destination, relative)), { recursive: true });
+        cpSync(source, join(destination, relative));
+      }
+    },
     collectOut: async () => { f.calls.push('collect-full'); return { local: join(f.spec.runDir, 'missing-out') }; },
     teardown: async reason => { f.calls.push(`teardown:${reason}`); return { state: teardownState }; },
   });
@@ -242,6 +269,23 @@ test('a failed Google Colab render falls back locally only after the VM stops', 
   const warning = f.events.find(event => event.code === 'REMOTE_RENDER_FALLBACK');
   assert.equal(warning.message, 'Google Colab render failed (browser missing). Falling back to the local render after the VM is stopped.');
   assert.equal(f.events.find(event => event.kind === 'result').result.renderLocation, 'local');
+});
+
+test('remote output without its submitted graph cannot reach rendering or export', async t => {
+  const f = fixture(t);
+  enableRemote(f);
+  const factory = f.adapters.colabFactory;
+  f.adapters.colabFactory = () => {
+    const backend = factory();
+    return { ...backend, downloadListed: (files, ...args) => backend.downloadListed(files.filter(file => !file.endsWith('.workflow.api.json')), ...args) };
+  };
+  f.adapters.colabRender = async () => { f.calls.push('remote-render'); throw new Error('must not render unverified media'); };
+  assert.equal(await executePipeline(f.spec, f.adapters), 1);
+  assert.match(f.events.at(-1).message, /verified ComfyUI contribution/);
+  assert.equal(f.calls.includes('remote-render'), false);
+  assert.equal(f.calls.includes('local-render'), false);
+  assert.equal(f.calls.includes('export'), false);
+  assert.ok(f.calls.some(call => call.startsWith('teardown:')), 'the held mock VM is released on provenance refusal');
 });
 
 test('an unconfirmed Google Colab shutdown does not start the local render', async t => {

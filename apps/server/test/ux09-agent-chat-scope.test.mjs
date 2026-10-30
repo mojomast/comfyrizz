@@ -20,6 +20,7 @@ import { createTakeStore } from '../src/takes/store.mjs';
 import { createProductionStore } from '../src/productions/store.mjs';
 import { createCommandHandler } from '../src/productions/commands.mjs';
 import { createScriptedModel } from '../../../packages/agent/dist/src/index.js';
+import { plannedContribution } from './helpers/comfy-contribution.mjs';
 
 const FIXTURE_PATH = fileURLToPath(new URL('../../../packages/schema/fixtures/valid/variants.json', import.meta.url));
 const fixture = JSON.parse(readFileSync(FIXTURE_PATH, 'utf8'));
@@ -64,6 +65,7 @@ function seedPackage(store, packageId, scenes = DEFAULT_SCENES) {
   pkg.title = 'UX09 scoped chat';
   pkg.scenes = scenes.map(scene => ({ ...pkg.scenes[0], ...scene, id: scene.id }));
   for (const scene of pkg.scenes) delete scene.transitionOut;
+  plannedContribution(pkg);
   const written = store.write(pkg);
   mkdirSync(join(store.dir, 'assets'), { recursive: true });
   writeFileSync(
@@ -179,7 +181,7 @@ const readThen = (...proposals) => [
 ];
 const draftPlanArgs = (sceneIds, headline = 'Meet Orbit') => ({
   title: 'UX09 scoped chat', brief: 'Named scenes for scoped-edit acceptance', audience: 'testers', aspect: '16:9', stylePreset: 'cinematic-dark',
-  scenes: sceneIds.map(id => ({ id, layout: 'title', headline, narration: `First line for ${id}. Second line for ${id}.`, seconds: 4, visual: 'procedural backdrop' })),
+  scenes: sceneIds.map(id => ({ id, layout: 'title', headline, narration: `First line for ${id}. Second line for ${id}.`, seconds: 4, visual: 'Editorial computing backdrop', mediaType: 'image' })),
 });
 
 test('UX09: a viewer iterationScope reaches the production tools: its line is accepted and expansion is refused with SCOPE_EXPANSION', async t => {
@@ -349,5 +351,5 @@ test('UX09: build before production_read is READ_REQUIRED and an unbound project
   const draft = await send(unbound.chat, { turnId: 'turn-ux09-unbound-seed', extra: { mode: 'build' } });
   unbound.model.set([{ name: 'project_build', args: {} }], 'Built.');
   const built = await send(unbound.chat, { turnId: 'turn-ux09-unbound', extra: { baseRevision: draft.conversation.revision } });
-  assert.equal(toolOf(built, 'project_build')[0].ok, true);
+  assert.equal(toolOf(built, 'project_build')[0].ok, true, JSON.stringify(toolOf(built, 'project_build')[0]));
 });

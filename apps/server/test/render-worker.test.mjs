@@ -14,6 +14,7 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 import { isMainThread } from 'node:worker_threads';
 import { createApp } from '../src/app.mjs';
 import { spawnCancellable } from '../../renderer/scripts/cancellable-spawn.mjs';
+import { seedMockContribution, approveMockContribution } from './helpers/comfy-contribution.mjs';
 
 const TOKEN = 'render-worker-token-0123456789abcdef';
 const repo = new URL('../../..', import.meta.url).pathname;
@@ -99,7 +100,8 @@ async function boot(t, { mode = 'render', termMs = 1500, hold = false } = {}) {
     renderModuleUrl: moduleUrl,
     sceneModuleUrl: moduleUrl,
   });
-  app.store.seed(structuredClone(seed));
+  seedMockContribution(app.store, structuredClone(seed));
+  approveMockContribution(app.takeStore, app.store.read(seed.id), app.store.dir);
   const server = createServer(app.handler);
   await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
   const port = server.address().port;
@@ -381,7 +383,7 @@ test('a render function named renderPackage still runs on the server thread', as
     render: renderPackage,
     renderScene: renderPackage,
   });
-  app.store.seed(structuredClone(seed));
+  seedMockContribution(app.store, structuredClone(seed));
   const server = createServer(app.handler);
   await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
   t.after(async () => {
@@ -462,7 +464,7 @@ test('SIGTERM during a render kills the process tree, removes props, and exits 0
   startPost({
     port,
     path: '/api/render',
-    body: { packageId: seed.id, override: { reason: REASON } },
+    body: { packageId: seed.id, intent: 'draft', override: { reason: REASON } },
   });
   const childPid = Number(await waitFor(() => {
     try { return readFileSync(renderer.pidFile, 'utf8'); } catch { return ''; }

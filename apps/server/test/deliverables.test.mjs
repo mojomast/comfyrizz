@@ -14,6 +14,7 @@ import { compileTimeline } from '../../../packages/planner/dist/src/index.js';
 import { createExporter } from '../src/export.mjs';
 import { buildVariants } from '../src/variant.mjs';
 import { renderPackage } from '../../renderer/scripts/render-package-lib.mjs';
+import { collectMockContribution } from './helpers/comfy-contribution.mjs';
 
 const repo = new URL('../../..', import.meta.url).pathname;
 const seed = JSON.parse(readFileSync(join(repo, 'examples', 'launch-demo', 'package.json'), 'utf8'));
@@ -80,6 +81,7 @@ test('X1: scripted model cutdown, CPU render, social pack, and the rights filter
   cpSync(join(repo, 'examples', 'launch-demo', 'assets'), join(packageDir, 'assets'), { recursive: true });
   const exportsDir = join(dir, 'out', 'export');
   try {
+    collectMockContribution(seed, packageDir);
     writeFileSync(join(packageDir, 'package.json'), `${JSON.stringify(seed, null, 2)}\n`);
     const variants = buildVariants(seed, { durations: [6, 15, 30], voice });
     const exporter = createExporter({
@@ -168,6 +170,7 @@ test('X1: scripted model cutdown, CPU render, social pack, and the rights filter
       },
     });
     const rightsPackagePath = join(dir, 'rights-package.json');
+    collectMockContribution(blocked, dir);
     writeFileSync(rightsPackagePath, `${JSON.stringify(blocked, null, 2)}\n`);
     const rights = await rightsExporter({ pkg: blocked, packagePath: rightsPackagePath });
     const rightsZip = zipEntries(readFileSync(join(rights.dir, 'package.zip')), dir);

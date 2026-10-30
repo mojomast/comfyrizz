@@ -1,19 +1,39 @@
 # One prompt to a finished film
 
 ComfyRizz's default flow is **one prompt → proposal → visible generated assets →
-a finished MP4 → agent-led changes**. **Hackathon judges use the managed demo
-link with inference already configured; no setup is required.** The instructions
-below are for people running ComfyRizz themselves. Use Google Colab for generated
+a finished MP4 → agent-led changes**. The planned judges' demo will have inference
+preconfigured; its public URL and live generation still need verification. The
+instructions below are for people running ComfyRizz themselves. Use Google Colab for generated
 films, or This computer for a no-key motion-graphics preview.
+
+**You do not need a local GPU.** Google Colab is the default managed generation
+path. After one-time setup, ComfyRizz allocates the cloud GPU, deploys ComfyUI with
+its dependencies and pinned models, runs the approved jobs, collects the media
+and shuts the runtime down. You direct the film from the browser instead of
+installing GPU drivers, downloading model weights locally or running notebook
+cells for each production. The local app and CPU rendering still use your computer.
+
+Eligible Google AI Pro accounts include Colab compute units. Google's current
+benefits page lists **200 CCUs**; the separate Colab Pro plan advertises **100
+units/month** (checked 2026-10-29). See the
+[allowances, sources and usage explanation](features/google-colab.md#compute-units-and-google-ai-pro).
+
+Final production delivery requires visibly used, completed ComfyUI-generated media
+from a verified supported hackathon model, with trusted generation and render receipts.
+CPU-only previews, planned jobs and imported provenance claims do not qualify.
 
 ## Install on Linux or native Windows
 
 Requirements:
 
-- Node.js 22.6 or newer and pnpm 10;
+- Node.js 22.19.0 or newer (required by Pi 1.4) and pnpm 10;
 - FFmpeg and ffprobe on `PATH`;
 - Chrome or Edge, or let Remotion manage its browser;
 - Python for Google Colab CLI and optional local narration.
+
+Verify `node --version` and `pnpm --version` first. A broken Corepack/pnpm launcher
+must be repaired before installation; see the [official pnpm installation guide](https://pnpm.io/installation).
+Offline installation also requires a populated dependency store.
 
 From a terminal (PowerShell on Windows):
 
@@ -43,6 +63,12 @@ available, and run **Test connection & tools**. Save and use the connection.
 Credentials remain in the server's protected runtime and are never returned to
 the browser. An invalid active provider produces a visible error rather than
 silently using scripted mode.
+
+Pi 1.4 coordinates production planning, chat and revisions. The selected provider
+still supplies the language model; it is separate from GPU media inference on
+Colab. The configured DeepSeek Flash routes use a **65,536-token output limit**,
+with low reasoning effort by default. Planning and revisions use no Colab GPU
+credits, but provider API charges can apply. See [Agent providers](AGENT_PROVIDERS.md).
 
 ### 2. Google Colab CLI
 
@@ -91,9 +117,11 @@ option rather than inferred from prompt wording.
 ## Make a video
 
 1. Enter one specific sentence. A stylized 20–40 second story with a small cast,
-   a clear goal and a visual setting is a good first run.
+   a clear goal and a visual setting is a good first run. Choose a 15/30/60/90-second
+   preset or an exact custom duration of **1–120 seconds**. An explicit duration
+   in the prompt takes precedence; a plan that cannot fit must be corrected.
 2. Press **Generate** once, then review the short title, logline, look, duration
-   and soundtrack. Choose **Revise proposal** for a free creative revision, or
+   and soundtrack. Choose **Revise proposal** to revise before GPU spending, or
    **Make this film** to start production.
 3. Watch real character/reference images, shots, clips and audio appear in the
    gallery. A card is ready only when its media has actually landed.
@@ -106,10 +134,12 @@ available in the production details.
 
 ## Change the result
 
-The finished view's agent composer edits the same package, not a new project.
-Examples: “Make the opening more dramatic”, “Use the second take for shot 3”, or
-“Make it shorter”. Advanced mode keeps the agent beside the preview and timeline,
-with example changes and access to shots, takes and manual controls.
+Use **Open in editor → project chat** to request a scoped change to the same
+package, such as “Change the opening caption to A QUIETER MORNING.” Advanced mode
+keeps the agent beside the preview and timeline, with access to shots, takes and
+manual controls. Review the proposed edit before exporting again. The proposal
+revision box has a narrower scope than project chat; arbitrary changes to
+generation prompts, assets or source timing are not all supported.
 
 Project edits preserve stable scene IDs and revision checks. Any subsequent paid
 regeneration or export is confirmed separately; the no-dialog behavior applies to

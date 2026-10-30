@@ -8,6 +8,7 @@ import { join } from 'node:path';
 import { createExporter, compositionRenderFingerprint } from '../src/export.mjs';
 import { stagePipelineInputs } from '../src/pipeline-media.mjs';
 import { loadCompositionManifest } from '../../../packages/compositions/src/index.mjs';
+import { collectMockContribution, recordMockRender } from './helpers/comfy-contribution.mjs';
 
 function project(t) {
   const root = mkdtempSync(join(tmpdir(), 'composition-integration-'));
@@ -15,7 +16,11 @@ function project(t) {
   const source = join(root, 'source');
   cpSync(new URL('../../../examples/composition-stories/', import.meta.url), source, { recursive: true });
   const packagePath = join(source, 'package.json');
-  return { root, source, packagePath, pkg: JSON.parse(readFileSync(packagePath)) };
+  const pkg = JSON.parse(readFileSync(packagePath));
+  pkg.scenes.unshift({ id: 's_mock_plate', layout: 'title', copy: { headline: 'Editorial context' }, preferredFrames: 90 });
+  collectMockContribution(pkg, source);
+  writeFileSync(packagePath, JSON.stringify(pkg));
+  return { root, source, packagePath, pkg };
 }
 
 test('isolated pipeline snapshot and exported ZIP preserve editable composition source', async t => {
@@ -71,12 +76,13 @@ test('composition export reuse follows source, media sidecar, removal, readditio
 });
 
 test('verified pipeline video may be reused only with its exact bytes', async t => {
-  const { root, packagePath, pkg } = project(t);
+  const { root, source, packagePath, pkg } = project(t);
   const exportsDir = join(root, 'exports');
   const dir = join(exportsDir, pkg.id);
   mkdirSync(dir, { recursive: true });
   const video = Buffer.from('verified current run');
   writeFileSync(join(dir, 'video.mp4'), video);
+  recordMockRender(pkg, source, join(dir, 'video.mp4'));
   const exporter = createExporter({ exportsDir, materialize: async ({ pkg }) => ({ pkg }), render: () => { throw new Error('unexpected render'); } });
   const result = await exporter({ pkg, packagePath, verifiedVideoSha256: createHash('sha256').update(video).digest('hex') });
   assert.equal(result.reused, true);
@@ -86,7 +92,7 @@ test('verified pipeline video may be reused only with its exact bytes', async t 
 
 test('render fingerprint tracks actual declared asset bytes instead of trusting stale metadata', async t => {
   const { source, pkg } = project(t);
-  mkdirSync(join(source, 'assets'));
+  mkdirSync(join(source, 'assets'), { recursive: true });
   writeFileSync(join(source, 'assets/picture.png'), 'original bytes');
   pkg.assets.a_picture = { file: 'assets/picture.png', sha256: 'unchanged-declaration' };
   const options = { pkg, timeline: {}, sources: [], packageDir: source };

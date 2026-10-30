@@ -17,6 +17,7 @@
 //   illustrative numbers labelled as example data; critique scores each scene
 //   /10 and fixes only the weak ones; the judge is not the builder.
 import { existsSync, readFileSync } from 'node:fs';
+import { piRequest } from '../pi-runtime.js';
 import { dirname, join } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { STYLE_PRESETS, type StylePreset } from '../brief.js';
@@ -139,7 +140,7 @@ export const STYLE_PRESET_ENERGY: Record<StylePreset, string> = {
   'editorial-flat': 'medium',
   'isometric-tech': 'medium',
   'paper-cut': 'medium',
-  'cinematic-dark': 'high',
+  'cinematic-dark': 'medium',
 };
 
 const STYLE_PRESET_ENERGY_REASON: Record<StylePreset, string> = {
@@ -148,7 +149,7 @@ const STYLE_PRESET_ENERGY_REASON: Record<StylePreset, string> = {
   'editorial-flat': 'editorial explainer',
   'isometric-tech': 'technical explainer',
   'paper-cut': 'layered explainer',
-  'cinematic-dark': 'launch or promo grade',
+  'cinematic-dark': 'cinematic grade; does not imply high-energy motion',
 };
 
 function repoRoot(): string {
@@ -302,7 +303,7 @@ export function motionSystemSection(): string {
     '- No idle wobble. Do not bob, breathe, or float a foreground element to fill time. A plate or a procedural background may drift; the type stays still while it is read.',
     `- Exits are faster than entries (${EXIT_TO_ENTRY}).`,
     '- Do not invent numbers. A figure with no source in the brief is labelled "Example data".',
-    'Style preset → default motion.energy (use this when the brief names a look):',
+    'Style preset → fallback motion.energy (only when motion intensity is unspecified; explicit calm/restrained/gentle motion wins over any look):',
     ...presetLines,
     'Transition length at the package fps, in seconds (frames = round(seconds × fps), inside the band):',
     ...bands.map(line => `- ${line}`),
@@ -655,11 +656,11 @@ export async function runMotionCritique(options: {
     sessionId: 'motion-critique',
   };
   let raw = '';
-  for await (const chunk of options.provider.stream(request)) {
+  await piRequest(options.provider, request, chunk => {
     if (chunk.type === 'text') raw += chunk.delta;
     else if (chunk.type === 'error') {
-      return { enabled: true, raw, request, rubric: parseCritiqueReply(raw || '{}', round) };
+      raw = raw || '{}';
     }
-  }
+  });
   return { enabled: true, raw, request, rubric: parseCritiqueReply(raw, round) };
 }

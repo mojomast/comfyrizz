@@ -34,7 +34,7 @@ const MASCOT = {
 
 async function setup(t, calls) {
   const runtimeDir = mkdtempSync(join(tmpdir(), 'ps15-mascot-share-'));
-  const provider = await replayProvider(calls);
+  const provider = await replayProvider(calls, { svgText: '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100"><rect width="100" height="100" fill="#f2f2f2"/><path d="M20 25 L50 40 L80 25 L80 75 L50 60 L20 75 Z" fill="#050505"/></svg>' });
   const runner = createCpuAgentRunner({ runtimeDir, providers: { custom: { baseUrl: provider.url } } });
   t.after(async () => {
     await provider.close();
@@ -71,7 +71,7 @@ function castRepairCalls() {
 }
 
 function repairRequest(provider) {
-  return provider.requests.find(request => JSON.stringify(request.messages).includes('Validation report: the current motion-graphics package is incomplete'));
+  return provider.requests.find(request => JSON.stringify(request.messages).includes('Validation report: the current video package is incomplete'));
 }
 
 function sharedCastProblems(problems) {
@@ -98,7 +98,7 @@ test('PS15 repair prompt names the exact shared mascot cast and every scene lack
   assert.equal(result.live, true);
 
   const request = repairRequest(provider);
-  assert.ok(request, 'the runner sent a motion-graphics repair prompt');
+  assert.ok(request, 'the runner sent the focused video-package repair prompt');
   const prompt = JSON.stringify(request.messages);
   assert.match(prompt, /SHARED_CAST_MISSING/);
   assert.ok(prompt.includes('c_pip'), 'the repair names the exact shared fictional cast id');

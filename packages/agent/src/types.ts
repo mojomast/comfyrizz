@@ -28,7 +28,7 @@ export type ChatChunk =
   /** Provider continuation data; never display as assistant reply text. */
   | { type: 'reasoning'; delta: string }
   | { type: 'tool_call'; id: string; name: string; args: unknown }
-  | { type: 'usage'; input: number; output: number }
+  | { type: 'usage'; input: number; output: number; cacheRead?: number; cacheWrite?: number; reasoningTokens?: number }
   | { type: 'error'; code: string; message?: string; toolCallId?: string }
   | { type: 'done' };
 

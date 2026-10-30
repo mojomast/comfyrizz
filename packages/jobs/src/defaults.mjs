@@ -25,7 +25,7 @@ export const MOTION_GUARD = {
 };
 
 /** A prompt that already directs the camera keeps its own direction. */
-export const CAMERA_MENTIONED = /\b(camera|dolly|pan|tilt|orbit|zoom|push[- ]?in|handheld)\b/i;
+export const CAMERA_MENTIONED = /\b(camera|dolly|pan|tilt|orbit|zoom|push[- ]?in|handheld)\b|\btracking\s+(?:shot|view)\b|(?:^|[.!?]\s*)(?:(?:slow|gentle|steady)\s+)?(?:forward|backward|lateral)\s+move\b/i;
 
 /** Things LTX-2.5 does not do reliably, as warnings rather than refusals (they still render). */
 export const UNRELIABLE_MOTION = [

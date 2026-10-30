@@ -506,6 +506,13 @@ function eventData(kind, payload, nextProduction) {
 function buildEvent(kind, payload, recorded, nextProduction) {
   const type = EVENT_TYPES[kind];
   const event = { type, data: eventData(kind, payload, nextProduction) };
+  // The HTTP facade verifies this optimistic package lock before executing
+  // approval. Keep the reviewed revision with the approval, rather than
+  // inferring it later from whichever package happens to be current.
+  if (kind === 'plan.approve') {
+    delete event.data.packageRevision;
+    if (Number.isSafeInteger(recorded.expected?.packageRevision)) event.data.packageRevision = recorded.expected.packageRevision;
+  }
   if (recorded.userEventId !== undefined) event.userEventId = recorded.userEventId;
   if (recorded.at !== undefined) event.at = recorded.at;
   return event;

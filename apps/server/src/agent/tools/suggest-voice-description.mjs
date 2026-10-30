@@ -12,6 +12,7 @@ import {
   MAX_SAMPLE_LINES,
   validateVoiceDescription,
 } from '../../characters/voice.mjs';
+import { runPiRuntime } from '../../../../../packages/agent/dist/src/pi-runtime.js';
 
 const CONTROL_RE = /[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/;
 const MAX_ATTEMPTS = 2;
@@ -138,21 +139,6 @@ function repairPrompt(error) {
   ].join(' ');
 }
 
-async function readModelText(model, request) {
-  let text = '';
-  for await (const chunk of model.stream(request)) {
-    if (chunk?.type === 'text') text += chunk.delta;
-    if (chunk?.type === 'error') {
-      throw new SuggestVoiceDescriptionError(
-        'VOICE_DESCRIPTION_MODEL_ERROR',
-        `${chunk.code}${chunk.message ? `: ${chunk.message}` : ''}`,
-      );
-    }
-    if (chunk?.type === 'done') break;
-  }
-  return text;
-}
-
 /**
  * Draft a voice description without saving it.
  *
@@ -172,31 +158,34 @@ export async function suggestVoiceDescription(input = {}, context = {}) {
   const signal = context.signal ?? new AbortController().signal;
   const messages = [{ role: 'user', content: userPrompt(sources) }];
 
-  let lastError;
-  for (let attempt = 0; attempt < MAX_ATTEMPTS; attempt += 1) {
+  let lastError, attempt = 0, raw = '', voiceDescription;
+  await runPiRuntime({ model, signal, sessionId: 'suggest-voice-description',
+    prepare: step => {
+      attempt = step; raw = '';
     if (signal.aborted) {
       throw new SuggestVoiceDescriptionError(
         'VOICE_DESCRIPTION_ABORTED',
         'voice description drafting was aborted',
       );
     }
-    const raw = await readModelText(model, {
-      system: SYSTEM_PROMPT,
-      messages,
-      tools: [],
-      signal,
-      sessionId: 'suggest-voice-description',
-    });
+      return { system: SYSTEM_PROMPT, messages, tools: [] };
+    }, onChunk: chunk => {
+      if (chunk.type === 'text') raw += chunk.delta;
+      if (chunk.type === 'error') throw new SuggestVoiceDescriptionError('VOICE_DESCRIPTION_MODEL_ERROR', `${chunk.code}${chunk.message ? `: ${chunk.message}` : ''}`);
+    }, afterModel: () => {
     try {
-      const voiceDescription = validateVoiceDescription(cleanModelText(raw));
-      return { ok: true, status: 'proposed', applied: false, voiceDescription };
+      voiceDescription = validateVoiceDescription(cleanModelText(raw));
+      return 'stop';
     } catch (error) {
       lastError = error;
-      if (!error?.code || attempt === MAX_ATTEMPTS - 1) break;
+      if (!error?.code || attempt === MAX_ATTEMPTS) return 'stop';
       messages.push({ role: 'assistant', content: raw });
       messages.push({ role: 'user', content: repairPrompt(error) });
+      return 'continue';
     }
-  }
+    }, execute: async () => { throw new Error('Voice description is data only'); },
+  });
+  if (voiceDescription) return { ok: true, status: 'proposed', applied: false, voiceDescription };
   throw lastError;
 }
 

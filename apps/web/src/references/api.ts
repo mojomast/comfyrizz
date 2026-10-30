@@ -49,6 +49,8 @@ const MIME_BY_EXTENSION: Record<string, string> = {
   mp4: 'video/mp4',
   mov: 'video/quicktime',
   webm: 'video/webm',
+  wav: 'audio/wav',
+  mp3: 'audio/mpeg',
 };
 
 export function referencesPath(chatId: string, suffix = ''): string {
@@ -57,10 +59,14 @@ export function referencesPath(chatId: string, suffix = ''): string {
 
 function mimeFor(file: ReferenceUploadFile): string {
   const declared = String(file?.type ?? '').split(';')[0].trim().toLowerCase();
-  if (declared) return declared;
   const name = String(file?.name ?? '').toLowerCase();
   const dot = name.lastIndexOf('.');
-  return (dot >= 0 ? MIME_BY_EXTENSION[name.slice(dot + 1)] : undefined) ?? 'application/octet-stream';
+  const extension = dot >= 0 ? name.slice(dot + 1) : '';
+  // Browsers disagree about WAV/MP3 MIME aliases. The accepted extension gives
+  // the upload route one canonical value without changing legacy media uploads.
+  if (extension === 'wav' || extension === 'mp3') return MIME_BY_EXTENSION[extension];
+  if (declared) return declared;
+  return MIME_BY_EXTENSION[extension] ?? 'application/octet-stream';
 }
 
 function newChatId(randomId?: () => string): string {

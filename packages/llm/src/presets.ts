@@ -50,9 +50,9 @@ export function resolveProvider(name: string, options: ResolveOptions = {}): Res
   if (name !== 'custom' && !apiKey) throw new Error(`${name} requires ${preset.apiKeyEnv}`);
   const baseUrl = (options.baseUrl ?? preset.baseUrl).replace(/\/+$/, '');
   const model = options.model ?? preset.defaultModel ?? '';
-  const defaultMaxReasoning = (name === 'opencode-go' && model === 'deepseek-v4.1-flash')
+  const deepSeekFlash = (name === 'opencode-go' && model === 'deepseek-v4.1-flash')
     || (name === 'custom' && baseUrl === 'https://api.deepseek.com/v1' && model === 'deepseek-flash');
-  const reasoningEffort = options.reasoningEffort ?? (defaultMaxReasoning ? 'max' : undefined);
+  const reasoningEffort = options.reasoningEffort ?? (deepSeekFlash ? 'low' : undefined);
   return {
     name,
     baseUrl,
@@ -62,6 +62,9 @@ export function resolveProvider(name: string, options: ResolveOptions = {}): Res
     headers: { ...(preset.headers ?? {}), ...(options.headers ?? {}) },
     sessionHeader: preset.sessionHeader,
     ...(reasoningEffort ? { reasoningEffort } : {}),
+    // Reasoning and emitted tool calls share the output allowance. DeepSeek's
+    // documented thinking default is 64K; 8K can end before any tool is emitted.
+    ...(deepSeekFlash ? { maxTokens: 65_536 } : {}),
     status: preset.status,
   };
 }

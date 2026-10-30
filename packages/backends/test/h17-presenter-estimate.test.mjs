@@ -27,6 +27,8 @@ const backend = () =>
 
 test("the presenter is priced per video-second, not per job (H17)", async () => {
   const pkg = JSON.parse(readFileSync(FIXTURE, "utf8"));
+  // Enabling a presenter globally is not a placement of its generated output.
+  pkg.scenes[0].presenter_asset = "a_presenter";
   const jobs = planJobs(pkg).jobs;
   const presenter = jobs.find((job) => job.kind === "presenter");
   assert.ok(presenter, "the fixture plans a presenter");

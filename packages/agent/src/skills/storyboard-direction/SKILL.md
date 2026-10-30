@@ -1,26 +1,45 @@
 ---
 name: storyboard-direction
 metadata:
-  version: "1.4.0"
+  version: "1.4.1"
 description: Make each scene communicate through a concrete, consistent visual mechanism.
 ---
 # Storyboard direction
 
-Give every scene a story job before choosing a look: introduce, explain a mechanism,
-compare, prove a claim, trace a process, or land a conclusion. Then pick the layout
-that performs it. Title for a hook or chapter; hero for one idea with a visual; list
-for steps or a small set; stat for one sourced number; chart for a sourced series;
-split or compare for exactly two labeled plates; code for real terminal or code
-evidence. Reuse a narrow set of forms across the film.
+For drawn animation, describe the subject, construction order, continuity and final
+hold. Respect the requested medium; make solid objects legible with planes and
+edges. A conversational plan describes the visual intent, not drawing tool calls
+or a promise that the geometry has already been rendered.
 
-In visual (<=512 characters), name the subject, framing, observable relationship or
-action, resulting state, and continuity anchor. Example: "Same teal receipt, now
-grouped beneath Project Atlas; close detail makes the project label readable;
-cream background, lower caption band clear." This is direction, not executable
-animation. Procedural renders a mesh/text layout plus supported recipes; use actual
-SVG geometry for diagrams, real supplied evidence for product claims, and label
-reconstructions as illustrative. Keep exact labels in editable text or SVG, not
-generated pixels. A generic dashboard cannot prove a workflow.
+Give each scene a story job. Choose title for a hook, hero for one idea, list for
+steps, stat or chart for sourced data, split/compare for two labeled plates, and
+code for real terminal or code evidence. Reuse a narrow set of forms.
+
+For attached CSV data stories, inspect column names and use context.query_csv for
+exact filtered counts and distinct values. Use storyboard.csv_tile_wall after
+proposing the scene to render one tile per selected row directly from the source.
+Match category values exactly, state exclusions, and retain the source identity.
+Labels must describe the actual filter, not an inferred outcome: inspect related
+fields before equating classification with finishing, retirement, or causation.
+For each number name the specific counted category and scope, including whether
+the final event is included. A wall follows source order, not necessarily date order;
+inspect the date/sequence fields and verify chronology before describing it as such.
+Give categories an explicit key with text as well as color. Use actual data-backed
+marks for requested event tiles rather than generic icons. Reserve space for the
+ending, keep text inside the safe area, and review opening, ending, and contrast in
+rendered frames. A revision to editorial claims or authored visuals requires the
+normal model/edit workflow and another review; a render alone cannot correct them.
+For explicitly requested per-tile labels, use csv_tile_wall label_column with the
+actual source column and check the resulting labels in rendered frames. A tile
+reveal is not a camera pullback: do not promise a pullback unless the scene has
+an actual supported camera movement. Do not describe tiles as visible in a scene
+without building the corresponding visual in that scene.
+
+In visual (<=512 characters), name subject, framing, action, resulting state and
+continuity anchor. This is direction, not executable animation. Use actual SVG
+geometry for diagrams, supplied evidence for product claims, and label
+reconstructions as illustrative. Keep labels editable. A generic dashboard
+cannot prove a workflow.
 
 Keep visual semantics stable. The same entity should retain its color, shape, label,
 and relative role. Use the supplied palette and reuse recognizable motifs instead of
@@ -103,28 +122,10 @@ rather than claiming visual, audio or timing checks passed.
 
 ### Native reference-conditioned video
 
-For FastH3 Omni, distinguish reference conditioning from fixed-frame anchoring.
-Assign each image a role (identity, composition, environment); duplicate images
-do not lock the opening frame. Inspect references before motion generation:
-character count, costume, anatomy, required prop, hand/shoulder contact, framing
-and visible cause/result must match the shot. A portrait cannot stand in for an
-evidence insert. Describe an unoccupied console positively as an unoccupied set;
-an offscreen voice does not need a visible person. Prefer one readable action and
-one speaker per short shot.
-
-Use the model's full-reference structure: subject_definitions, summary,
-retention_analysis, detailed_description, overall_soundscape, non_diegetic_music.
-Keep reference labels stable; bind a voice reference to its speaker (S1), and put
-exact spoken words only inside <d>[English] words.</d> in [Shot 1]. For generated
-speech, mark audio as reference, not fully_copy. State delivery outside dialogue.
-Specify physical sound and N/A for absent score. BasicGuider has no negative
-branch: prefer explicit desired composition over lists of forbidden objects.
-These are authoring directions; use only fields exposed by the current tool.
-
-Keep Omni's release-specific 8-step recipe; older FastH3/base-H3 settings describe
-different checkpoints. Validate a small representative set before a full batch.
-Review natural-speed motion, speech, lip sync and cut boundaries; successful
-decoding or ASR alone cannot approve acting, identity or story accuracy.
+For reference-conditioned video, references do not lock frames. Describe identity,
+composition, props and one observable action per short shot. Review character count,
+contact, framing, sound, motion and cuts when evidence is available; decoding or ASR
+alone cannot approve acting, identity or story accuracy.
 
 ## Sources
 

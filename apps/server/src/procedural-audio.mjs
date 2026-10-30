@@ -4,14 +4,14 @@ import { join } from 'node:path';
 import { synthesizeFinishingWav } from '../../../packages/agent/dist/src/finishing-audio.js';
 
 /** Add a real deterministic PCM stem to the editable package; no GPU or model call. */
-export function applyProceduralFinishingAudio(pkg, { plan, assetsDir, seed = 1 }) {
+export function applyProceduralFinishingAudio(pkg, { plan, assetsDir, seed = 1, assetId = 'a_finishing_mix' }) {
   const text = String(plan ?? '').trim();
   if (!text) throw new Error('an audio direction is required');
   const fps = Number(pkg?.format?.fps) > 0 ? Number(pkg.format.fps) : 30;
   const seconds = (pkg.scenes ?? []).reduce((sum, scene) => sum + (Number(scene?.preferredFrames) || 0), 0) / fps;
   if (!(seconds > 0)) throw new Error('the project has no timeline to score');
   const stem = synthesizeFinishingWav(text, seconds, seed);
-  const assetId = 'a_finishing_mix';
+  if (!/^a_[A-Za-z0-9_-]+$/.test(assetId)) throw new Error('invalid finishing audio asset id');
   mkdirSync(assetsDir, { recursive: true });
   writeFileSync(join(assetsDir, `${assetId}.wav`), stem.wav);
   const next = structuredClone(pkg);

@@ -1,4 +1,5 @@
 import { copyFileSync, cpSync, existsSync, mkdirSync, readFileSync, rmSync, statSync } from 'node:fs';
+import { recordGenerationReceipts, assertModelContribution, recordRenderedContribution } from '../../../packages/jobs/src/model-contribution.mjs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { planJobs } from '../../../packages/jobs/src/index.mjs';
@@ -13,7 +14,7 @@ import { resolveBrowserExecutable } from '../../renderer/scripts/browser-executa
 import { pipelineCommand } from './pipeline-process.mjs';
 import { copyNamedAssets } from './run-assets.mjs';
 import { json, writeJson, preparePresenterInputs, correctPresenters, presenterScenes } from './pipeline-media.mjs';
-import { summarizeJobs, syncnetConfigured, SYNCNET_RUNTIME_SKIP_CODE, SYNCNET_SKIP_MESSAGE } from './pipeline-contract.mjs';
+import { summarizeJobs, syncnetConfigured, SYNCNET_RUNTIME_SKIP_CODE, SYNCNET_SKIP_MESSAGE, musicPerformanceScenes, MUSIC_SYNC_SKIP_CODE, MUSIC_SYNC_SKIP_MESSAGE } from './pipeline-contract.mjs';
 import { assessBudget, nextJobUpperEstimate, rateForGpu, reserveUnitsFor, spendingMinutes, COLLECT_AND_STOP_RESERVE_MINUTES } from '../../../packages/backends/src/budget.mjs';
 import { decideRenderFallback } from '../../../packages/backends/src/colab-render-plan.mjs';
 import { redactForLog } from '../../../packages/backends/src/colab-plan.mjs';
@@ -86,6 +87,9 @@ async function releaseHeld(reason) {
 
 async function main() {
   let pkg = json(packagePath), renderResult;
+  for (const scene of musicPerformanceScenes(pkg)) {
+    send({ kind: 'warning', stageId: 'preflight', sceneId: scene.id, code: MUSIC_SYNC_SKIP_CODE, message: MUSIC_SYNC_SKIP_MESSAGE });
+  }
   const syncnetReady = syncnetConfigured(process.env);
   const remoteRender = plan.remoteRender === true && plan.options?.backendId === 'colab' && plan.options?.renderLocation === 'colab';
   await stage('preflight', async () => {
@@ -249,6 +253,16 @@ with zipfile.ZipFile(sys.argv[1]) as z:
       }
     }
     const collected = colab ? join(scratch, 'out') : outDir;
+    if (heldBackend && typeof heldBackend.downloadListed === 'function') {
+      // Remote rendering still requires local verification of generation provenance.
+      // Fetch the contribution and captured graph before paying for the render.
+      const files = (result.manifest?.jobs ?? []).filter(entry => entry.status === 'succeeded').flatMap(entry => (entry.outputs ?? []).flatMap(output => {
+        const file = output.relative ?? output.file;
+        return typeof file === 'string' ? [file, file.replace(/\.[^/.]+$/, '.workflow.api.json')] : [];
+      }));
+      await heldBackend.downloadListed(files, collected, { onEvent: sourceEvent });
+      recordGenerationReceipts({ manifest: result.manifest, jobsDoc: result.jobsDoc, outputDir: collected, backend: backend.id });
+    }
     copyNamedAssets({ pkg: result.package, outputDir: collected, packageDir: workDir });
     pkg = result.package; writeJson(packagePath, pkg);
   }, jobs.length === 0);
@@ -271,6 +285,7 @@ with zipfile.ZipFile(sys.argv[1]) as z:
   }, !plan.presenters);
 
   await stage('render', async () => {
+    assertModelContribution({ pkg: json(packagePath), packageDir: workDir });
     const localRender = async () => {
       renderResult = await render(packagePath, join(runDir, 'video.mp4'), { signal, onEvent: event => progress(event.phase, event.progress) });
       // Only the isolated run snapshot receives derived assets; the saved project
@@ -361,6 +376,9 @@ with zipfile.ZipFile(sys.argv[1]) as z:
         report.checks.narrationEnvelope = narration.passed === true;
       }
       if (Object.values(report.checks).some(value => !value)) throw new Error('Final video verification failed');
+      const verifiedPackage = json(packagePath);
+      report.modelContribution = recordRenderedContribution({ pkg: verifiedPackage, packageDir: workDir,
+        timeline: compileTimeline(verifiedPackage, narrationOptions(workDir)), videoPath: join(runDir, 'video.mp4') });
     } catch (error) {
       report.error = error.message;
       if (plan.voiced && report.checks.narrationEnvelope === undefined) report.checks.narrationEnvelope = false;

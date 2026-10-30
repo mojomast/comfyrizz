@@ -8,6 +8,7 @@ import {
   ROLES,
   SCHEMA,
   STORED_EXTENSIONS,
+  USAGES,
   ReferenceValidationError,
   makeReference,
   refId,
@@ -59,6 +60,7 @@ test('R01: makeReference returns a frozen comfyrizz.reference/v1 record', () => 
   assert.equal(reference.height, 480);
   assert.equal(reference.durationSec, null);
   assert.equal(reference.role, 'style');
+  assert.equal(reference.usage, 'reference');
   assert.equal(reference.note, 'warm film grain');
   assert.equal(reference.label, 'grain.png');
   assert.equal(reference.createdAt, '2026-10-20T12:00:00.000Z');
@@ -79,6 +81,7 @@ test('R01: id, file, role, note and label have safe defaults', () => {
   assert.equal(reference.id, ID);
   assert.equal(reference.file, `${ID}.png`);
   assert.equal(reference.role, 'other');
+  assert.equal(reference.usage, 'reference');
   assert.equal(reference.note, '');
   assert.equal(reference.label, '');
   assert.equal('durationSec' in reference, false);
@@ -155,13 +158,16 @@ test('R01: labels are trimmed and capped at 80 characters', () => {
   );
 });
 
-test('R01: validatePatch accepts only role, note and label and normalises them', () => {
-  const patch = validatePatch({ role: 'product', note: '  keep label readable  ', label: '  grinder  ' });
-  assert.deepEqual(patch, { role: 'product', note: 'keep label readable', label: 'grinder' });
+test('R01: validatePatch accepts role, note, label and explicit usage and normalises them', () => {
+  const patch = validatePatch({ role: 'product', usage: ' editorial ', note: '  keep label readable  ', label: '  grinder  ' });
+  assert.deepEqual(patch, { role: 'product', usage: 'editorial', note: 'keep label readable', label: 'grinder' });
   assert.equal(Object.isFrozen(patch), true);
+  assert.deepEqual(USAGES, ['reference', 'editorial']);
+  assert.equal(makeReference({ ...base, usage: 'editorial' }).usage, 'editorial');
 
   assert.deepEqual(validatePatch({}), {});
   assert.deepEqual(validatePatch({ note: undefined }), {});
+  assert.throws(() => validatePatch({ usage: 'public' }), fieldError('usage', 'INVALID_USAGE'));
 });
 
 test('R01: validatePatch rejects unknown fields without mutating the input', () => {
@@ -296,10 +302,10 @@ test('R01: kind and mime must agree and stay within the supported types', () => 
     fieldError('mime', 'UNSUPPORTED_MIME'),
   );
   assert.throws(
-    () => makeReference({ ...base, kind: 'audio', mime: 'video/mp4' }),
+    () => makeReference({ ...base, kind: 'document', mime: 'video/mp4' }),
     fieldError('kind', 'INVALID_KIND'),
   );
-  assert.deepEqual(KINDS, ['image', 'video']);
+  assert.deepEqual(KINDS, ['image', 'video', 'audio']);
 });
 
 test('R01: numeric metadata is validated field by field', () => {
@@ -320,6 +326,45 @@ test('R01: numeric metadata is validated field by field', () => {
   });
   assert.equal(video.kind, 'video');
   assert.equal(video.durationSec, 12.5);
+});
+
+test('R01: audio songs need duration but never fake pixel dimensions', () => {
+  const song = makeReference({
+    ...base,
+    kind: 'audio',
+    mime: 'audio/mpeg',
+    file: undefined,
+    role: 'song',
+    durationSec: 185.25,
+    codec: 'mp3',
+    sampleRate: 48000,
+    channels: 2,
+  });
+
+  assert.equal(song.kind, 'audio');
+  assert.equal(song.role, 'song');
+  assert.equal(song.file, `${ID}.mp3`);
+  assert.equal(song.durationSec, 185.25);
+  assert.equal(song.codec, 'mp3');
+  assert.equal(song.sampleRate, 48000);
+  assert.equal(song.channels, 2);
+  assert.equal(song.usage, 'reference');
+  assert.equal('width' in song, false);
+  assert.equal('height' in song, false);
+
+  assert.equal(makeReference({
+    ...base,
+    kind: 'audio',
+    mime: 'audio/wav',
+    file: undefined,
+    durationSec: 1,
+  }).file, `${ID}.wav`);
+  for (const durationSec of [undefined, null, 0, -1, Number.NaN, Number.POSITIVE_INFINITY]) {
+    assert.throws(
+      () => makeReference({ ...base, kind: 'audio', mime: 'audio/mpeg', file: undefined, durationSec }),
+      fieldError('durationSec', 'INVALID_DURATION'),
+    );
+  }
 });
 
 test('R01: createdAt defaults to a valid ISO timestamp and rejects junk', () => {

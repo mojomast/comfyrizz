@@ -20,6 +20,7 @@ import test from 'node:test';
 import { createApp } from '../src/app.mjs';
 import { ITERATION_PRESETS } from '../src/productions/iteration.mjs';
 import { createProductionStore } from '../src/productions/store.mjs';
+import { collectMockContribution } from './helpers/comfy-contribution.mjs';
 
 const TOKEN = 'ux21f-app-mounts-token-0123456789';
 const SCENE_ID = 's_title';
@@ -101,6 +102,8 @@ async function mount(t, runtimeDir) {
 }
 
 async function createProduction(env, pkg, suffix) {
+  collectMockContribution(pkg, env.app.store.dir);
+  env.app.store.write(pkg);
   const created = await env.call('POST', '/api/productions', {
     commandId: `cmd_create_${suffix}`,
     idempotencyKey: `key_create_${suffix}`,

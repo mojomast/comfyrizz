@@ -91,6 +91,11 @@ function updateBuild(state, event) {
   }
 }
 
+const USAGE_METADATA = ['cacheRead', 'cacheWrite', 'reasoningTokens'];
+function usageMetadata(value) {
+  return Object.fromEntries(USAGE_METADATA.filter(key => Number.isFinite(value?.[key])).map(key => [key, value[key]]));
+}
+
 function sanitizedEvent(event) {
   const out = {};
   for (const [key, value] of Object.entries(event ?? {})) {
@@ -110,7 +115,7 @@ function sanitizedEvent(event) {
     } else if (key === 'issues' && Array.isArray(value)) {
       out.issues = value.slice(0, 30).map(issue => ({ path: String(issue?.path ?? '').slice(0, 200), message: String(issue?.message ?? '').slice(0, 300) }));
     } else if (key === 'usage' && value && typeof value === 'object') {
-      out.usage = { input: Number(value.input) || 0, output: Number(value.output) || 0 };
+      out.usage = { input: Number(value.input) || 0, output: Number(value.output) || 0, ...usageMetadata(value) };
     } else if (value === null || ['string', 'number', 'boolean'].includes(typeof value)) {
       out[key] = value;
     } else if (Array.isArray(value) && value.every(item => typeof item === 'string')) {
@@ -141,6 +146,7 @@ export function createAgentProgress(sessionId, now = () => Date.now()) {
     lastModel: null,
     lastTool: null,
     usage: { input: 0, output: 0 },
+    svgUsage: { input: 0, output: 0, requests: 0, reportedRequests: 0 },
     problems: null,
     message: null,
     build: null,
@@ -154,6 +160,12 @@ export function createAgentProgress(sessionId, now = () => Date.now()) {
   function setPhaseUsage(phase, usage) {
     const next = { input: Number(usage?.input) || 0, output: Number(usage?.output) || 0 };
     const previous = phaseContribution.get(phase) ?? { input: 0, output: 0 };
+    for (const key of USAGE_METADATA) {
+      if (Number.isFinite(usage?.[key])) {
+        next[key] = usage[key];
+        state.usage[key] = (state.usage[key] ?? 0) + next[key] - (previous[key] ?? 0);
+      } else if (previous[key] !== undefined) next[key] = previous[key];
+    }
     state.usage.input += next.input - previous.input;
     state.usage.output += next.output - previous.output;
     phaseContribution.set(phase, next);
@@ -164,6 +176,7 @@ export function createAgentProgress(sessionId, now = () => Date.now()) {
     setPhaseUsage(phase, {
       input: previous.input + (Number(usage?.input) || 0),
       output: previous.output + (Number(usage?.output) || 0),
+      ...Object.fromEntries(Object.entries(usageMetadata(usage)).map(([key, value]) => [key, (previous[key] ?? 0) + value])),
     });
   }
 
@@ -190,6 +203,19 @@ export function createAgentProgress(sessionId, now = () => Date.now()) {
       state.activity = 'model_complete';
       state.lastModel = safe;
       if (safe.usage) addStepUsage(phaseName(safe), safe.usage);
+    } else if (safe.type === 'svg_generation_usage') {
+      state.svgUsage.requests += 1;
+      if (safe.usage) {
+        state.svgUsage.reportedRequests += 1;
+        state.svgUsage.input += safe.usage.input;
+        state.svgUsage.output += safe.usage.output;
+        state.usage.input += safe.usage.input;
+        state.usage.output += safe.usage.output;
+        for (const [key, value] of Object.entries(usageMetadata(safe.usage))) {
+          state.svgUsage[key] = (state.svgUsage[key] ?? 0) + value;
+          state.usage[key] = (state.usage[key] ?? 0) + value;
+        }
+      }
     } else if (safe.type === 'tool_call') {
       state.activity = 'tool_running';
       state.tool = safe.name ?? null;
@@ -222,7 +248,7 @@ export function createAgentProgress(sessionId, now = () => Date.now()) {
       startedAt: new Date(startedAt).toISOString(),
       updatedAt: new Date(now()).toISOString(),
       elapsedMs: Math.max(0, (finishedAt ?? now()) - startedAt),
-      usage: { ...state.usage, total: state.usage.input + state.usage.output },
+      usage: { ...state.usage, total: state.usage.input + state.usage.output, ...(state.svgUsage.requests ? { svg: { ...state.svgUsage } } : {}) },
       recentEvents: events.slice(-30),
     };
   }

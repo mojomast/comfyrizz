@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
-import { isMediaKind, isMissingMedia, isRenderableMedia, listMediaFiles, normalizeScrim, resolveSceneMedia } from '../src/media-model.js';
+import { isMediaKind, isMissingMedia, isRenderableMedia, listMediaFiles, mediaPlaybackDurationSeconds, normalizeScrim, resolveSceneMedia } from '../src/media-model.js';
 import { contrastText, textColors } from '../src/theme-model.js';
 
 const here = dirname(fileURLToPath(import.meta.url));
@@ -92,6 +92,24 @@ test('text colours never depend on an unusable palette[0]', () => {
 test('the launch-demo palette keeps its exact original text colours', () => {
   const pkg = { theme: { palette: ['#0d0f14', '#1b2440', '#6d8cff', '#e6e8ee'] } };
   assert.deepEqual(textColors(pkg), { primary: '#e6e8ee', muted: '#6d8cff', onAccent: '#0d0f14' });
+});
+
+test('uploaded video durationSeconds is used when the probe has no frame count', () => {
+  // Typical reviewed-upload metadata: ffprobe measured duration and dimensions,
+  // but no expensive decoded packet/frame count.
+  const uploaded = {
+    kind: 'video',
+    origin: 'upload',
+    status: 'ready',
+    file: 'uploads/reviewed-performance.mp4',
+    sha256: 'b'.repeat(64),
+    bytes: 1234567,
+    media: { width: 1920, height: 1080, durationSeconds: 7.375, audio: 'present', codec: 'h264' },
+  };
+  assert.equal(mediaPlaybackDurationSeconds(uploaded), 7.375);
+  assert.equal(mediaPlaybackDurationSeconds({ media: { frames: 96, fps: 24, durationSeconds: 99 } }), 4, 'explicit frames keep legacy timing');
+  assert.equal(mediaPlaybackDurationSeconds({ media: { durationSeconds: 7.375 } }), 7.375, 'fps is not required with measured duration');
+  assert.equal(mediaPlaybackDurationSeconds({ media: {} }), 97 / 24, 'only absent measured metadata uses the legacy fallback');
 });
 
 test('a pending GPU slot is not renderable until it has a file', () => {

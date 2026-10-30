@@ -2,6 +2,7 @@ export interface PreviewAudioRequest {
   assetId: string;
   file: string;
   cacheKey: string;
+  kind?: 'font';
 }
 
 export interface PreviewMediaPlan {
@@ -27,6 +28,10 @@ export function previewMediaPlan(pkg: any, cachedSources: Record<string, string>
   const requests: PreviewAudioRequest[] = [];
   const missingMedia: string[] = [];
   const assets = pkg?.assets && typeof pkg.assets === 'object' ? pkg.assets : {};
+  for (const font of Array.isArray(pkg?.theme?.fonts) ? pkg.theme.fonts : []) {
+    const file = typeof font?.file === 'string' ? font.file : '';
+    if (file && !sources[file]) requests.push({ assetId: '', file, cacheKey: `font:${pkg?.revision ?? 0}:${file}`, kind: 'font' });
+  }
   for (const [assetId, asset] of Object.entries<any>(assets)) {
     const file = typeof asset?.file === 'string' ? asset.file : '';
     if (!file) continue;

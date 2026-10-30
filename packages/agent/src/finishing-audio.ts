@@ -1,6 +1,6 @@
 const SAMPLE_RATE = 24000;
 
-type FinishingTheme = 'paper' | 'storm' | 'percussion' | 'noir' | 'ambient';
+type FinishingTheme = 'paper' | 'storm' | 'percussion' | 'noir' | 'score' | 'ambient';
 
 function random(seed: number): () => number {
   let state = seed >>> 0 || 1;
@@ -15,6 +15,7 @@ function finishingTheme(text: string): FinishingTheme {
   if (/salt|brine|storm|squall|rake|thunder/.test(text)) return 'storm';
   if (/prepared.piano|player piano|percussion|floor thump|stomp|call.and.response/.test(text)) return 'percussion';
   if (/locksmith|brass key|shadow key|noir|metal awning/.test(text)) return 'noir';
+  if (/instrumental|felt piano|arpeggio|score|soundtrack|music|melody|warm pad/.test(text)) return 'score';
   return 'ambient';
 }
 
@@ -116,6 +117,34 @@ export function synthesizeFinishingWav(plan: string, seconds: number, seed = 1):
       if (drawer >= 0 && drawer < 1.4) sample += noise * Math.sin(Math.PI * drawer / 1.4) * 2.2;
       const finalNote = t - duration * 0.84;
       if (finalNote >= 0) sample += Math.sin(2 * Math.PI * 82.41 * finalNote) * Math.exp(-finalNote * 1.8) * 0.065;
+    } else if (theme === 'score') {
+      // A real deterministic instrumental bed: four-bar harmony, felt bass,
+      // bell arpeggio and a restrained kick/brush pulse. It is original CPU
+      // synthesis, not a stock loop or an AI music-model claim.
+      const beat = 60 / 96;
+      const bar = beat * 4;
+      const localBar = t % bar;
+      const chords = [
+        [220, 261.63, 329.63],
+        [174.61, 220, 261.63],
+        [130.81, 164.81, 196],
+        [196, 246.94, 293.66],
+      ];
+      const chord = chords[Math.floor(t / bar) % chords.length];
+      const padEnvelope = Math.max(0, Math.min(1, localBar / 0.3, (bar - localBar) / 0.45));
+      for (const frequency of chord) {
+        sample += (Math.sin(2 * Math.PI * frequency * t) + 0.22 * Math.sin(2 * Math.PI * frequency * 2 * t)) * padEnvelope * 0.018;
+      }
+      const beatPhase = t % beat;
+      sample += Math.sin(2 * Math.PI * chord[0] * 0.5 * beatPhase) * Math.exp(-beatPhase * 3.5) * 0.065;
+      sample += Math.sin(2 * Math.PI * 55 * beatPhase) * Math.exp(-beatPhase * 24) * 0.11;
+      sample += white * Math.exp(-beatPhase * 70) * 0.018;
+      const arpStep = Math.floor(t / (beat / 2));
+      const arpPhase = t % (beat / 2);
+      const arpFrequency = chord[arpStep % chord.length] * (arpStep % 8 >= 6 ? 4 : 2);
+      sample += (Math.sin(2 * Math.PI * arpFrequency * arpPhase) + 0.3 * Math.sin(2 * Math.PI * arpFrequency * 2.01 * arpPhase)) * Math.exp(-arpPhase * 12) * 0.055;
+      const brushPhase = (beatPhase + beat / 2) % beat;
+      if (beatPhase >= beat / 2) sample += noise * Math.exp(-brushPhase * 18) * 0.12;
     } else {
       const phase = t % 1.6;
       const root = /warm|major|playful/.test(localText) ? 110 : 103.83;

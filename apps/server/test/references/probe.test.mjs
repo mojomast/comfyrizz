@@ -5,7 +5,14 @@ import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { promisify } from 'node:util';
-import { probeImage, probeVideo, MAX_VIDEO_DURATION_SEC, PROBE_TIMEOUT_MS } from '../../src/references/probe.mjs';
+import {
+  MAX_AUDIO_DURATION_SEC,
+  MAX_VIDEO_DURATION_SEC,
+  PROBE_TIMEOUT_MS,
+  probeAudio,
+  probeImage,
+  probeVideo,
+} from '../../src/references/probe.mjs';
 
 const execFileAsync = promisify(execFile);
 
@@ -88,6 +95,13 @@ function ffprobeJson({ width = 1920, height = 1080, duration = '12.5', fps = '30
   });
 }
 
+function ffprobeAudioJson({ duration = '185.25', codec = 'mp3', sampleRate = '48000', channels = 2 } = {}) {
+  return JSON.stringify({
+    streams: [{ codec_name: codec, sample_rate: sampleRate, channels }],
+    format: { duration },
+  });
+}
+
 const isCode = code => error => {
   assert.equal(error.code, code, error.message);
   return true;
@@ -147,6 +161,7 @@ test('probeVideo parses stream and format entries, including 30000/1001 fps', as
     height: 1080,
     durationSec: 12.5,
     fps: 30000 / 1001,
+    frames: 375,
   });
   assert.equal(calls.length, 1);
 });
@@ -167,8 +182,7 @@ test('probeVideo sends ffprobe an argument array with the path as one argument',
   assert.ok(Array.isArray(args));
   assert.deepEqual(args, [
     '-v', 'error',
-    '-select_streams', 'v:0',
-    '-show_entries', 'stream=width,height,r_frame_rate,nb_frames:format=duration',
+    '-show_entries', 'stream=codec_type,width,height,r_frame_rate,avg_frame_rate,nb_frames:format=duration',
     '-of', 'json',
     file,
   ]);
@@ -202,6 +216,23 @@ test('probeVideo rejects videos longer than 60 seconds with TOO_LONG', async () 
   assert.equal(boundary.durationSec, 60);
 });
 
+test('probeVideo rejects unknown and invalid durations instead of skipping its cap', async () => {
+  await assert.rejects(
+    probeVideo('unknown.mp4', { exec: async () => JSON.stringify({ streams: [{ width: 8, height: 6 }], format: {} }) }),
+    isCode('UNKNOWN_DURATION'),
+  );
+  for (const duration of [null, 'N/A', 'not-a-number', Number.NaN, Number.POSITIVE_INFINITY]) {
+    await assert.rejects(
+      probeVideo('unknown.mp4', { exec: async () => ({ stdout: ffprobeJson({ duration }) }) }),
+      isCode('UNKNOWN_DURATION'),
+    );
+  }
+  await assert.rejects(
+    probeVideo('negative.mp4', { exec: async () => ({ stdout: ffprobeJson({ duration: '-1' }) }) }),
+    isCode('INVALID_DURATION'),
+  );
+});
+
 test('probeVideo rejects a file without a video stream with NO_VIDEO_STREAM', async () => {
   await assert.rejects(
     probeVideo('audio.mp4', { exec: async () => ({ stdout: JSON.stringify({ streams: [], format: { duration: '3' } }) }) }),
@@ -225,7 +256,7 @@ test('probeVideo accepts string output and stdout from a failed exec call', asyn
   const fromFailure = await probeVideo('clip.mp4', {
     exec: async () => { throw failure; },
   });
-  assert.deepEqual(fromFailure, { width: 640, height: 360, durationSec: 5, fps: 30000 / 1001 });
+  assert.deepEqual(fromFailure, { width: 640, height: 360, durationSec: 5, fps: 30000 / 1001, frames: 375 });
 });
 
 test('probeVideo fails closed without an exec function or readable JSON', async () => {
@@ -235,6 +266,96 @@ test('probeVideo fails closed without an exec function or readable JSON', async 
     probeVideo('clip.mp4', { exec: async () => 'not json' }),
     isCode('PROBE_FAILED'),
   );
+});
+
+test('probeVideo records audio-stream presence without confusing it with the video stream', async () => {
+  const present = await probeVideo('performance.mp4', {
+    exec: async () => JSON.stringify({
+      streams: [
+        { codec_type: 'audio', codec_name: 'aac' },
+        { codec_type: 'video', width: 1280, height: 720, r_frame_rate: '25/1', nb_frames: 'N/A' },
+      ],
+      format: { duration: '8' },
+    }),
+  });
+  assert.deepEqual(present, { width: 1280, height: 720, durationSec: 8, fps: 25, audio: 'present' });
+
+  const absent = await probeVideo('silent.mp4', {
+    exec: async () => JSON.stringify({
+      streams: [{ codec_type: 'video', width: 1280, height: 720, r_frame_rate: '25/1' }],
+      format: { duration: '8' },
+    }),
+  });
+  assert.equal(absent.audio, 'none');
+});
+
+test('probeAudio returns duration and stream metadata with safe ffprobe arguments', async () => {
+  const file = 'virtual/song with spaces;not-a-command.mp3';
+  const calls = [];
+  const result = await probeAudio(file, {
+    timeoutMs: 2345,
+    exec: async (command, args, options) => {
+      calls.push({ command, args, options });
+      return { stdout: ffprobeAudioJson() };
+    },
+  });
+
+  assert.deepEqual(result, { durationSec: 185.25, codec: 'mp3', sampleRate: 48000, channels: 2 });
+  assert.equal(calls.length, 1);
+  const [{ command, args, options }] = calls;
+  assert.equal(command, 'ffprobe');
+  assert.ok(Array.isArray(args));
+  assert.deepEqual(args, [
+    '-v', 'error',
+    '-select_streams', 'a:0',
+    '-show_entries', 'stream=codec_name,sample_rate,channels,duration:format=duration',
+    '-of', 'json',
+    file,
+  ]);
+  assert.equal(args.filter(arg => arg === file).length, 1);
+  assert.deepEqual(options, { timeoutMs: 2345 });
+});
+
+test('probeAudio uses stream duration as a fallback and enforces the 300 second cap', async () => {
+  const fromStream = await probeAudio('song.wav', {
+    exec: async () => JSON.stringify({
+      streams: [{ codec_name: 'pcm_s16le', sample_rate: '44100', channels: 2, duration: '300' }],
+      format: {},
+    }),
+  });
+  assert.deepEqual(fromStream, { durationSec: 300, codec: 'pcm_s16le', sampleRate: 44100, channels: 2 });
+  assert.equal(MAX_AUDIO_DURATION_SEC, 300);
+
+  await assert.rejects(
+    probeAudio('long.mp3', { exec: async () => ffprobeAudioJson({ duration: '300.001' }) }),
+    isCode('TOO_LONG'),
+  );
+});
+
+test('probeAudio rejects no stream, unknown duration and invalid duration', async () => {
+  await assert.rejects(
+    probeAudio('silent-container.mp3', { exec: async () => ({ stdout: '{"streams":[],"format":{"duration":"2"}}' }) }),
+    isCode('NO_AUDIO_STREAM'),
+  );
+  await assert.rejects(
+    probeAudio('unknown.mp3', { exec: async () => JSON.stringify({ streams: [{ codec_name: 'mp3' }], format: {} }) }),
+    isCode('UNKNOWN_DURATION'),
+  );
+  for (const duration of [null, 'N/A', 'bogus', Number.NaN, Number.POSITIVE_INFINITY]) {
+    await assert.rejects(
+      probeAudio('unknown.mp3', { exec: async () => ({ stdout: ffprobeAudioJson({ duration }) }) }),
+      isCode('UNKNOWN_DURATION'),
+    );
+  }
+  for (const duration of ['0', '-1']) {
+    await assert.rejects(
+      probeAudio('invalid.mp3', { exec: async () => ({ stdout: ffprobeAudioJson({ duration }) }) }),
+      isCode('INVALID_DURATION'),
+    );
+  }
+  await assert.rejects(probeAudio('song.mp3', {}), isCode('NO_EXEC'));
+  await assert.rejects(probeAudio('', { exec: async () => ({}) }), isCode('INVALID_FILE'));
+  await assert.rejects(probeAudio('song.mp3', { exec: async () => 'not json' }), isCode('PROBE_FAILED'));
 });
 
 test('probeVideo reads a real generated clip when ffmpeg is installed', async t => {

@@ -74,7 +74,7 @@ function projectAState() {
 function readyCard(overrides = {}) {
   return {
     productionId: PRODUCTION_A,
-    production: { id: PRODUCTION_A, revision: 4 },
+    production: { id: PRODUCTION_A, revision: 4, iteration: { policy: { level: 'director' } } },
     revision: 4,
     gap: false,
     stale: false,
@@ -504,7 +504,7 @@ test('a reloaded plan that is already approved starts no second run', async () =
   const reloaded = {
     ...first,
     revision: 7,
-    production: { id: PRODUCTION_A, revision: 7 },
+    production: { id: PRODUCTION_A, revision: 7, iteration: { policy: { level: 'director' } } },
     events: [
       ...first.events,
       {

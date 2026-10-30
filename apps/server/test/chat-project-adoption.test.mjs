@@ -15,7 +15,7 @@ function plan() {
     aspect: '16:9',
     stylePreset: 'cinematic-dark',
     scenes: [
-      { id: 's_title', layout: 'title', headline: 'Original opening', sub: 'Keep this subtitle', seconds: 4, narration: 'Original opening.', visual: 'A procedural title card' },
+      { id: 's_title', layout: 'title', headline: 'Original opening', sub: 'Keep this subtitle', seconds: 4, narration: 'Original opening.', visual: 'An editorial opening plate', mediaType: 'image' },
       { id: 's_hero', layout: 'hero', headline: 'Original hero', sub: 'Current supporting copy', body: 'Current body copy.', seconds: 8, narration: 'Current narration.', visual: 'A current diagram', mediaType: 'svg', svg: SVG },
     ],
   };

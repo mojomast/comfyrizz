@@ -313,7 +313,7 @@ test('Make another clears to the Super Easy home without deleting anything', () 
   handle.destroy();
 });
 
-test('a run that is not done does not offer Make another', () => {
+test('a run that is not done offers an explicit stop and restart', () => {
   const { root } = fakeRoot();
   const handle = mountSuperEasy({
     root,
@@ -326,7 +326,8 @@ test('a run that is not done does not offer Make another', () => {
     onMoreControl: noop,
   });
 
-  assert.doesNotMatch(root.innerHTML, /data-super-easy-make-another/u);
+  assert.match(root.innerHTML, /data-super-easy-make-another>Stop and start a new prompt<\/button>/u);
+  assert.match(root.innerHTML, /Any active video run is cancelled/u);
   handle.destroy();
 });
 

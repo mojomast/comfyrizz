@@ -6,6 +6,7 @@
 import { createReadStream, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { dirname, join, resolve, sep } from 'node:path';
 import { createHash } from 'node:crypto';
+import { recordRenderedContribution, renderedContribution } from '../../../packages/jobs/src/model-contribution.mjs';
 import { buildCredits, buildPackageZip, isAssetRedistributable } from '../../../packages/sources/dist/src/index.js';
 import { canonicalJson, compileTimeline } from '../../../packages/planner/dist/src/index.js';
 import { narrationOptions } from '../../renderer/scripts/render-package-lib.mjs';
@@ -182,7 +183,7 @@ export function createExporter({ exportsDir, render, materialize = materializeCo
     // frames come from the player's own cues (measured narration when present).
     // L1: a language variant passes its own narration (`{}` re-estimates from
     // the translated `scene.narration`) so captions never show the base language.
-    const compileOptions = narration !== undefined ? narration : narrationOptions(packageDir);
+    const compileOptions = narration !== undefined ? narration : narrationOptions(packageDir, pkg);
     let timeline = compileTimeline(pkg, compileOptions);
     const compositionExtras = collectCompositionExtras(pkg, packageDir);
     if (compositionExtras.length) {
@@ -264,6 +265,7 @@ export function createExporter({ exportsDir, render, materialize = materializeCo
               && receipt.captionsSha256 === captionsSha256;
           } catch { /* An invalid or missing receipt is never evidence of a reusable export. */ }
         }
+        if (snapshot.intent === 'final' && !renderedContribution({ packageDir, videoSha256: sha256, pkg, timelineHash: timeline.hash })) matchingVideo = false;
       }
       let reused = false;
       let video;
@@ -288,12 +290,14 @@ export function createExporter({ exportsDir, render, materialize = materializeCo
         if (!existsSync(videoPath)) throw new Error('render finished without writing an MP4');
       }
       const renderedSha256 = await videoHash();
+      if (snapshot.intent === 'final') recordRenderedContribution({ pkg, packageDir: staged.packageDir, receiptDir: packageDir, timeline, videoPath });
       writeFileSync(receiptPath, JSON.stringify({
         version: 2,
         packageId: pkg.id,
         fingerprint,
         snapshotFingerprint: snapshot.fingerprint,
         intent: snapshot.intent,
+        modelContribution: snapshot.modelContribution,
         archiveMode: snapshot.archiveMode,
         format: snapshot.format,
         speechSha256: snapshot.speechSha256,

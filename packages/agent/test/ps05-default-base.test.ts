@@ -55,10 +55,14 @@ test('DEFAULT_BASE data-brief checklist attaches datasets and a data layout in o
   assert.match(prompt, /one storyboard\.propose/);
 });
 
-test('DEFAULT_BASE motion-graphics stop gate needs four in-palette SVGs and a pending still', async () => {
+test('DEFAULT_BASE motion-graphics stop gate preserves drawings and plans stills only when requested', async () => {
   const prompt = await defaultSystemPrompt();
-  assert.match(prompt, /at least 4 in-palette llm-svg/i);
-  assert.match(prompt, /pending still/i);
+  assert.match(prompt, /no minimum SVG asset count/i);
+  assert.match(prompt, /valid layouts, drawings, data or media/i);
+  assert.doesNotMatch(prompt, /at least (?:4|four).*llm-svg/i);
+  assert.match(prompt, /preserve any explicitly requested continuous drawing/i);
+  assert.match(prompt, /plan a still only when the brief calls for one/i);
+  assert.match(prompt, /a planned still is not a finished asset/i);
   assert.match(prompt, /stop gate/i);
 });
 

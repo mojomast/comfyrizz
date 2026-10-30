@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { Readable } from 'node:stream';
@@ -409,7 +409,7 @@ test('TR08: a take ticket mints a media URL for the take file only', async (t) =
   assert.equal(response.json.takeId, take.takeId);
   assert.equal(response.json.url, `/api/media/${'d'.repeat(32)}`);
   assert.equal(ctx.mints.length, 1);
-  assert.equal(ctx.mints[0], join(ctx.packageDir, ctx.pkg.id, take.file));
+  assert.equal(ctx.mints[0], realpathSync(join(ctx.packageDir, ctx.pkg.id, take.file)));
 
   const missing = await call(ctx.routes, `/api/package/${ctx.pkg.id}/clips/${CLIP}/takes/tk_000000000000/ticket`, {
     body: {},

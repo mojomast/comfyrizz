@@ -8,6 +8,7 @@
 // code outside SEMANTIC_CODES.
 
 export const SEMANTIC_CODES = Object.freeze([
+  "SEM_DRAWING_TIMING",
   "SEM_DUPLICATE_SCENE_ID",
   "SEM_ID_PATTERN",
   "SEM_REF_UNRESOLVED",
@@ -51,6 +52,9 @@ export const SEMANTIC_CODES = Object.freeze([
   "SEM_AUDIO_ASSET_NOT_AUDIO",
   "SEM_AUDIO_ASSET_NOT_READY",
   "SEM_AUDIO_UNKNOWN_SCENE",
+  "SEM_AUDIO_TRIM_INVALID",
+  "SEM_LYRICS_INVALID",
+  "SEM_LYRICS_MUSIC_REQUIRED",
   "SEM_LAYOUT_REQUIRES_MEDIA",
   "SEM_CODE_REQUIRED",
   "SEM_MOTION_FOCUS_RECT",
@@ -223,6 +227,9 @@ function collect(doc, errors) {
 function checkIds(doc, scenes, assets, datasets, errors) {
   const seen = new Set();
   scenes.forEach((scene, i) => {
+    if (Array.isArray(scene.drawing?.elements)) scene.drawing.elements.forEach((element, j) => {
+      if (typeof element?.start === 'number' && typeof element?.end === 'number' && element.end < element.start) errors.push(error('SEM_DRAWING_TIMING', `/scenes/${i}/drawing/elements/${j}/end`, 'end must be at least start'));
+    });
     const id = scene.id;
     if (!isStr(id) || !SCENE_ID_RE.test(id)) {
       errors.push(error("SEM_ID_PATTERN", `/scenes/${i}/id`, `scene id must match ^s[A-Za-z0-9_-]{0,63}$ (got ${JSON.stringify(id)})`));
@@ -360,6 +367,9 @@ function checkScenes(scenes, assets, datasets, errors) {
     const at = `/scenes/${i}`;
     const layout = scene.layout;
     const spec = isStr(layout) ? LAYOUTS[layout] : undefined;
+    // The player renders a drawing in place of SceneView, including its layout and media.
+    // Structural validation separately checks that the drawing and its elements are valid.
+    const hasDrawing = isObj(scene.drawing);
     if (spec) {
       if (scene.variant !== undefined) {
         const variants = spec.variants || [];
@@ -368,22 +378,26 @@ function checkScenes(scenes, assets, datasets, errors) {
         }
       }
       const copy = isObj(scene.copy) ? scene.copy : {};
-      if (spec.requiresData && !(isObj(scene.data) && isStr(scene.data.dataset))) {
+      if (!hasDrawing && spec.requiresData && !(isObj(scene.data) && isStr(scene.data.dataset))) {
         errors.push(error("SEM_LAYOUT_REQUIRES_DATA", `${at}/data`, `layout ${layout} requires data.dataset`));
       }
-      if (spec.requiresHeadline && !nonEmpty(copy.headline)) {
+      // Media-only shots skip the layout entirely (and may retain a lower
+      // third). Their required media is checked below; inventing invisible
+      // headline copy should not be necessary to validate a video shot.
+      const mediaOnlyWithMedia = scene.media_only === true && ((isObj(scene.background) && isStr(scene.background.asset)) || (Array.isArray(scene.foreground) && scene.foreground.length > 0));
+      if (!hasDrawing && !mediaOnlyWithMedia && spec.requiresHeadline && !nonEmpty(copy.headline)) {
         errors.push(error("SEM_COPY_REQUIRED", `${at}/copy/headline`, `layout ${layout} requires copy.headline`));
       }
-      if (layout === "list" && scene.variant === "bullets" && (!Array.isArray(copy.items) || copy.items.length < 2)) {
+      if (!hasDrawing && layout === "list" && scene.variant === "bullets" && (!Array.isArray(copy.items) || copy.items.length < 2)) {
         errors.push(error("SEM_COPY_REQUIRED", `${at}/copy/items`, "list variant bullets requires copy.items with 2 to 6 entries"));
       }
-      if (layout === "list" && scene.variant === "quote" && !nonEmpty(copy.quote)) {
+      if (!hasDrawing && layout === "list" && scene.variant === "quote" && !nonEmpty(copy.quote)) {
         errors.push(error("SEM_COPY_REQUIRED", `${at}/copy/quote`, "list variant quote requires copy.quote"));
       }
-      if (spec.requiresMedia && (!Array.isArray(scene.media) || scene.media.length !== spec.requiresMedia)) {
+      if (!hasDrawing && spec.requiresMedia && (!Array.isArray(scene.media) || scene.media.length !== spec.requiresMedia)) {
         errors.push(error("SEM_LAYOUT_REQUIRES_MEDIA", `${at}/media`, `layout ${layout} requires media with ${spec.requiresMedia} plates`));
       }
-      if (spec.requiresCode) {
+      if (!hasDrawing && spec.requiresCode) {
         const block = isObj(scene.code) ? scene.code : {};
         if (!nonEmpty(block.language) || !nonEmpty(block.code)) {
           errors.push(error("SEM_CODE_REQUIRED", `${at}/code`, `layout ${layout} requires code.language and code.code`));
@@ -438,7 +452,7 @@ function checkScenes(scenes, assets, datasets, errors) {
     if (scene.media_only === true) {
       const hasMediaBackground = isObj(scene.background) && isStr(scene.background.asset);
       const hasForeground = Array.isArray(scene.foreground) && scene.foreground.length > 0;
-      if (!hasMediaBackground && !hasForeground) {
+      if (!hasDrawing && !hasMediaBackground && !hasForeground) {
         errors.push(
           error(
             "SEM_MEDIA_ONLY_NO_MEDIA",
@@ -624,7 +638,13 @@ function checkAudio(doc, scenes, assets, errors) {
       errors.push(error("SEM_AUDIO_ASSET_NOT_READY", path, `${what} ${JSON.stringify(id)} is ${asset.status ?? "pending"}: the mix needs a rendered file`));
     }
   };
-  if (isObj(audio.music)) requireAudio(audio.music.asset, "/audio/music/asset", "the music bed");
+  if (isObj(audio.music)) {
+    requireAudio(audio.music.asset, "/audio/music/asset", "the music bed");
+    const trim = isObj(audio.music.trim) ? audio.music.trim : null;
+    if (trim && isFiniteNumber(trim.startSeconds) && isFiniteNumber(trim.endSeconds) && trim.startSeconds >= trim.endSeconds) {
+      errors.push(error("SEM_AUDIO_TRIM_INVALID", "/audio/music/trim", "music trim requires startSeconds < endSeconds"));
+    }
+  }
   if (Array.isArray(audio.sfx)) {
     audio.sfx.forEach((sfx, i) => {
       if (!isObj(sfx)) return;
@@ -633,6 +653,81 @@ function checkAudio(doc, scenes, assets, errors) {
         errors.push(error("SEM_AUDIO_UNKNOWN_SCENE", `/audio/sfx/${i}/scene`, `unknown scene ${JSON.stringify(sfx.scene)}`));
       }
     });
+  }
+  checkLyrics(audio, errors);
+}
+
+// ECMAScript trim() whitespace, written explicitly so Python can apply exactly
+// the same blank-text rule (notably for FEFF and Unicode separator codepoints).
+const LYRIC_BLANK_RE = /^[\u0009-\u000d\u0020\u00a0\u1680\u2000-\u200a\u2028\u2029\u202f\u205f\u3000\ufeff]*$/;
+
+/** Canonical music-video lyric timing, mirrored by pipeline-py's _check_lyrics. */
+function checkLyrics(audio, errors) {
+  const style = audio.lyricsStyle ?? "off";
+  const nonOff = style === "caption" || style === "reel";
+  const cues = Array.isArray(audio.lyrics) ? audio.lyrics : [];
+
+  // Existing cue data is never inert, even when style is off: it still names a
+  // master song and source trim. An empty array with no lyric style is harmless.
+  if (nonOff || cues.length > 0) {
+    if (!isObj(audio.music)) {
+      errors.push(error("SEM_LYRICS_MUSIC_REQUIRED", "/audio/music", "lyrics require audio.music as their master song"));
+    } else if (!isObj(audio.music.trim)) {
+      errors.push(error("SEM_LYRICS_MUSIC_REQUIRED", "/audio/music/trim", "lyrics require an explicit audio.music.trim source window"));
+    }
+  }
+  if (nonOff && cues.length === 0) {
+    errors.push(error("SEM_LYRICS_INVALID", "/audio/lyrics", `lyricsStyle ${style} requires at least one lyric cue`));
+  }
+
+  let previousCueStart;
+  for (let i = 0; i < cues.length; i += 1) {
+    const cue = cues[i];
+    if (!isObj(cue)) continue;
+    const at = `/audio/lyrics/${i}`;
+    if (isStr(cue.text) && LYRIC_BLANK_RE.test(cue.text)) {
+      errors.push(error("SEM_LYRICS_INVALID", `${at}/text`, "lyric cue text must not be blank"));
+    }
+    const start = isFiniteNumber(cue.startSeconds) ? cue.startSeconds : undefined;
+    if (start !== undefined) {
+      if (previousCueStart !== undefined && start <= previousCueStart) {
+        errors.push(error("SEM_LYRICS_INVALID", `${at}/startSeconds`, "lyric cue starts must be strictly increasing"));
+      }
+      previousCueStart = start;
+    }
+
+    const nextCue = i + 1 < cues.length && isObj(cues[i + 1]) ? cues[i + 1] : null;
+    const nextStart = nextCue && isFiniteNumber(nextCue.startSeconds) ? nextCue.startSeconds : undefined;
+    const end = isFiniteNumber(cue.endSeconds) ? cue.endSeconds : undefined;
+    if (start !== undefined && end !== undefined && end <= start) {
+      errors.push(error("SEM_LYRICS_INVALID", `${at}/endSeconds`, "lyric cue endSeconds is exclusive and must be greater than startSeconds"));
+    } else if (end !== undefined && nextStart !== undefined && end > nextStart) {
+      errors.push(error("SEM_LYRICS_INVALID", `${at}/endSeconds`, "lyric cue endSeconds overlaps the next cue"));
+    }
+
+    let boundary = Number.POSITIVE_INFINITY;
+    if (end !== undefined) boundary = end;
+    if (nextStart !== undefined) boundary = Math.min(boundary, nextStart);
+    if (!Array.isArray(cue.words)) continue;
+    let previousWordStart;
+    for (let j = 0; j < cue.words.length; j += 1) {
+      const word = cue.words[j];
+      if (!isObj(word)) continue;
+      const wordAt = `${at}/words/${j}`;
+      if (isStr(word.text) && LYRIC_BLANK_RE.test(word.text)) {
+        errors.push(error("SEM_LYRICS_INVALID", `${wordAt}/text`, "lyric word text must not be blank"));
+      }
+      if (!isFiniteNumber(word.startSeconds)) continue;
+      const wordStart = word.startSeconds;
+      const nonStrict = previousWordStart !== undefined && wordStart <= previousWordStart;
+      const outside = (start !== undefined && wordStart < start) || wordStart >= boundary;
+      if (outside) {
+        errors.push(error("SEM_LYRICS_INVALID", `${wordAt}/startSeconds`, "lyric word start is outside its cue's explicit or implicit exclusive boundary"));
+      } else if (nonStrict) {
+        errors.push(error("SEM_LYRICS_INVALID", `${wordAt}/startSeconds`, "lyric word starts must be strictly increasing"));
+      }
+      previousWordStart = wordStart;
+    }
   }
 }
 

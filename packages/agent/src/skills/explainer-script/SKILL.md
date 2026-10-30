@@ -22,10 +22,12 @@ For each beat ask what the picture adds beyond the spoken words. Prefer an examp
 with a visible cause and result over a capability list. For comedy, separate setup,
 reveal and reaction; keep surprise-causing information out of setup copy and narration.
 
-Estimate narration around 2.3 words per second, leaving room for pauses, visual
-inspection, and emphasis. This is a planning heuristic, not a hard rule: language,
-delivery, and subject complexity change the pace. A ten-second scene may need
-fewer than twenty-three spoken words. If the draft overruns, remove secondary
+For planning, budget roughly 1.8 spoken words per second of usable scene time,
+after allowing about half a second of synthesis padding per narrated scene and
+accounting for transition overlaps. Leave room for pauses, visual inspection and
+emphasis. This is a heuristic, not a measured duration: language, voice, delivery
+and subject complexity change the pace. Check both each scene and the entire film.
+If the draft overruns, remove secondary
 ideas or split a dense beat within the tool's constraints; do not simply demand
 faster speech or silently extend a requested duration.
 Vary beat lengths by purpose; leave deliberate inspection or reaction time, not

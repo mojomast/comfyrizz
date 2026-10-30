@@ -23,7 +23,8 @@ const PNG = Buffer.from(
   'base64',
 );
 const TOKEN = 'reference-wire-test-session-token';
-const NO_REFERENCE_SYSTEM_SHA256 = '1e18b1f2abdca162d3d74af2b2ac9806868cfd3cf91cdf982308283643546388';
+// Contribution-aware baseline: the production policy intentionally changed the prompt.
+const NO_REFERENCE_SYSTEM_SHA256 = '17ae539725b444da7c407333da73d5dc9647d12c770c1a4456f4a86e3f7470dc';
 
 function reference(id = 'ref_0123456789abcdef') {
   return {

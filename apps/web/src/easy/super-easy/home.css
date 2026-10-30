@@ -218,3 +218,386 @@
     flex-direction: column;
   }
 }
+
+.super-easy-video-types {
+  min-width: 0;
+  margin: 0 0 var(--space-3);
+  padding: 0;
+  border: 0;
+}
+
+.super-easy-video-types > legend {
+  margin-bottom: var(--space-1);
+  padding: 0;
+  font-weight: var(--font-weight-600);
+}
+
+.super-easy-video-types > p {
+  margin: 0 0 var(--space-3);
+  color: var(--text-2);
+  font-size: var(--font-size-13);
+}
+
+.super-easy-video-type-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--space-2);
+}
+
+.super-easy-video-type {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  min-width: 0;
+  min-height: 112px;
+  padding: var(--space-3);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-control);
+  background: var(--bg-1);
+  cursor: pointer;
+}
+
+.super-easy-video-type:has(input:checked) {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 1px var(--accent);
+}
+
+.super-easy-video-type input {
+  position: absolute;
+  inset: var(--space-2) var(--space-2) auto auto;
+  width: 20px;
+  height: 20px;
+  margin: 0;
+}
+
+.super-easy-video-type-name {
+  padding-inline-end: var(--space-5);
+  font-weight: var(--font-weight-600);
+}
+
+.super-easy-video-type-description,
+.super-easy-video-type-cost {
+  color: var(--text-2);
+  font-size: var(--font-size-13);
+}
+
+.super-easy-video-type-cost {
+  margin-top: auto;
+}
+
+.super-easy-video-type-badges {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-1);
+  color: var(--accent);
+  font-size: var(--font-size-13);
+  font-weight: var(--font-weight-600);
+}
+
+.super-easy-song-trim {
+  min-width: 0;
+  margin: 0 0 var(--space-3);
+  padding: var(--space-3);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-control);
+  background: var(--bg-1);
+}
+
+.super-easy-song-trim[hidden] {
+  display: none;
+}
+
+.super-easy-song-trim > legend {
+  padding: 0 var(--space-1);
+  font-weight: var(--font-weight-600);
+}
+
+.super-easy-song-trim > p {
+  margin: 0 0 var(--space-2);
+  color: var(--text-2);
+  font-size: var(--font-size-13);
+}
+
+.super-easy-song-trim > .super-easy-home-error {
+  margin: var(--space-2) 0 0;
+  color: var(--danger);
+}
+
+.super-easy-song-trim-fields {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--space-2);
+}
+
+.super-easy-song-trim-fields label {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  font-size: var(--font-size-13);
+  font-weight: var(--font-weight-600);
+}
+
+.super-easy-song-trim-fields input {
+  width: 100%;
+  min-height: 40px;
+  padding: var(--space-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-control);
+  background: var(--bg-0);
+  color: var(--text-1);
+  font: inherit;
+  font-weight: var(--font-weight-400);
+}
+
+.super-easy-song-trim-fields input[aria-invalid="true"] {
+  border-color: var(--danger);
+}
+
+.super-easy-lyrics {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  min-width: 0;
+  margin: 0 0 var(--space-3);
+  padding: var(--space-3);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-control);
+  background: var(--bg-1);
+}
+
+.super-easy-lyrics[hidden] {
+  display: none;
+}
+
+.super-easy-lyrics > legend {
+  padding: 0 var(--space-1);
+  font-weight: var(--font-weight-600);
+}
+
+.super-easy-lyrics > p,
+.super-easy-lyrics-examples p {
+  margin: 0;
+  color: var(--text-2);
+  font-size: var(--font-size-13);
+}
+
+.super-easy-lyrics > label {
+  font-size: var(--font-size-13);
+  font-weight: var(--font-weight-600);
+}
+
+.super-easy-lyrics select {
+  min-height: 40px;
+  max-width: 100%;
+}
+
+.super-easy-lyrics textarea {
+  width: 100%;
+  min-height: calc(var(--space-6) * 3);
+  padding: var(--space-3);
+  resize: vertical;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-control);
+  background: var(--bg-0);
+  color: var(--text-1);
+  font-family: var(--font-mono, monospace);
+  font-size: var(--font-size-13);
+  line-height: var(--line-height-base);
+}
+
+.super-easy-lyrics textarea[aria-invalid="true"] {
+  border-color: var(--danger);
+}
+
+.super-easy-lyrics > .super-easy-lyrics-error {
+  margin: 0;
+  color: var(--danger);
+  white-space: pre-line;
+}
+
+.super-easy-lyrics-examples {
+  color: var(--text-2);
+  font-size: var(--font-size-13);
+}
+
+.super-easy-lyrics-examples summary {
+  min-height: 36px;
+  cursor: pointer;
+}
+
+.super-easy-lyrics-examples pre {
+  max-width: 100%;
+  margin: var(--space-1) 0 var(--space-2);
+  padding: var(--space-2);
+  overflow: auto;
+  border-radius: var(--radius-control);
+  background: var(--bg-0);
+  color: var(--text-1);
+  font-size: var(--font-size-13);
+  white-space: pre-wrap;
+}
+
+.super-easy-context {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  margin-block: var(--space-3);
+  padding: var(--space-3);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-control);
+  background: var(--bg-1);
+}
+
+.super-easy-context h2 {
+  margin: 0;
+  font-size: var(--font-size-15);
+}
+
+.super-easy-context-optional,
+.super-easy-context p,
+.super-easy-context-item-heading span,
+.super-easy-context-usage-help {
+  color: var(--text-2);
+  font-size: var(--font-size-13);
+  font-weight: var(--font-weight-400);
+}
+
+.super-easy-context p {
+  margin: 0;
+}
+
+.super-easy-context > label,
+.super-easy-context-url-row > label,
+.super-easy-context-note {
+  font-size: var(--font-size-13);
+  font-weight: var(--font-weight-600);
+}
+
+.super-easy-context input[type="file"],
+.super-easy-context input[type="url"],
+.super-easy-context-note input {
+  width: 100%;
+  min-height: 40px;
+}
+
+.super-easy-context-url-row > div {
+  display: flex;
+  align-items: stretch;
+  gap: var(--space-2);
+}
+
+.super-easy-context-url-row input {
+  min-width: 0;
+  flex: 1 1 auto;
+  padding: var(--space-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-control);
+  background: var(--bg-0);
+  color: var(--text-1);
+  font: inherit;
+}
+
+.super-easy-context-list,
+.super-easy-context-pending-list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.super-easy-context-list:has(.super-easy-context-empty),
+.super-easy-context-pending-list:empty {
+  display: none;
+}
+
+.super-easy-context-item,
+.super-easy-context-pending {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: var(--space-2);
+  padding: var(--space-2);
+  border-top: 1px solid var(--border);
+}
+
+.super-easy-context-item-heading {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  gap: var(--space-2);
+  width: 100%;
+}
+
+.super-easy-context-item > a {
+  max-width: 100%;
+  overflow-wrap: anywhere;
+  font-size: var(--font-size-13);
+}
+
+.super-easy-context-usage {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-height: 36px;
+}
+
+.super-easy-context-usage input {
+  width: 20px;
+  height: 20px;
+}
+
+.super-easy-context-note {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  width: 100%;
+}
+
+.super-easy-context-note input {
+  padding: var(--space-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-control);
+  background: var(--bg-0);
+  color: var(--text-1);
+  font: inherit;
+  font-weight: var(--font-weight-400);
+}
+
+.super-easy-context-pending {
+  flex-direction: row;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  font-size: var(--font-size-13);
+}
+
+.super-easy-context-error,
+.super-easy-context-status.is-error {
+  color: var(--danger);
+}
+
+.super-easy-context-empty {
+  color: var(--text-2);
+  font-size: var(--font-size-13);
+}
+
+@media (max-width: 480px) {
+  .super-easy-video-type-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .super-easy-video-type {
+    min-height: 0;
+  }
+
+  .super-easy-song-trim-fields {
+    grid-template-columns: 1fr;
+  }
+
+  .super-easy-context-url-row > div {
+    flex-direction: column;
+  }
+}

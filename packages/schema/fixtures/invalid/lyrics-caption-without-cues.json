@@ -1,0 +1,278 @@
+{
+  "$schema": "https://comfyrizz.example/schema/package-v1.json",
+  "schemaVersion": 1,
+  "revision": 1,
+  "id": "pkg_lyricscaptionwithoutcues",
+  "title": "Generated-first showcase",
+  "format": {
+    "width": 1920,
+    "height": 1080,
+    "fps": 30
+  },
+  "duration": {
+    "mode": "flexible",
+    "maxFrames": 1200
+  },
+  "theme": {
+    "palette": [
+      "#0d0f14",
+      "#6d8cff",
+      "#e6e8ee"
+    ],
+    "font": "Inter"
+  },
+  "voice": {
+    "enabled": true,
+    "engine": "kokoro",
+    "voice": "af_heart",
+    "speed": 1.05
+  },
+  "datasets": {
+    "d_revenue": {
+      "unit": "k USD",
+      "label": "Quarterly revenue",
+      "values": [
+        {
+          "label": "Q1",
+          "value": 120
+        },
+        {
+          "label": "Q2",
+          "value": 210
+        },
+        {
+          "label": "Q3",
+          "value": 340
+        }
+      ],
+      "source": "example",
+      "approved": true,
+      "note": "invented numbers, labelled as an example in the copy"
+    }
+  },
+  "scenes": [
+    {
+      "id": "s1",
+      "layout": "hero",
+      "variant": "split",
+      "preferredFrames": 240,
+      "copy": {
+        "headline": "Two free assets, one box",
+        "sub": "Vectors on CPU, stills on a GPU"
+      },
+      "background": {
+        "procedural": {
+          "pattern": "mesh",
+          "seed": 7,
+          "palette": [
+            "#0d0f14",
+            "#1b2440"
+          ]
+        }
+      },
+      "foreground": [
+        {
+          "asset": "a_cutout",
+          "x": 0.65,
+          "y": 0.5,
+          "w": 0.42,
+          "anim": "fade-in"
+        }
+      ],
+      "narration": "Two free assets, one box.",
+      "narration_asset": "a_narr",
+      "narration_duration_frames": 240,
+      "transitionOut": {
+        "type": "fade",
+        "frames": 15
+      }
+    },
+    {
+      "id": "s2",
+      "layout": "list",
+      "variant": "bullets",
+      "preferredFrames": 210,
+      "copy": {
+        "headline": "What the router picks",
+        "items": [
+          "Icons and diagrams as SVG code",
+          "Illustrations as FLUX stills",
+          "Plates only where motion helps"
+        ]
+      },
+      "background": {
+        "procedural": {
+          "pattern": "grid"
+        }
+      },
+      "transitionOut": {
+        "type": "fade",
+        "frames": 15
+      },
+      "foreground": [
+        {
+          "asset": "a_anim_bars",
+          "x": 0.5,
+          "y": 0.62,
+          "w": 0.5,
+          "anim": "slide-in"
+        }
+      ]
+    },
+    {
+      "id": "s3",
+      "layout": "chart",
+      "variant": "bar",
+      "preferredFrames": 240,
+      "copy": {
+        "headline": "Exaggerated quarterly revenue",
+        "footnote": "Example data, invented for this demo"
+      },
+      "data": {
+        "dataset": "d_revenue",
+        "display": "bar"
+      },
+      "background": {
+        "procedural": {
+          "pattern": "gradient"
+        }
+      },
+      "transitionOut": {
+        "type": "fade",
+        "frames": 15
+      }
+    },
+    {
+      "id": "s4",
+      "layout": "title",
+      "variant": "outro",
+      "preferredFrames": 150,
+      "copy": {
+        "headline": "Comfyrizz",
+        "cta": "github.example/comfyrizz"
+      },
+      "background": {
+        "procedural": {
+          "pattern": "dots"
+        }
+      }
+    }
+  ],
+  "assets": {
+    "a_cutout": {
+      "kind": "image",
+      "origin": "generated",
+      "status": "ready",
+      "file": "assets/a_cutout.png",
+      "sha256": "aaaabbbbccccddddaaaabbbbccccddddaaaabbbbccccddddaaaabbbbccccdddd",
+      "media": {
+        "width": 1024,
+        "height": 1024,
+        "alpha": true
+      },
+      "cutout": true,
+      "license": {
+        "id": "CC0-1.0"
+      },
+      "redistributable": true,
+      "gen": {
+        "generator": "flux3-klein",
+        "workflow": "workflows/flux3_klein_t2i.api.json",
+        "model": "flux-3-image-klein",
+        "caption": "A clean illustration of a small robot holding a film clapper, plain flat background, full subject in frame.",
+        "inputs": {
+          "width": 1024,
+          "height": 1024,
+          "seed": 7,
+          "steps": 16,
+          "cutout": true
+        },
+        "backend": "colab:G4",
+        "attempt_id": "att_cutout0001",
+        "job_id": "job_cutout0001"
+      },
+      "model_license": {
+        "id": "FLUX.3-Image-Klein"
+      }
+    },
+    "a_anim_bars": {
+      "kind": "vector-anim",
+      "origin": "generated",
+      "status": "ready",
+      "file": "assets/a_anim_bars.svg",
+      "sha256": "fedcba9876543210fedcba9876543210fedcba9876543210fedcba9876543210",
+      "license": {
+        "id": "CC0-1.0"
+      },
+      "redistributable": true,
+      "gen": {
+        "generator": "llm-svg",
+        "sanitizer_version": "1.0.0",
+        "render_check": {
+          "ok": true,
+          "version": "1.0.0",
+          "rasterizer": "resvg",
+          "width": 320,
+          "height": 180,
+          "palette_ok": true
+        },
+        "caption": "Three keyframed bars that grow from the baseline; the Remotion frame drives the clip."
+      }
+    },
+    "a_narr": {
+      "kind": "audio",
+      "origin": "generated",
+      "status": "ready",
+      "file": "assets/a_narr.wav",
+      "sha256": "1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef",
+      "media": {
+        "durationSeconds": 8,
+        "audio": "present",
+        "codec": "pcm_s16le"
+      },
+      "license": {
+        "id": "CC0-1.0"
+      },
+      "redistributable": true,
+      "gen": {
+        "generator": "kokoro",
+        "model": "kokoro-82m-v1.0",
+        "inputs": {
+          "voice": "af_heart",
+          "speed": 1.05
+        },
+        "caption": "Two free assets, one box."
+      },
+      "model_license": {
+        "id": "Apache-2.0"
+      }
+    }
+  },
+  "compliance": {
+    "open_weights_only": true,
+    "llm": {
+      "provider": "custom",
+      "model": "qwen3-coder-30b",
+      "weights": "open"
+    },
+    "backends_used": [
+      "colab:G4",
+      "byo-comfyui"
+    ],
+    "closed_apis_used": [],
+    "warnings": [
+      "runtime assets are downloaded, not vendored"
+    ]
+  },
+  "audio": {
+    "music": {
+      "asset": "a_narr",
+      "trim": {
+        "startSeconds": 0,
+        "endSeconds": 30
+      }
+    },
+    "lyricsStyle": "caption",
+    "lyrics": []
+  }
+}

@@ -1,12 +1,16 @@
 import { writePlan } from '../plan-writer.ts';
+import { planInputsHash } from '../store.ts';
 import { randomUUID } from '../../uuid.ts';
 import { approveAndGenerate } from '../approve-generate.ts';
 import { runCpuGenerate, type CpuHost, type RunCpuGenerateOptions } from '../cpu-path.ts';
 import { readPlanCard, type PlanCard } from '../../productions/cards/plan-card.ts';
 import { buildDraftLevelCommand, type DraftLevelCommand } from './set-draft-level.ts';
-import type { EasyState, StepId } from '../types.ts';
+import type { EasyState, LyricsStyle, SongTrim, StepId } from '../types.ts';
 import { proposalForPackage, type SuperEasyProposal } from './proposal.ts';
+import { formatSuperEasyLrcErrors, validateSuperEasyLrc } from './lyrics.ts';
+import { narrationPending } from '../narration-status.ts';
 import type { MotionModel } from './setup.ts';
+import type { VideoType } from './video-types.ts';
 
 const EMPTY_PROMPT = 'Tell us what your video is about first.';
 const GOOGLE_COLAB_CONFIRM_REQUIRED = 'Google Colab needs your confirmation before it can spend anything. Choose This computer, or confirm Google Colab first.';
@@ -25,10 +29,24 @@ const DEFAULT_RUN_TIMEOUT_MS = 60 * 60 * 1000;
 const DEFAULT_RUN_POLL_MS = 1000;
 
 export interface SuperEasyApi {
-  buildVideo(input: { brief: string; provider?: { provider: string; model?: string }; motionModel?: MotionModel; sessionId?: string }): Promise<any>;
+  buildVideo(input: {
+    brief: string;
+    provider?: { provider: string; model?: string };
+    motionModel?: MotionModel;
+    thinking?: 'disabled';
+    sessionId?: string;
+    videoType?: VideoType;
+    songTrim?: SongTrim | null;
+    lyricsStyle?: LyricsStyle;
+    lyricsLrc?: string;
+    conversationId?: string;
+    attachmentSignature?: string;
+    narrationRevision?: { packageId: string; baseRevision: number; note: string; recoveryProductionId?: string };
+    proposalRevision?: { packageId: string; baseRevision: number; note: string };
+  }): Promise<any>;
   getAgentProgress?(sessionId: string): Promise<any>;
-  createProduction(input: { conversationId: string | null; packageId: string | null }): Promise<any>;
-  proposeEasyPlan(id: string, body: { level: EasyState['level']; compute: EasyState['compute'] }): Promise<unknown>;
+  createProduction(input: { conversationId: string | null; packageId: string | null; expectedPackageRevision?: number }): Promise<any>;
+  proposeEasyPlan(id: string, body: { level: EasyState['level']; compute: EasyState['compute']; expectedPackageRevision?: number }): Promise<unknown>;
   proposeActionPlan(id: string, body: unknown): Promise<unknown>;
   getProduction(id: string): Promise<unknown>;
   sendCommand(id: string, command: unknown): Promise<unknown>;
@@ -36,8 +54,11 @@ export interface SuperEasyApi {
   dispatchAction(id: string, body: unknown): Promise<unknown>;
   startRun(body: unknown): Promise<unknown>;
   getRun(id: string): Promise<unknown>;
+  getRunRecovery?(id: string): Promise<unknown>;
+  recoverRunOutputs?(id: string, body: { baseRevision: number }): Promise<unknown>;
   cancelRun?(id: string): Promise<unknown>;
   getRunVideo(id: string): Promise<Blob>;
+  generateLocalNarration?(body: { packageId: string; productionId: string; baseRevision: number; recoveryInputs?: unknown }): Promise<any>;
   colabStatus(): Promise<{ backendId?: string } | null>;
 }
 
@@ -56,18 +77,31 @@ export interface SuperEasyHost {
 export interface SuperEasyStore {
   get(): EasyState;
   patch(partial: Partial<EasyState>): EasyState;
+  generation?(): number;
 }
 
 export interface SuperEasyRunPollingOptions {
   timeoutMs?: number;
   pollMs?: number;
   setTimer?: (callback: () => void, delayMs: number) => unknown;
+  isCurrent?(): boolean;
+  onRecord?(record: Record<string, unknown>): void;
 }
 
 export interface RunSuperEasyInput {
   prompt: string;
   compute?: EasyState['compute'];
+  lengthS?: EasyState['idea']['lengthS'];
   motionModel?: MotionModel;
+  deepSeekNoThinking?: boolean;
+  /** Undefined preserves older callers; null explicitly restores Custom in shared state. */
+  videoType?: VideoType | null;
+  songTrim?: SongTrim | null;
+  lyricsStyle?: LyricsStyle;
+  lyricsLrc?: string;
+  conversationId?: string | null;
+  attachmentSignature?: string | null;
+  attachmentRevision?: number;
   /** One-time guided setup confirmation; a per-click spend override is not accepted. */
   setupConfirmed?: boolean;
   cpu?: Pick<RunCpuGenerateOptions, 'timeoutMs' | 'pollMs' | 'setTimer' | 'clearTimer'>;
@@ -76,6 +110,10 @@ export interface RunSuperEasyInput {
   proposalOnly?: boolean;
   basePrompt?: string;
   revisionNotes?: string[];
+  /** Explicit measured-narration recovery; ordinary mixed creative requests remain full revisions. */
+  narrationOnly?: boolean;
+  reviewedPackageRevision?: number;
+  recoveryProductionId?: string;
 }
 
 export type SuperEasyRunStage = 'idea' | 'compute' | 'plan' | 'iteration' | 'approval' | 'run';
@@ -95,6 +133,7 @@ export interface RunSuperEasyDeps {
 
 export type SuperEasyRunFailureCode =
   | 'EMPTY_PROMPT'
+  | 'INVALID_LYRICS'
   | 'GOOGLE_COLAB_CONFIRM_REQUIRED'
   | 'GENERATED_MEDIA_REQUIRES_COLAB'
   | 'PLAN_FAILED'
@@ -105,6 +144,7 @@ export type SuperEasyRunFailureCode =
   | 'FINAL_PLAN_FAILED'
   | 'RUN_ID_REQUIRED'
   | 'RUN_FAILED'
+  | 'RECOVERY_FAILED'
   | 'FINAL_VIDEO_FAILED'
   | 'LOCAL_RENDER_FAILED';
 
@@ -113,6 +153,12 @@ export interface SuperEasyRunFailure {
   code: SuperEasyRunFailureCode;
   stage: SuperEasyRunStage;
   message: string;
+  retryable?: boolean;
+  narrationRevision?: string;
+  proposalRevisionNote?: string;
+  /** Only a terminal failure of a known paid run can advertise recovery. */
+  failedRunId?: string;
+  downloadedOutputsRecovery?: boolean;
 }
 
 export interface SuperEasyFinalArtifact {
@@ -158,6 +204,22 @@ function messageOf(error: unknown, fallback: string): string {
 function codeOf(error: unknown): string | null {
   if (!isRecord(error)) return null;
   return typeof error.code === 'string' ? error.code : null;
+}
+
+export function narrationRevisionFor(error: unknown, pkg: any): string | null {
+  if (codeOf(error) !== 'NARRATION_TOO_LONG' || !isRecord(error) || !isRecord(error.details)) return null;
+  const details = error.details;
+  if (!Number.isFinite(details.measuredSeconds) || !Number.isFinite(details.authoredSeconds) || !Array.isArray(details.scenes)) return null;
+  const scenes = Array.isArray(pkg?.scenes) ? pkg.scenes : [];
+  const measured = details.scenes.filter((item: any) => typeof item?.sceneId === 'string'
+    && Number.isFinite(item.measuredSeconds) && Number.isFinite(item.availableSeconds)
+    && Number.isSafeInteger(item.targetWords) && item.targetWords >= 0);
+  if (!measured.length) return null;
+  const source = scenes.map((scene: any) => ({ id: scene.id, narration: scene.narration }));
+  const fit = Number.isFinite(details.minimumFrames)
+    ? `Measured constraints require a minimum ${details.minimumFrames} frames against ${details.targetFrames}, an excess of ${details.excessFrames} frames at ${details.fps} fps.`
+    : `The measured film was ${details.measuredSeconds}s against an authored ${details.authoredSeconds}s.`;
+  return `Revise the existing film's narration for its original duration; preserve its subject, factual qualifications, story, scene order, visual direction and essential causal details. Do not increase duration or speed up the voice. ${fit} Per-scene frame measurements and authored timeline slots, with estimated word targets (not guarantees): ${JSON.stringify(measured)}. Existing story and narration to preserve: ${JSON.stringify({ title: pkg?.title, scenes: source })}. Return a revised proposal for human review and reapproval; narration must be measured again.`;
 }
 
 function revisionOf(snapshot: unknown): number | null {
@@ -299,7 +361,11 @@ function pause(options: SuperEasyRunPollingOptions | undefined, milliseconds: nu
   });
 }
 
-async function pollFinalRun(
+class TerminalRunError extends Error {
+  recoveryEligible = false;
+}
+
+export async function pollFinalRun(
   api: SuperEasyApi,
   runId: string,
   options: SuperEasyRunPollingOptions | undefined,
@@ -308,12 +374,15 @@ async function pollFinalRun(
   const timeoutMs = options?.timeoutMs ?? DEFAULT_RUN_TIMEOUT_MS;
   const pollMs = options?.pollMs ?? DEFAULT_RUN_POLL_MS;
   for (;;) {
+    if (options?.isCurrent?.() === false) throw new Error('Recovery stopped or the project changed.');
     const run = runRecordOf(await api.getRun(runId));
+    if (options?.isCurrent?.() === false) throw new Error('Recovery stopped or the project changed.');
     const failed = terminalRunFailure(run);
-    if (failed !== null) throw new Error(failed);
+    if (failed !== null) throw Object.assign(new TerminalRunError(failed), { recoveryEligible: run.status === 'failed' });
+    options?.onRecord?.(run);
     const status = typeof run.status === 'string' ? run.status.toLowerCase() : '';
-    if (status === 'done' || status === 'idle') return run;
-    if (!['starting', 'running', 'rendering', 'queued', 'dispatching', 'pending'].includes(status)) {
+    if (status === 'done' || status === 'idle' || status === 'completed') return run;
+    if (!['starting', 'running', 'rendering', 'verifying', 'queued', 'dispatching', 'pending'].includes(status)) {
       throw new Error(runFailureMessage(run));
     }
     if (Date.now() - startedAt >= timeoutMs) throw new Error('The final video run timed out.');
@@ -366,13 +435,73 @@ async function finishWithVideo(
   };
 }
 
+function withCurrentPlanInputs(input: RunSuperEasyInput, state: EasyState, proposalOnly: boolean): RunSuperEasyInput {
+  return {
+    ...input,
+    compute: state.compute,
+    lengthS: state.idea.lengthS,
+    motionModel: state.motionModel ?? 'auto',
+    videoType: state.videoType,
+    songTrim: state.songTrim ? { ...state.songTrim } : null,
+    lyricsStyle: state.lyricsStyle,
+    lyricsLrc: state.lyricsLrc,
+    conversationId: state.chatId,
+    attachmentSignature: state.attachmentSignature,
+    attachmentRevision: state.attachmentRevision,
+    proposalOnly,
+  };
+}
+
+/** Keep saved-context checks and new runs on the same persisted prompt format. */
+export function creativeRevisionPrompt(basePrompt: string, revisionNotes: readonly string[]): string {
+  return revisionNotes.length
+    ? `${basePrompt}\n\nCreative revision requests (keep unrelated creative choices): ${revisionNotes.join(' | ')}`
+    : basePrompt;
+}
+
 export async function runSuperEasy(input: RunSuperEasyInput, deps: RunSuperEasyDeps): Promise<SuperEasyRunResult> {
+  if (input.proposalOnly === false && input.reviewedPackageRevision !== undefined
+    && deps.host.getPackage?.()?.revision !== input.reviewedPackageRevision) {
+    return failure('PLAN_FAILED', 'plan', 'The reviewed package changed. Review the latest proposal before approving.');
+  }
+  const proposalState = deps.store.get();
+  if (input.proposalOnly === false
+    && proposalState.plan.status === 'building'
+    && proposalState.builtPackageInputsHash !== planInputsHash(proposalState)) {
+    // An approval click may carry the proposal's old attachment/type/trim/lyric input.
+    // Rebuild from the live store and stop at a new proposal for another review.
+    input = withCurrentPlanInputs(input, proposalState, true);
+  }
+  const lyricsVideoType = input.videoType === undefined ? proposalState.videoType : input.videoType;
+  const lyricsLrc = input.lyricsLrc ?? proposalState.lyricsLrc ?? '';
+  if (lyricsVideoType === 'music-video') {
+    const validation = validateSuperEasyLrc(lyricsLrc);
+    if (!validation.ok) {
+      return failure('INVALID_LYRICS', 'idea', `Fix the pasted LRC before Generate.\n${formatSuperEasyLrcErrors(validation.errors)}`);
+    }
+  }
   const basePrompt = typeof input?.basePrompt === 'string' ? input.basePrompt.trim() : (typeof input?.prompt === 'string' ? input.prompt.trim() : '');
   if (basePrompt === '') return failure('EMPTY_PROMPT', 'idea', EMPTY_PROMPT);
   const revisionNotes = Array.isArray(input.revisionNotes) ? input.revisionNotes.filter(note => typeof note === 'string' && note.trim()).map(note => note.trim()) : [];
-  const prompt = revisionNotes.length
-    ? `${basePrompt}\n\nCreative revision requests (keep unrelated creative choices): ${revisionNotes.join(' | ')}`
-    : basePrompt;
+  const lastNote = revisionNotes.at(-1) ?? '';
+  // Recognize the specific narration-only proposal wording; mixed creative
+  // requests must not silently discard the user's other changes.
+  const narrationOnly = input.proposalOnly === true && (input.narrationOnly === true
+    || /^shorten narration to fit comfortably within each shot, allowing for transition overlaps\.\s*preserve (?:the exact \d+(?:\.\d+)?[ -]second total|the existing duration) and the source story\.$/i.test(lastNote));
+  const proposalRevision = input.proposalOnly === true && revisionNotes.length > 0 && !narrationOnly;
+  const prior = deps.store.get();
+  const priorGeneration = deps.store.generation?.();
+  const priorPackage = deps.host.getPackage?.();
+  const revisionBase = proposalRevision && priorPackage ? structuredClone(priorPackage) : undefined;
+  const priorPrompt = creativeRevisionPrompt(basePrompt, revisionNotes.slice(0, -1));
+  if ((narrationOnly || proposalRevision) && (!priorPackage || priorPackage.id !== prior.packageId || !Number.isSafeInteger(priorPackage.revision)
+    || (input.reviewedPackageRevision !== undefined && priorPackage.revision !== input.reviewedPackageRevision)
+    || !lastNote || prior.builtPackageInputsHash !== planInputsHash(prior) || prior.idea.text !== priorPrompt
+    || (input.conversationId !== undefined && input.conversationId !== prior.chatId)
+    || (input.motionModel !== undefined && input.motionModel !== prior.motionModel))) {
+    return failure('PLAN_FAILED', 'plan', 'The proposal or its inputs changed. Review a fresh proposal before revising.');
+  }
+  const prompt = creativeRevisionPrompt(basePrompt, revisionNotes);
 
   const compute = input.compute ?? 'cpu';
   const setupConfirmed = input.setupConfirmed === true || deps.setupConfirmed === true;
@@ -382,32 +511,69 @@ export async function runSuperEasy(input: RunSuperEasyInput, deps: RunSuperEasyD
 
   const current = deps.store.get();
   deps.store.patch({
-    idea: { ...current.idea, text: prompt },
+    idea: { ...current.idea, text: prompt, ...(input.lengthS === undefined ? {} : { lengthS: input.lengthS }) },
     compute,
     motionModel: input.motionModel ?? 'auto',
+    ...(input.videoType !== undefined ? { videoType: input.videoType } : {}),
+    ...(input.songTrim !== undefined ? { songTrim: input.songTrim } : {}),
+    ...(input.lyricsStyle !== undefined ? { lyricsStyle: input.lyricsStyle } : {}),
+    ...(input.lyricsLrc !== undefined ? { lyricsLrc: input.lyricsLrc } : {}),
+    ...(input.conversationId !== undefined ? { chatId: input.conversationId } : {}),
+    ...(input.attachmentSignature !== undefined ? { attachmentSignature: input.attachmentSignature } : {}),
+    ...(Number.isSafeInteger(input.attachmentRevision) && (input.attachmentRevision as number) >= 0 ? { attachmentRevision: input.attachmentRevision } : {}),
     level: 'draft',
     levelTouched: true,
     ...(input.proposalOnly === true && revisionNotes.length > 0 ? { plan: { ...current.plan, status: 'writing' } } : {}),
   });
 
+  if (narrationOnly || proposalRevision) {
+    const updated = deps.store.get();
+    if (planInputsHash({ ...updated, idea: { ...updated.idea, text: prior.idea.text } }) !== prior.builtPackageInputsHash) {
+      return failure('PLAN_FAILED', 'plan', 'The proposal inputs changed. Review a fresh proposal before revising narration.');
+    }
+  }
+
   const write = (proposalOnly = false): Promise<void> => writePlan(deps.store.get(), {
     api: deps.api as never,
     host: deps.host,
     store: deps.store,
-  }, { stopAfterPackage: proposalOnly });
+  }, { stopAfterPackage: proposalOnly, deepSeekNoThinking: input.deepSeekNoThinking,
+    ...(narrationOnly ? { narrationRevision: { packageId: priorPackage.id, baseRevision: priorPackage.revision, note: lastNote, ...(input.recoveryProductionId ? { recoveryProductionId: input.recoveryProductionId } : {}) } } : {}),
+    ...(proposalRevision ? { proposalRevision: { packageId: priorPackage.id, baseRevision: priorPackage.revision, note: lastNote } } : {}),
+    ...(input.proposalOnly === false && input.reviewedPackageRevision !== undefined ? { expectedPackageRevision: input.reviewedPackageRevision } : {}) });
 
   deps.onPhase?.('plan');
+  const restoreRevisionBase = () => {
+    const current = deps.store.get();
+    const pkg = deps.host.getPackage?.();
+    if (proposalRevision && pkg?.id === priorPackage?.id && pkg?.revision === priorPackage?.revision
+      && current.packageId === prior.packageId && current.idea.text === prompt
+      && (priorGeneration === undefined || deps.store.generation?.() === priorGeneration)
+      && (current.productionId === null || current.productionId === prior.productionId)
+      && (current.planHash === null || current.planHash === prior.planHash)
+      && (current.builtPackageInputsHash === null || current.builtPackageInputsHash === prior.builtPackageInputsHash)
+      && planInputsHash({ ...current, idea: { ...current.idea, text: prior.idea.text } }) === prior.builtPackageInputsHash) {
+      deps.store.patch({ idea: { ...current.idea, text: prior.idea.text }, plan: prior.plan,
+        builtPackageInputsHash: prior.builtPackageInputsHash, planHash: prior.planHash, productionId: prior.productionId });
+    }
+  };
   try {
     await write(input.proposalOnly === true);
   } catch (error) {
+    restoreRevisionBase();
     return failure('PLAN_FAILED', 'plan', messageOf(error, PLAN_FAILED));
   }
 
   if (input.proposalOnly === true) {
     const planned = deps.store.get();
     const pkg = deps.host.getPackage?.();
-    if (!planned.packageId || !pkg) return failure('PLAN_FAILED', 'plan', planned.plan.error || PLAN_FAILED);
-    return { ok: true, proposal: { ...proposalForPackage(pkg, basePrompt, revisionNotes), motionModel: input.motionModel ?? 'auto' }, snapshot: null };
+    if (!['building', 'ready'].includes(planned.plan.status) || !planned.packageId || !pkg
+      || planned.builtPackageInputsHash !== planInputsHash(planned)) {
+      const message = planned.plan.error || 'Your inputs changed while the plan was being written. Try again to review a fresh plan.';
+      restoreRevisionBase();
+      return failure('PLAN_FAILED', 'plan', message);
+    }
+    return { ok: true, proposal: { ...proposalForPackage(pkg, basePrompt, revisionNotes, narrationOnly, revisionBase), motionModel: input.motionModel ?? 'auto' }, snapshot: null };
   }
 
   const planned = deps.store.get();
@@ -469,6 +635,9 @@ export async function runSuperEasy(input: RunSuperEasyInput, deps: RunSuperEasyD
   if (reproposed.plan.status !== 'ready') {
     return failure('PLAN_FAILED', 'plan', reproposed.plan.error || PLAN_FAILED);
   }
+  if (reproposed.builtPackageInputsHash !== planInputsHash(reproposed)) {
+    return await runSuperEasy(withCurrentPlanInputs(input, reproposed, true), deps);
+  }
 
   deps.onPhase?.('approval');
   try {
@@ -515,16 +684,22 @@ export async function runSuperEasy(input: RunSuperEasyInput, deps: RunSuperEasyD
     }
   }
 
+  const beforeApproval = deps.store.get();
+  if (!beforeApproval.packageId || beforeApproval.builtPackageInputsHash !== planInputsHash(beforeApproval)) {
+    return await runSuperEasy(withCurrentPlanInputs(input, beforeApproval, true), deps);
+  }
+
   let runId: string | null = null;
   let approvalMessage: string | undefined;
   try {
-    approvalMessage = await approveAndGenerate(deps.store.get(), {
+    approvalMessage = await approveAndGenerate(beforeApproval, {
       api: deps.api as never,
       store: deps.store,
       snapshot,
       go: deps.go,
     }, {
       runMode: compute === 'colab' ? 'final' : 'take',
+      ...(input.reviewedPackageRevision !== undefined ? { expectedPackageRevision: input.reviewedPackageRevision } : {}),
       dispatchActions: compute !== 'colab' || hasPaidWork,
       onRunStarted(startedRunId) {
         runId = startedRunId;
@@ -543,6 +718,32 @@ export async function runSuperEasy(input: RunSuperEasyInput, deps: RunSuperEasyD
   }
 
   deps.onPhase?.('run');
+  if (compute === 'cpu' || !hasPaidWork) {
+    const pkg = deps.host.getPackage?.();
+    if (narrationPending(pkg)) {
+      if (typeof deps.api.generateLocalNarration !== 'function' || !Number.isSafeInteger(pkg?.revision)) {
+        return failure('CPU_FAILED', 'run', 'Local narration is unavailable. Reconnect to the server and try again.');
+      }
+      try {
+        deps.host.announce?.('Generating narration on this computer.');
+        const startingPackage = JSON.stringify(pkg);
+        const narrated = await deps.api.generateLocalNarration({ packageId: pkg.id, productionId, baseRevision: pkg.revision,
+          ...(compute === 'cpu' ? { recoveryInputs: { state: deps.store.get(), input: {
+            prompt: input.prompt, basePrompt, revisionNotes, lengthS: input.lengthS, compute, motionModel: input.motionModel,
+            videoType: input.videoType, conversationId: input.conversationId, attachmentSignature: input.attachmentSignature,
+            attachmentRevision: input.attachmentRevision, deepSeekNoThinking: input.deepSeekNoThinking,
+          } } } : {}) });
+        if (JSON.stringify(deps.host.getPackage?.()) !== startingPackage) {
+          return failure('CPU_FAILED', 'run', 'The video changed while narration was being generated. Reload the saved version before trying again.');
+        }
+        deps.host.adoptBuiltPackage(narrated);
+      } catch (error) {
+        const revision = narrationRevisionFor(error, pkg);
+        if (revision) return { ...failure('CPU_FAILED', 'run', messageOf(error, 'Narration is too long.')), retryable: false, narrationRevision: revision };
+        return failure('CPU_FAILED', 'run', messageOf(error, 'Local narration could not be generated.'));
+      }
+    }
+  }
   if (compute === 'cpu') {
     const cpu = await runCpuGenerate({
       host: deps.host,
@@ -569,7 +770,8 @@ export async function runSuperEasy(input: RunSuperEasyInput, deps: RunSuperEasyD
     try {
       await pollFinalRun(deps.api, runId, input.run);
     } catch (error) {
-      return failure('RUN_FAILED', 'run', messageOf(error, RUN_FAILED));
+      return { ...failure('RUN_FAILED', 'run', messageOf(error, RUN_FAILED)),
+        ...(error instanceof TerminalRunError && error.recoveryEligible ? { failedRunId: runId } : {}) };
     }
     try {
       const blob = await deps.api.getRunVideo(runId);

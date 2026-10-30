@@ -6,6 +6,7 @@
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import { collectMockContribution } from '../helpers/comfy-contribution.mjs';
 import { createHash } from 'node:crypto';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -206,7 +207,12 @@ test('TR07: runs.start passes mode and corrections to onComplete', async (t) => 
 test('TR07: the default mode is still a final render and lands no takes', async (t) => {
   const { app, runtime, renderCalls } = makeApp(t);
   try {
-    const started = await app.runs.start({ backendId: 'byo-comfyui', pkg: fixturePackage() });
+    const pkg = fixturePackage();
+    delete pkg.scenes.at(-1).transitionOut;
+    pkg.scenes.forEach(scene => { delete scene.narration; });
+    collectMockContribution(pkg, app.store.dir);
+    app.store.write(pkg);
+    const started = await app.runs.start({ backendId: 'byo-comfyui', pkg });
     const finished = await app.runs.wait(started.runId);
 
     assert.equal(finished.status, 'done');

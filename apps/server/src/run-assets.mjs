@@ -7,6 +7,7 @@
 // named file (asset `file` plus H12 `variants.*.file`) keeps the two in step without hard-coding
 // the intermediate folder.
 import { cpSync, existsSync, mkdirSync } from 'node:fs';
+import { copyGenerationReceipts } from '../../../packages/jobs/src/model-contribution.mjs';
 import { dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { workflowSidecars } from './workflow.mjs';
 
@@ -40,6 +41,7 @@ export function isInside(root, file) {
  * @returns {string[]} the relative paths actually copied
  */
 export function copyNamedAssets({ pkg, outputDir, packageDir }) {
+  copyGenerationReceipts({ pkg, sourceDir: outputDir, packageDir });
   const copied = [];
   for (const file of namedAssetFiles(pkg)) {
     if (!isInside(outputDir, file)) continue;

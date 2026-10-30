@@ -127,9 +127,21 @@ function buildPackage(pkg, assetId, take, { sanitize = false } = {}) {
   if (media === undefined) delete asset.media;
   else asset.media = media;
 
-  const gen = sanitize ? pickFields(take.gen, GEN_FIELDS) : clone(take.gen);
+  // Source-fingerprinted takes retain their resolved job inputs in the sidecar.
+  // The package is the authored request, which may use asset IDs and dimensions
+  // that the planner resolves differently. Replacing it with job inputs both
+  // destroys that request and immediately invalidates its source fingerprint.
+  const sourceGen = typeof take.sourceGenFingerprint === 'string' && isObject(asset.gen)
+    ? clone(asset.gen) : null;
+  const gen = sourceGen ?? (sanitize ? pickFields(take.gen, GEN_FIELDS) : clone(take.gen));
   if (gen === undefined) delete asset.gen;
   else {
+    if (sourceGen && isObject(take.gen)) {
+      for (const key of ['backend', 'attempt_id', 'job_id', 'idempotency_key', 'params_hash', 'created_at']) {
+        if (take.gen[key] !== undefined) gen[key] = clone(take.gen[key]);
+        else delete gen[key];
+      }
+    }
     // Normalize a bare factory id left by older ingest so existing takes can
     // still be selected without re-running Google Colab.
     const stamped = provenanceBackend(gen.backend, asset.gen?.backend);

@@ -767,7 +767,10 @@ export function planJobs(pkg, opts = {}) {
       continue;
     }
     const readyish = asset.status === "ready" || asset.status === "candidate" || asset.status === "rejected";
-    if (readyish && !opts.includeReady) {
+    // includeReady regenerates explicitly selected roots, not their already
+    // available dependency closure. Unready dependencies still become jobs so
+    // the caller can price or refuse the expanded work.
+    if (readyish && (!opts.includeReady || (only && !only.has(assetId)))) {
       skipped.push({ asset: assetId, reason: `status ${JSON.stringify(asset.status)} needs no generation` });
       continue;
     }

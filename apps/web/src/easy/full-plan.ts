@@ -5,7 +5,7 @@ import { readPlanCard, type PlanCard } from '../productions/cards/plan-card.ts';
 
 const LOAD_ERROR = 'We couldn’t load the full plan. Close and try again.';
 const PLANNING_ERROR = 'We couldn’t prepare the plan. No generation was started.';
-const CONFLICT_ERROR = 'This package changed elsewhere. Your edits were not overwritten. Close and reopen the full plan to load the latest version.';
+const CONFLICT_ERROR = 'This project changed elsewhere. Your edits were not overwritten. Close and reopen the full plan to load the latest version.';
 
 interface LoadedPackage {
   package: Record<string, unknown>;
@@ -164,7 +164,7 @@ function setPointer(root: Record<string, unknown>, segments: readonly string[], 
 /** Apply pointer-addressed text edits to a deep clone, leaving pkg untouched. */
 export function applyFullPlanFields<T>(pkg: T, fields: Readonly<Record<string, string>>): T {
   const edited = cloneValue(pkg);
-  if (!asRecord(edited)) throw new Error('The full package must be an object.');
+  if (!asRecord(edited)) throw new Error('The full project must be an object.');
   for (const [path, value] of Object.entries(fields)) {
     const segments = pointerSegments(path);
     const previous = valueAtPointer(edited, segments);
@@ -274,7 +274,7 @@ function assetMarkup(entry: AssetEntry, index: number): string {
     { key: 'negative', label: 'Negative prompt', rows: 3 },
     { key: 'style', label: 'Style', rows: 2 },
     { key: 'finishing_sound', label: 'Input finishing sound', rows: 3 },
-    { key: 'plan', label: 'Procedural audio plan', rows: 4 },
+    { key: 'plan', label: 'Audio plan', rows: 4 },
   ];
   for (const field of inputFields) {
     if (hasOwn(inputs, field.key)) {
@@ -296,7 +296,7 @@ function assetMarkup(entry: AssetEntry, index: number): string {
   }
   const dialogue = asRecord(direction?.dialogue);
   const dialogueFields: Array<{ key: string; label: string; rows: number; hint?: string }> = [
-    { key: 'text', label: 'Dialogue · exact spoken text', rows: 3, hint: 'Keep this exact line consistent with the scene narration and conditioning clip.' },
+    { key: 'text', label: 'Dialogue · exact spoken text', rows: 3, hint: 'Keep this exact line consistent with the scene narration and source video.' },
     { key: 'conditioningText', label: 'Dialogue · conditioning transcript', rows: 3 },
     { key: 'language', label: 'Dialogue · language', rows: 2 },
     { key: 'voice', label: 'Dialogue · voice direction', rows: 2 },
@@ -362,7 +362,7 @@ function gpuMarkup(cardInput: unknown): string {
 <dl>
 <div><dt>Kind</dt><dd>${escapeHtml(displayOf(action.kind))}</dd></div>
 <div><dt>Target</dt><dd>${escapeHtml(actionTarget(action))}</dd></div>
-<div><dt>Takes</dt><dd>${escapeHtml(actionTakes(action))}</dd></div>
+<div><dt>Versions</dt><dd>${escapeHtml(actionTakes(action))}</dd></div>
 <div><dt>Upper bound</dt><dd>${escapeHtml(displayOf(action.upperBound))}</dd></div>
 <div><dt>Asset IDs</dt><dd>${escapeHtml(actionAssets(action))}</dd></div>
 </dl>
@@ -380,7 +380,7 @@ function packageJson(pkg: unknown): string {
   try {
     return JSON.stringify(pkg, null, 2) ?? '';
   } catch {
-    return 'Package JSON is unavailable.';
+    return 'Project JSON is unavailable.';
   }
 }
 
@@ -419,11 +419,11 @@ ${textField({ id: 'easy-full-plan-soundtrack', label: 'Soundtrack', path: '/prop
 </section>
 <section id="easy-full-plan-scenes" class="easy-full-plan-section" aria-labelledby="easy-full-plan-scenes-title">
 <div class="easy-full-plan-section-heading"><div><p class="easy-full-plan-step">02</p><h3 id="easy-full-plan-scenes-title">Scenes</h3></div><span>${scenes.length} total</span></div>
-<div class="easy-full-plan-cards">${sceneCards || '<p class="easy-full-plan-empty">This package has no scenes.</p>'}</div>
+<div class="easy-full-plan-cards">${sceneCards || '<p class="easy-full-plan-empty">This project has no scenes.</p>'}</div>
 </section>
 <section id="easy-full-plan-assets" class="easy-full-plan-section" aria-labelledby="easy-full-plan-assets-title">
 <div class="easy-full-plan-section-heading"><div><p class="easy-full-plan-step">03</p><h3 id="easy-full-plan-assets-title">Generation assets</h3></div><span>${assets.length} total</span></div>
-<div class="easy-full-plan-cards">${assetCards || '<p class="easy-full-plan-empty">This package has no generation assets.</p>'}</div>
+<div class="easy-full-plan-cards">${assetCards || '<p class="easy-full-plan-empty">This project has no generation assets.</p>'}</div>
 </section>
 <section id="easy-full-plan-gpu" class="easy-full-plan-section" aria-labelledby="easy-full-plan-gpu-title">
 <div class="easy-full-plan-section-heading"><div><p class="easy-full-plan-step">04</p><h3 id="easy-full-plan-gpu-title">GPU actions &amp; cost</h3></div><span>Read only</span></div>
@@ -431,7 +431,7 @@ ${textField({ id: 'easy-full-plan-soundtrack', label: 'Soundtrack', path: '/prop
 ${gpuMarkup(card)}
 <details class="easy-full-plan-json"><summary>Full signed plan JSON <span>Read only</span></summary><pre>${escapeHtml(packageJson(card ?? null))}</pre></details>
 </section>
-<details class="easy-full-plan-json"><summary>Full package JSON <span>Read only</span></summary><pre data-full-plan-json>${escapeHtml(packageJson(pkg))}</pre></details>
+<details class="easy-full-plan-json"><summary>Full project JSON <span>Read only</span></summary><pre data-full-plan-json>${escapeHtml(packageJson(pkg))}</pre></details>
 </main>
 </div>
 <footer class="easy-full-plan-savebar">
@@ -505,9 +505,9 @@ async function loadPackage(ctx: EasyStepContext): Promise<{ latest: LoadedPackag
   const wrapper = asRecord(body);
   const fallback = asRecord(ctx.host.getPackage());
   const pkg = asRecord(wrapper?.package) ?? (wrapper && hasOwn(wrapper, 'id') && hasOwn(wrapper, 'scenes') ? wrapper : fallback);
-  if (!pkg) throw new Error('The current package is unavailable.');
+  if (!pkg) throw new Error('The current project is unavailable.');
   const packageId = state.packageId || textOf(pkg.id);
-  if (!packageId) throw new Error('The current package id is unavailable.');
+  if (!packageId) throw new Error('The current project id is unavailable.');
   return {
     latest: {
       package: pkg,
@@ -697,7 +697,7 @@ export async function openFullPlanEditor(ctx: EasyStepContext, hooks: FullPlanHo
       }
 
       setBusy(true);
-      setStatus('Saving the full package…');
+      setStatus('Saving the full project…');
       try {
         const editor = cloneValue(latest.editor ?? asRecord(ctx.host.editorStore.getState().doc.editor) ?? { version: 1, captionOverrides: [] });
         const response = await ctx.host.apiFetch(`/api/package/${encodeURIComponent(loaded.packageId)}`, {
@@ -735,7 +735,7 @@ export async function openFullPlanEditor(ctx: EasyStepContext, hooks: FullPlanHo
         return true;
       } catch (error) {
         if (error instanceof FullPlanHttpError && error.status === 409) showError(CONFLICT_ERROR);
-        else showError(`We couldn’t save the full package. ${messageOf(error)}`);
+        else showError(`We couldn’t save the full project. ${messageOf(error)}`);
         return false;
       } finally {
         setBusy(false);

@@ -64,7 +64,7 @@ import { createClipStore, mountRenderBar, withRenderOverride, type RenderBarHand
 import { previewPackage, type PreviewClip } from './takes/preview-takes.ts';
 import { mountSceneTimeline, type SceneTimelineHandle } from './editor/timeline/mount';
 import type { ClipChip } from './editor/timeline/clip-state.ts';
-import { openInitialProject, type OpenedProject } from './default-project.ts';
+import { DEFAULT_PACKAGE_ID, openInitialProject, type OpenedProject } from './default-project.ts';
 import { assetRowHtml, hydrateAssetThumbs, type AssetThumbsHandle } from './assets/asset-row.ts';
 import { createThumbsClient, type ThumbsClient, type ThumbResult } from './thumbs/client.ts';
 import { mountAssetViewer } from './viewer/asset-viewer.ts';
@@ -130,6 +130,19 @@ function settleStatusChip(): void {
 
 let pkg = structuredClone(pkgJson) as unknown as PackageV1;
 const editorStore = createEditorStore({ package: pkg as never });
+let projectedPackage = editorStore.getState().doc.package;
+// Timeline onDocument only fires for content edits, not save acknowledgements.
+// Always project the current canonical document (which retains newer local edits),
+// rather than applying an old request's package or only bumping a revision number.
+editorStore.subscribe(() => {
+  const { doc, session } = editorStore.getState();
+  if (!session.previewing && doc.package !== projectedPackage) {
+    projectedPackage = doc.package;
+    pkg = structuredClone(doc.package) as unknown as PackageV1;
+    const projectName = document.getElementById('project-name');
+    if (projectName) projectName.textContent = pkg.title;
+  }
+});
 const shellToasts = createShellToastController();
 const saveStatusEl = document.getElementById('save-status');
 // UX05: the header reads the save-state snapshot, not just a local boolean. A
@@ -141,6 +154,11 @@ const paintSaveStatus = (state = editorStore.saveState()) => {
   saveStatusEl.dataset.editSequence = String(state.editSequence);
   saveStatusEl.dataset.acknowledgedSequence = String(state.acknowledgedSequence);
   saveStatusEl.dataset.revision = state.acknowledgedRevision == null ? '' : String(state.acknowledgedRevision);
+  if (state.editSequence > 0) {
+    const draft = document.getElementById('draft');
+    if (draft) draft.textContent = state.status === 'saved'
+      ? `saved · revision ${state.acknowledgedRevision}` : saveStatusText(state.status, state.error ?? undefined);
+  }
 };
 editorStore.subscribeSaveState(paintSaveStatus);
 paintSaveStatus();
@@ -161,7 +179,7 @@ async function saveEditorNow(): Promise<{
 }> {
   await autosave?.flush();
   const doc = editorStore.getState().doc;
-  const status = editorStore.saveStatus();
+  const status = editorStore.saveState().status;
   const revision = Number(doc.package.revision ?? 0);
   return {
     ok: status === 'saved',
@@ -169,7 +187,7 @@ async function saveEditorNow(): Promise<{
     baseRevision: revision,
     revision,
     status,
-    text: editorStore.statusText(),
+    text: saveStatusText(status, editorStore.saveState().error ?? undefined),
   };
 }
 function recoveryLine(label: string, local: string, server: string): string {
@@ -255,6 +273,7 @@ function showRecoveryPrompt(offer: RecoveryOffer): void {
 }
 
 async function publishRestored(restored: ReturnType<typeof recoveryDocument>, baseRevision: number, offer: RecoveryOffer): Promise<void> {
+  const generation = editorStore.documentGeneration();
   const result = await savePackageRequest(apiFetch, {
     packageId: offer.packageId,
     baseRevision,
@@ -262,6 +281,7 @@ async function publishRestored(restored: ReturnType<typeof recoveryDocument>, ba
     editor: restored.editor,
     editSequence: 0,
   });
+  if (editorStore.documentGeneration() !== generation) return;
   if (result.ok) {
     editorStore.noteSave({ type: 'ack', editSequence: 0, revision: result.revision });
     pkg = editorStore.getState().doc.package as unknown as PackageV1;
@@ -298,6 +318,7 @@ let editorApi: SceneTimelineHandle | null = null;
 function adoptEditorPackage(next: PackageV1, editor?: EditorSidecar): void {
   pkg = next;
   editorStore.replaceDocument({ package: next as never, ...(editor ? { editor } : {}) });
+  if (sessionToken() && Number.isSafeInteger(next.revision)) editorStore.noteSave({ type: 'ack', editSequence: 0, revision: next.revision });
 }
 
 // When the local server is open, the seeded demo's references and cast belong
@@ -790,6 +811,15 @@ function resetPreviewMedia(nextPkg: PackageV1): void {
       previewMediaKeys.delete(file);
     }
   }
+  for (const font of nextPkg.theme?.fonts ?? []) {
+    const file = font.file;
+    const key = `font:${nextPkg.revision ?? 0}:${file}`;
+    if (file && previewMediaSources[file] && previewMediaKeys.get(file) !== key) {
+      revokePreviewUrl(file);
+      delete previewMediaSources[file];
+      previewMediaKeys.delete(file);
+    }
+  }
 }
 
 async function hydratePreviewAudio(requests: PreviewAudioRequest[]): Promise<void> {
@@ -797,13 +827,16 @@ async function hydratePreviewAudio(requests: PreviewAudioRequest[]): Promise<voi
   const generation = previewMediaGeneration;
   if (!packageId || requests.length === 0) return;
   let changed = false;
+  let staleFont = false;
   await Promise.all(requests.map(async request => {
     const failed = previewMediaFailed.get(request.file);
-    if (previewMediaSources[request.file] || previewMediaFlights.has(request.file)
+    const flightKey = `${request.file}\u0000${request.cacheKey}`;
+    if (previewMediaSources[request.file] || previewMediaFlights.has(flightKey)
       || (failed && failed.key === request.cacheKey && Date.now() - failed.at < 30_000)) return;
     const flight = (async () => {
       try {
-        const response = await apiFetch(`/api/package/${encodeURIComponent(packageId)}/media?path=${encodeURIComponent(request.file)}`);
+        const route = request.kind === 'font' ? 'font' : 'media';
+        const response = await apiFetch(`/api/package/${encodeURIComponent(packageId)}/${route}?path=${encodeURIComponent(request.file)}`);
         if (!response.ok) {
           previewMediaFailed.set(request.file, { key: request.cacheKey, at: Date.now() });
           return;
@@ -813,6 +846,12 @@ async function hydratePreviewAudio(requests: PreviewAudioRequest[]): Promise<voi
           URL.revokeObjectURL(url);
           return;
         }
+        if (request.kind === 'font' && (!pkg.theme?.fonts?.some(font => font.file === request.file)
+          || request.cacheKey !== `font:${pkg.revision ?? 0}:${request.file}`)) {
+          URL.revokeObjectURL(url);
+          staleFont = true;
+          return;
+        }
         previewMediaSources[request.file] = url;
         previewMediaKeys.set(request.file, request.cacheKey);
         previewMediaFailed.delete(request.file);
@@ -820,13 +859,13 @@ async function hydratePreviewAudio(requests: PreviewAudioRequest[]): Promise<voi
       } catch {
         previewMediaFailed.set(request.file, { key: request.cacheKey, at: Date.now() });
       } finally {
-        previewMediaFlights.delete(request.file);
+        previewMediaFlights.delete(flightKey);
       }
     })();
-    previewMediaFlights.set(request.file, flight);
+    previewMediaFlights.set(flightKey, flight);
     await flight;
   }));
-  if (changed && generation === previewMediaGeneration && String(pkg.id ?? '') === packageId) {
+  if ((changed || staleFont) && generation === previewMediaGeneration && String(pkg.id ?? '') === packageId) {
     updatePreview(pkg, timeline, generatedAssets);
   }
 }
@@ -1226,13 +1265,6 @@ function syncTimeline(): void {
   }
 }
 
-function markDirty(reason: string): void {
-  state.dirty = true;
-  $('draft').textContent = `draft · ${reason} · recompiled on export`;
-  syncTimeline();
-  updatePreview(pkg, timeline, generatedAssets);
-}
-
 /** C-pres: the storyboard's presenter toolbar (coverage + placement + label). */
 function presenterBar(): string {
   const presenter = (pkg.presenter ?? {}) as { enabled?: boolean; scenes?: unknown; placement?: string; label?: string };
@@ -1263,6 +1295,9 @@ function mixBar(): string {
 
 function renderStoryboard(): void {
   const host = $('storyboard');
+  const active = document.activeElement instanceof HTMLInputElement && host.contains(document.activeElement)
+    ? document.activeElement : null;
+  const focus = active ? { scene: active.dataset.scene, field: active.dataset.field, value: active.dataset.value, start: active.selectionStart, end: active.selectionEnd } : null;
   resetSceneCardCache();
   host.innerHTML = presenterBar() + mixBar() + pkg.scenes
     .map((scene, index) => {
@@ -1282,6 +1317,8 @@ function renderStoryboard(): void {
         <div class="scene-top"><span class="idx">${index + 1}</span><b>${esc(scene.id)}</b><span class="layout">${esc(scene.layout)}${scene.variant ? ` · ${esc(scene.variant)}` : ''}</span>${editStatus ? `<span class="render-status ${editStatus}">${editStatus === 'rendered' ? 're-rendered' : 'reused'}</span>` : ''}</div>
         <label>Headline</label>
         <input type="text" data-scene="${esc(scene.id)}" data-field="headline" value="${esc(copy.headline ?? '')}" placeholder="Add a headline…" maxlength="64" />
+        <label>Kicker</label>
+        <input type="text" data-scene="${esc(scene.id)}" data-field="kicker" value="${esc(copy.kicker ?? '')}" placeholder="Add a kicker…" maxlength="64" />
         <label>Sub / body</label>
         <input type="text" data-scene="${esc(scene.id)}" data-field="${scene.layout === 'hero' ? 'body' : 'sub'}" value="${esc(copy[scene.layout === 'hero' ? 'body' : 'sub'] ?? '')}" placeholder="Add supporting copy…" maxlength="240" />
         ${chart}
@@ -1305,8 +1342,8 @@ function renderStoryboard(): void {
     input.addEventListener('input', () => {
       const scene = pkg.scenes.find(item => item.id === input.dataset.scene);
       if (!scene) return;
-      (scene.copy as Record<string, unknown>)[input.dataset.field!] = input.value;
-      markDirty(`${scene.id}.${input.dataset.field}`);
+      const result = editorStore.dispatch({ type: 'SetSceneCopy', sceneId: scene.id, copy: { ...scene.copy, [input.dataset.field!]: input.value } });
+      if (!result.ok) logActivity(`Copy edit failed: ${result.error}`);
     });
   });
   host.querySelectorAll<HTMLInputElement>('input[data-value]').forEach(input => {
@@ -1316,8 +1353,8 @@ function renderStoryboard(): void {
       const dataset = datasetId ? pkg.datasets?.[datasetId] : undefined;
       const index = Number(input.dataset.value);
       if (!dataset || !dataset.values[index]) return;
-      dataset.values[index].value = Number(input.value) || 0;
-      markDirty(`chart.${dataset.values[index].label}`);
+      const result = editorStore.dispatch({ type: 'SetDatasetValue', sceneId: scene!.id, index, value: Number(input.value) || 0 });
+      if (!result.ok) logActivity(`Chart edit failed: ${result.error}`);
     });
   });
   // Click a card (but not while editing a field or pressing a per-scene action) to jump the Player to that scene.
@@ -1361,6 +1398,11 @@ function renderStoryboard(): void {
     audioMixEnabled = mixToggle.checked;
     logActivity(`Sound design ${audioMixEnabled ? 'on' : 'off'} for the next render/export`);
   });
+  if (focus) {
+    const input = [...host.querySelectorAll<HTMLInputElement>('input[data-field], input[data-value]')].find(item => item.dataset.scene === focus.scene && item.dataset.field === focus.field && item.dataset.value === focus.value);
+    input?.focus({ preventScroll: true });
+    if (input?.type === 'text') input.setSelectionRange(focus.start, focus.end);
+  }
 }
 
 const PALETTE_LABELS = ['Background', 'Accent', 'Text', 'Highlight'];
@@ -1376,12 +1418,8 @@ function renderPalette(): void {
   host.querySelectorAll<HTMLInputElement>('input[data-color]').forEach(input => {
     input.addEventListener('input', () => {
       const index = Number(input.dataset.color);
-      colors[index] = input.value;
-      for (const scene of pkg.scenes) {
-        const procedural = scene.background?.procedural as { palette?: string[] } | undefined;
-        if (procedural) procedural.palette = [colors[0], colors[1], colors[2]];
-      }
-      markDirty('palette');
+      const result = editorStore.dispatch({ type: 'SetPalette', index, color: input.value });
+      if (!result.ok) logActivity(`Palette edit failed: ${result.error}`);
     });
   });
 }
@@ -2125,16 +2163,11 @@ async function approveFromGenerateTab(): Promise<void> {
 // the storyboard shows. Shared by the per-scene actions.
 async function persistDraft(): Promise<Record<string, unknown>> {
   if (!token) return { package: pkg };
-  const saved = await apiFetch(`/api/package/${encodeURIComponent(pkg.id)}`, {
-    method: 'PATCH',
-    headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({ baseRevision: pkg.revision, package: pkg }),
-  });
-  const savedBody = (await saved.json().catch(() => ({}))) as { revision?: number; error?: string; currentRevision?: number };
-  if (!saved.ok) throw new Error(savedBody.error === 'conflict' ? `edit conflict at revision ${savedBody.currentRevision}` : (savedBody.error ?? `HTTP ${saved.status}`));
-  pkg.revision = savedBody.revision!;
-  logActivity(`Saved revision ${savedBody.revision} before the scene action`);
-  return { packageId: pkg.id, baseRevision: savedBody.revision };
+  const generation = editorStore.documentGeneration();
+  const saved = await saveEditorNow();
+  if (editorStore.documentGeneration() !== generation) throw new Error('The open project changed before saving finished');
+  if (!saved.ok) throw new Error(saved.text);
+  return { packageId: saved.packageId, baseRevision: saved.revision };
 }
 
 /** C11: re-render one scene through the renderer's incremental renderer (A6), then download the full MP4. */
@@ -2204,31 +2237,13 @@ async function applySceneChipFlow(sceneId: string, chip: string): Promise<void> 
 async function applyPresenterFlow(args: Record<string, unknown>, note: string): Promise<void> {
   logActivity(`Presenter: ${note} (opt-in; clips are planned, not run)`);
   try {
-    const body = await persistDraft();
-    const response = await apiFetch('/api/presenter/set', {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ ...body, ...args }),
-    });
-    const result = (await response.json().catch(() => ({}))) as {
-      error?: string;
-      summary?: string;
-      package?: PackageV1;
-      revision?: number;
-      presenters?: Timeline['presenters'];
-      findings?: Array<{ code: string; message: string }>;
-    };
-    if (!response.ok) throw new Error(result.error ?? `HTTP ${response.status}`);
-    if (result.package) {
-      pkg = result.package;
-      if (result.revision != null) pkg.revision = result.revision;
-      timeline.presenters = result.presenters ?? [];
-      adoptEditorPackage(pkg);
-      updatePreview(pkg, timeline, generatedAssets);
-      renderStoryboard();
-    }
-    const fix = (result.findings ?? []).find(finding => finding.code === 'PRESENTER_ON_READ_ONLY_SCENE');
-    logActivity(`Presenter: ${result.summary ?? note}${fix ? ` — ${fix.message}` : ''}`);
+    // Same pure presenter operation as /api/presenter/set, committed before any
+    // await. Autosave serializes it behind pending copy/timeline edits, retaining
+    // undo, newer typing, sidecars and genuine external revision conflicts.
+    const result = editorStore.dispatch({ type: 'SetPresenter', args });
+    if (!result.ok) throw new Error(result.error);
+    await persistDraft();
+    logActivity(`Presenter saved: ${note}`);
   } catch (error) {
     logActivity(`Presenter change failed: ${(error as Error).message}`);
   }
@@ -2328,9 +2343,17 @@ async function productionRenderFields(productionId: string | null | undefined): 
   return { commandId: `render:${commandId}`, expected: { productionRevision: revision } };
 }
 
-async function renderExportBlob(overrideReason?: string, options: { productionId?: string | null } = {}): Promise<{ blob: Blob; revision: number; renderId?: string }> {
+async function renderExportBlob(overrideReason?: string, options: { productionId?: string | null; persistedRevision?: number } = {}): Promise<{ blob: Blob; revision: number; renderId?: string }> {
+  // Resolve the owner from the same server review snapshot used by Keep. This
+  // also covers editor exports after a reload, without an Easy URL/local state.
+  const productionId = token
+    ? (await takesApi.listClips(String(pkg.id))).productionId ?? options.productionId
+    : options.productionId;
   let body: Record<string, unknown> = { package: pkg };
-  if (token) {
+  if (token && options.persistedRevision !== undefined) {
+    if (!options.productionId || state.dirty || editorStore.saveState().status !== 'saved' || pkg.revision !== options.persistedRevision) throw new Error('The saved package changed. Review and approve the current version before exporting.');
+    body = { packageId: pkg.id, baseRevision: options.persistedRevision };
+  } else if (token) {
     // C2: persist with a base revision, then render that exact revision.
     const saved = await apiFetch(`/api/package/${encodeURIComponent(pkg.id)}`, { method: 'PATCH', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ baseRevision: pkg.revision, package: pkg }) });
     const savedBody = await saved.json().catch(() => ({}));
@@ -2339,17 +2362,21 @@ async function renderExportBlob(overrideReason?: string, options: { productionId
     body = { packageId: pkg.id, baseRevision: savedBody.revision };
     logActivity(`Saved revision ${savedBody.revision} before render`);
   }
-  const bound = Boolean(token) && typeof options.productionId === 'string' && options.productionId !== '';
+  const bound = Boolean(token) && typeof productionId === 'string' && productionId !== '';
   // Other production commands (a new conversation, a chat turn) can land
   // between reading the revision and the render, so a conflict reads it again.
   for (let attempt = 0; ; attempt += 1) {
-    const production = bound ? await productionRenderFields(options.productionId) : {};
+    const production = bound ? await productionRenderFields(productionId) : {};
     const requestBody = { ...(audioMixEnabled ? body : { ...body, mixAudio: false }), ...production };
+    const renderedRevision = Number(pkg.revision) || 0;
+    const renderedPackageId = String(pkg.id);
     const response = await apiFetch('/api/render', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(withRenderOverride(requestBody, overrideReason)) });
     if (response.ok) {
       const blob = await response.blob();
       const renderId = response.headers.get('x-comfyrizz-render-id') ?? undefined;
-      return { blob, revision: Number(pkg.revision) || 0, ...(renderId ? { renderId } : {}) };
+      const { readRenderedArtifact } = await import('./easy/render-artifact-client.ts');
+      const artifact = await readRenderedArtifact(apiFetch, response, blob, { packageId: renderedPackageId, revision: renderedRevision });
+      return { ...artifact, blob, revision: renderedRevision, ...(renderId ? { renderId } : {}) };
     }
     const errorBody = (await response.json().catch(() => ({}))) as { error?: string; code?: string; gate?: RenderGateSummary };
     if (bound && errorBody.code === 'REVISION_CONFLICT' && attempt < 2) continue;
@@ -2805,7 +2832,7 @@ function init(opened: OpenedProject): void {
   if (timelineHost) {
     const timelineHooks: TimelineHooks = {
       onDocument(next, compiled) {
-        pkg = next;
+        pkg = structuredClone(next);
         timeline = compiled;
         scrub.max = String(Math.max(0, compiled.durationInFrames - 1));
         const frame = player?.getCurrentFrame() ?? 0;
@@ -2853,21 +2880,23 @@ function init(opened: OpenedProject): void {
     onFrame();
     logActivity('Remotion Player ready: compiled timeline mounted');
   });
+  updatePreview(pkg, timeline, generatedAssets);
 
   const easyRoot = document.getElementById('easy-root');
   if (easyRoot) {
-    // UX16F: the Easy export step persists only the canonical delivery record
-    // (name and bytes). A stable artifact resolver is not mounted because UX15
-    // exposes no artifact lookup route; the step reports "not connected" rather
-    // than pretending a saved download is recoverable.
+    // Saved MP4 records resolve through authenticated, byte-verified downloads.
     const easyHost = {
       apiFetch, editorStore, previewTake, refreshClips, adoptBuiltPackage, seekToScene,
-      hasToken: () => Boolean(sessionToken()), getPackage: () => pkg, renderMp4: (options?: { productionId?: string | null }) => renderExportBlob(undefined, options),
+      hasToken: () => Boolean(sessionToken()), getPackage: () => pkg, renderMp4: (options?: { productionId?: string | null; persistedRevision?: number }) => renderExportBlob(undefined, options),
       clips: () => clipStore.all(), subscribeClips: (listener: () => void) => clipStore.subscribe(() => listener()), takesApi,
       clipGate: () => studioClipGate(clipStore.all(), pkg.assets as never), applySceneChip: applySceneChipFlow, aiSelection: () => agentSettings.selection(),
       openAgentSettings: () => document.getElementById('agent-settings-open')?.dispatchEvent(new MouseEvent('click', { bubbles: true })),
       openEditor: () => { setMode('advanced'); }, playerElement: () => $('player'),
       exportArtifactStorage: exportArtifactStorage(),
+      resolveExportArtifact: async (record: { exportId: string; packageId: string; revision: number | null }) => {
+        const { resolveRenderedArtifact } = await import('./easy/render-artifact-client.ts');
+        return resolveRenderedArtifact(apiFetch, record);
+      },
     };
     mountEasyStudio(easyRoot, easyHost);
   }
@@ -3257,6 +3286,12 @@ function init(opened: OpenedProject): void {
 
   projectChat = mountProjectChat({
     apiFetch: chatApiFetch,
+    getEditContext: () => {
+      // A bare launch demo is a starting point for a new conversation. Once
+      // Super Easy opens a real package, Advanced chat must edit that package.
+      if (opened.source !== 'requested' && pkg.id === DEFAULT_PACKAGE_ID) return null;
+      return { packageId: pkg.id, revision: pkg.revision };
+    },
     getAgentProgress: async sessionId => {
       const response = await chatApiFetch(`/api/agent/progress?sessionId=${encodeURIComponent(sessionId)}`);
       if (!response.ok) throw new Error(`Progress HTTP ${response.status}`);
@@ -3397,11 +3432,7 @@ const openedProject = await openInitialProject({
   hasToken: Boolean(sessionToken()),
   request: input => apiFetch(input),
   onPackage: (nextPackage, nextEditor) => {
-    editorStore.replaceDocument({
-      package: nextPackage as never,
-      ...(nextEditor ? { editor: nextEditor as never } : {}),
-    });
-    pkg = nextPackage;
+    adoptEditorPackage(nextPackage, nextEditor as EditorSidecar | undefined);
     const compiled = editorStore.getState().derived.timeline;
     if (compiled) timeline = compiled as unknown as Timeline;
   },

@@ -12,7 +12,7 @@
  * (C13), so an edit can be diffed against what the frame grid actually was. No secrets:
  * the API token and the provider keys never reach it.
  */
-import { createReadStream, existsSync } from 'node:fs';
+import { createReadStream, existsSync, mkdtempSync, rmSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { buildVariants } from '../variant.mjs';
@@ -21,7 +21,8 @@ import { sceneAssetIds } from '../scene.mjs';
 import { packageTimeline, timingChangeReason } from '../edit.mjs';
 import { measuredOptionsFromDir } from '../compile-package.mjs';
 import { loadCompositionManifest } from '../../../../packages/compositions/src/index.mjs';
-import { createDeliverySnapshot, preflightDelivery } from '../productions/delivery-snapshot.mjs';
+import { createDeliverySnapshot, preflightDelivery, stageDeliverySnapshot } from '../productions/delivery-snapshot.mjs';
+import { publishRenderArtifact, readRenderArtifact } from '../render-artifacts.mjs';
 import { readEditor, validateEditor } from '../editor-sidecar.mjs';
 
 /**
@@ -216,7 +217,7 @@ export function createRenderRoutes(options = {}) {
   }
 
   function sendRouteError(response, error) {
-    const status = Number.isSafeInteger(error?.status) ? error.status : 500;
+    const status = Number.isSafeInteger(error?.status) ? error.status : error?.code === 'INVALID_PACKAGE' ? 400 : 500;
     return sendJson(response, status, {
       error: error?.message ?? 'render failed',
       ...(typeof error?.code === 'string' ? { code: error.code } : {}),
@@ -650,7 +651,7 @@ export function createRenderRoutes(options = {}) {
         intent = intentFor(body);
         editorInfo = editorFor(pkg, body);
         snapshot = deliverySnapshotFor({ pkg, packagePath }, body, intent, editorInfo.editor);
-        preflight = preflightDelivery(snapshot, { reviews: body.reviews });
+        preflight = preflightDelivery(snapshot, { reviews: body.reviews, mixAudio: body.mixAudio });
       } catch (error) {
         return sendRouteError(response, error);
       }
@@ -671,9 +672,16 @@ export function createRenderRoutes(options = {}) {
         deliveryFingerprint: snapshot.fingerprint,
       });
       let job;
+      let staged;
+      let stagingDir;
       try {
+        // Freeze both the accepted package and its exact media before yielding
+        // to the renderer. Later edits cannot relabel this historical download.
+        stagingDir = mkdtempSync(join(rendersDir, `${renderId}-`));
+        staged = stageDeliverySnapshot({ snapshot, packageDir: dirname(packagePath), stagingDir });
+        if (existsSync(output)) throw new Error('Fresh render output already exists');
         hold.beginRender(() => job?.cancel());
-        job = startRender(render, packagePath, output, {
+        job = startRender(render, staged.packagePath, output, {
           onLog: line => events.publish({ type: 'render.log', renderId, line }),
           intent,
           deliveryFingerprint: snapshot.fingerprint,
@@ -684,6 +692,8 @@ export function createRenderRoutes(options = {}) {
           ...(body.mixAudio === false ? { mixAudio: false } : {}),
         });
         const result = await job.promise;
+        const artifact = intent === 'final' ? publishRenderArtifact({ renderId, rendersDir,
+          receiptDir: store.dir, staged, snapshot, preflight, result, revision }) : null;
         hold.endRender();
         events.publish({
           type: 'render.finished',
@@ -713,10 +723,15 @@ export function createRenderRoutes(options = {}) {
           'cache-control': 'no-store',
           'content-disposition': `attachment; filename="comfyrizz-${renderId}.mp4"`,
           'x-comfyrizz-render-id': renderId,
+          ...(artifact ? {
+            'x-comfyrizz-artifact-url': `/api/render/artifacts/${renderId}`,
+            'x-comfyrizz-video-sha256': artifact.videoSha256,
+          } : {}),
           'x-comfyrizz-timeline-sha256': result.hash,
           'x-comfyrizz-frames': String(result.frames),
           'x-comfyrizz-delivery-fingerprint': snapshot.fingerprint,
           'x-comfyrizz-export-intent': intent,
+          ...(preflight.warnings.length ? { 'x-comfyrizz-delivery-warnings': preflight.warnings.map(item => item.code).join(',') } : {}),
           'x-comfyrizz-speech-sha256': snapshot.speechSha256,
           ...(revision == null ? {} : { 'x-comfyrizz-revision': String(revision) }),
           ...productionHeaders(admission),
@@ -733,6 +748,8 @@ export function createRenderRoutes(options = {}) {
         });
         if (cancelled || response.writableEnded || response.destroyed) return;
         sendJson(response, 500, { error: error.message, renderId });
+      } finally {
+        if (stagingDir) rmSync(stagingDir, { recursive: true, force: true });
       }
     } finally {
       hold.release();
@@ -763,7 +780,7 @@ export function createRenderRoutes(options = {}) {
         });
       }
       if (!body.sceneId) return sendJson(response, 400, { error: 'sceneId required' });
-      const assets = sceneAssetIds(target.pkg, body.sceneId, measuredOptionsFromDir(dirname(target.packagePath)));
+      const assets = sceneAssetIds(target.pkg, body.sceneId, measuredOptionsFromDir(dirname(target.packagePath), target.pkg));
       if (assets === null) return sendJson(response, 404, { error: `unknown scene ${body.sceneId}` });
       const output = join(rendersDir, `${renderId}.mp4`);
       const cacheDir = sceneCacheDir(target.pkg.id);
@@ -792,7 +809,7 @@ export function createRenderRoutes(options = {}) {
         intent = intentFor(body);
         editorInfo = editorFor(target.pkg, body);
         snapshot = deliverySnapshotFor(target, body, intent, editorInfo.editor);
-        preflight = preflightDelivery(snapshot, { reviews: body.reviews });
+        preflight = preflightDelivery(snapshot, { reviews: body.reviews, mixAudio: body.mixAudio });
       } catch (error) {
         return sendRouteError(response, error);
       }
@@ -861,6 +878,7 @@ export function createRenderRoutes(options = {}) {
           'x-comfyrizz-full-reason': result.reason ?? '',
           'x-comfyrizz-delivery-fingerprint': snapshot.fingerprint,
           'x-comfyrizz-export-intent': intent,
+          ...(preflight.warnings.length ? { 'x-comfyrizz-delivery-warnings': preflight.warnings.map(item => item.code).join(',') } : {}),
           'x-comfyrizz-speech-sha256': snapshot.speechSha256,
           ...(target.revision == null ? {} : { 'x-comfyrizz-revision': String(target.revision) }),
           ...productionHeaders(admission),
@@ -936,7 +954,7 @@ export function createRenderRoutes(options = {}) {
         intent = intentFor(body);
         editorInfo = editorFor(target.pkg, body);
         snapshot = deliverySnapshotFor(target, body, intent, editorInfo.editor);
-        preflight = preflightDelivery(snapshot, { reviews: body.reviews });
+        preflight = preflightDelivery(snapshot, { reviews: body.reviews, mixAudio: body.mixAudio });
       } catch (error) {
         return sendRouteError(response, error);
       }
@@ -1033,6 +1051,7 @@ export function createRenderRoutes(options = {}) {
           'x-comfyrizz-frames': String(result.frames),
           'x-comfyrizz-delivery-fingerprint': snapshot.fingerprint,
           'x-comfyrizz-export-intent': intent,
+          ...(preflight.warnings.length ? { 'x-comfyrizz-delivery-warnings': preflight.warnings.map(item => item.code).join(',') } : {}),
           'x-comfyrizz-speech-sha256': snapshot.speechSha256,
           ...(target.revision == null ? {} : { 'x-comfyrizz-revision': String(target.revision) }),
           ...productionHeaders(admission),
@@ -1068,6 +1087,20 @@ export function createRenderRoutes(options = {}) {
       return false;
     }
     if (typeof pathname !== 'string') return false;
+    const artifact = /^\/api\/render\/artifacts\/(r_[a-f0-9]{12})(\/video)?$/.exec(pathname);
+    if (artifact && request.method === 'GET') {
+      try {
+        const saved = readRenderArtifact({ renderId: artifact[1], rendersDir, receiptDir: store.dir });
+        if (!artifact[2]) sendJson(response, 200, saved.metadata);
+        else {
+          response.writeHead(200, { 'content-type': 'video/mp4', 'content-length': saved.bytes.length,
+            'cache-control': 'no-store', 'content-disposition': `attachment; filename="comfyrizz-${artifact[1]}.mp4"`,
+            'x-comfyrizz-video-sha256': saved.metadata.videoSha256 });
+          response.end(saved.bytes);
+        }
+      } catch (error) { sendJson(response, error.status ?? 500, { error: error.message, code: error.code }); }
+      return true;
+    }
     if (!DELIVERY_ROUTE_SET.has(pathname) || request.method !== 'POST') return false;
 
     // Every delivery caller is dispatched from the one table above and every

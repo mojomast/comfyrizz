@@ -159,6 +159,16 @@ test('Google Colab call order is spend-cap, approve, dispatch, then run', async 
   assert.equal(calls.find((item) => item.kind === 'approve').command.expected.productionRevision, 5);
 });
 
+test('chat correction approval dispatches the server-owned take without a second run request', async () => {
+  const store = memoryStore();
+  const { api, calls } = fakeApi();
+  await approveAndGenerate(store.get(), { api, store, snapshot: snapshot({}, [{
+    id: 'act_1', kind: 'shot.generate', targetId: 'shot_1', upperBound: 4,
+    assetIds: ['a_1'], executor: 'chat-correction-take', reuse: false,
+  }]) });
+  assert.deepEqual(kinds(calls), ['spend-cap', 'approve', 'dispatch']);
+});
+
 test('final mode starts one whole-production run and reports its id', async () => {
   const store = memoryStore();
   const { api, calls } = fakeApi();

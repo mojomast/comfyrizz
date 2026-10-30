@@ -1,5 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { collectMockContribution, approveMockContribution } from '../helpers/comfy-contribution.mjs';
 import { createServer } from 'node:http';
 import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { spawnSync } from 'node:child_process';
@@ -189,7 +190,7 @@ test('PN04: the gate reports 3/4 and blocks render at the frozen state', () => {
   assert.deepEqual(gate.blocking, [{ clipId: 's3_juno:a_juno_plate', state: 'review' }]);
 });
 
-test('PN04: approving s3 take 2 through the takes API makes the gate 4/4 and unblocks render', async (t) => {
+test('PN04: approving s3 take 2 with a verified mocked plate makes the gate 5/5 and unblocks render', async (t) => {
   const runtimeDir = tempRuntime(t);
   const renders = [];
   const app = createApp({
@@ -206,15 +207,17 @@ test('PN04: approving s3 take 2 through the takes API makes the gate 4/4 and unb
   t.after(() => app.close());
 
   const fixture = packageWithMedia();
+  collectMockContribution(fixture, app.store.dir);
   app.store.seed(fixture);
   app.takeStore.write(pkg.id, takesDoc);
+  approveMockContribution(app.takeStore, fixture, app.store.dir);
 
   await withServer(app, async ({ call }) => {
     const listed = await call(`/api/package/${pkg.id}/clips`);
     assert.equal(listed.status, 200);
     const listing = await listed.json();
-    assert.equal(listing.clips.length, 4);
-    assert.equal(listing.clips.filter(clip => clip.state === 'approved').length, 3);
+    assert.equal(listing.clips.length, 5);
+    assert.equal(listing.clips.filter(clip => clip.state === 'approved').length, 4);
     const juno = listing.clips.find(clip => clip.clipId === 's3_juno:a_juno_plate');
     assert.equal(juno.state, 'review');
     assert.equal(juno.takeCount, 2);
@@ -224,8 +227,8 @@ test('PN04: approving s3 take 2 through the takes API makes the gate 4/4 and unb
     assert.equal(blocked.status, 409);
     const blockedBody = await blocked.json();
     assert.equal(blockedBody.code, 'RENDER_GATE_BLOCKED');
-    assert.equal(blockedBody.approved, 3);
-    assert.equal(blockedBody.total, 4);
+    assert.equal(blockedBody.approved, 4);
+    assert.equal(blockedBody.total, 5);
     assert.equal(renders.length, 0);
 
     const clipId = encodeURIComponent('s3_juno:a_juno_plate');
@@ -240,8 +243,8 @@ test('PN04: approving s3 take 2 through the takes API makes the gate 4/4 and unb
 
     const gate = finalGate(fixture, app.takeStore.read(pkg.id));
     assert.equal(gate.ok, true);
-    assert.equal(gate.approved, 4);
-    assert.equal(gate.total, 4);
+    assert.equal(gate.approved, 5);
+    assert.equal(gate.total, 5);
     assert.deepEqual(gate.blocking, []);
 
     const rendered = await call('/api/render', { packageId: pkg.id });

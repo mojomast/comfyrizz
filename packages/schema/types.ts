@@ -1,7 +1,7 @@
 // GENERATED FILE - do not edit by hand.
 //
 // Source:        packages/schema/package-v1.schema.json
-// Schema sha256: 994208dd293f5a4eff7beb104dd1a1ddd80e633099ba3c091b1955449147d24b
+// Schema sha256: e4a04c57efb92f82b4faad72958ba4f58bf9bfe4e6e74e1a26d5edd4752e0445
 // Generator:     packages/schema/scripts/gen-types.mjs (v1.0.0)
 //
 // Regenerate: pnpm --filter @comfyrizz/schema gen:types
@@ -56,6 +56,10 @@ export interface PackageV1 {
      * [min 1, max 108000]
      */
     targetFrames?: number;
+    /**
+     * Require the compiled timeline to match targetFrames exactly, including transition overlaps.
+     */
+    exact?: boolean;
     minFrames?: number;
     maxFrames?: number;
     /**
@@ -295,6 +299,22 @@ export interface PackageAudio {
      */
     loop?: boolean;
     duck?: AudioDuck;
+    /**
+     * Optional finite source window for the music bed. Semantic validation requires startSeconds <
+     * endSeconds; music-video adoption also bounds it to the probed song.
+     */
+    trim?: {
+      startSeconds: number;
+      endSeconds: number;
+      };
+    /**
+     * Optional illustrative music-reactive treatment. It does not claim beat, lyric or song-section
+     * analysis.
+     */
+    reactive?: {
+      style: "waveform" | "bars";
+      intensity: number;
+      };
     };
   /**
    * LTX plate audio (an asset with media.audio: present) mixed under the narration. -24 LUFS-ish,
@@ -311,6 +331,17 @@ export interface PackageAudio {
    * [maxItems 64]
    */
   sfx?: Array<AudioSfx>;
+  /**
+   * Music-video lyric presentation. Absent means off; this field intentionally has no schema default
+   * so normalising an old package does not mutate its audio block.
+   */
+  lyricsStyle?: "off" | "caption" | "reel";
+  /**
+   * Optional canonical lyric cues in original-song seconds. Cue ends are exclusive; an omitted end
+   * is bounded by the next cue for semantic word validation.
+   * [maxItems 512]
+   */
+  lyrics?: Array<LyricCue>;
   }
 
 export interface AudioDuck {
@@ -334,6 +365,18 @@ export interface AudioSfx {
   at?: "scene-start" | "scene-end" | "transition";
   offset_seconds?: number;
   gain_db?: number;
+  }
+
+export interface LyricCue {
+  startSeconds: number;
+  endSeconds?: number;
+  text: string;
+  words?: Array<LyricWord>;
+  }
+
+export interface LyricWord {
+  startSeconds: number;
+  text: string;
   }
 
 export interface SceneMotion {
@@ -626,6 +669,11 @@ export interface Dataset {
   source_url?: string;
   retrieved_at?: string;
   note?: string;
+  csv_query?: {
+    id: string;
+    sha256: string;
+    description: string;
+    };
   }
 
 export interface Copy {
@@ -703,6 +751,19 @@ export interface ForegroundItem {
   size?: number;
   }
 
+export interface DrawingElement {
+  type: "path" | "polygon" | "text" | "rect" | "circle";
+  color: string;
+  opacity?: number;
+  start: number;
+  end: number;
+  }
+
+/**
+ * [min 0, max 1000]
+ */
+export type DrawingCoordinate = number;
+
 export interface Scene {
   id: SceneId;
   layout: "title" | "hero" | "stat" | "chart" | "list" | "split" | "compare" | "code";
@@ -715,7 +776,23 @@ export interface Scene {
   hero?: boolean;
   variant?: "centered" | "outro" | "full-bleed" | "split" | "bar" | "bullets" | "quote";
   preferredFrames?: number;
+  drawing?: {
+    background: string;
+    elements: Array<DrawingElement>;
+    source?: {
+      id: string;
+      sha256: string;
+      description: string;
+      };
+    };
   copy?: Copy;
+  /**
+   * Title layout only: headline font size in composition pixels. Omit for the existing 104px (outro
+   * 76px) default; explicit size uses 1.05 line-height. Width depends on font and copy, not
+   * auto-fit.
+   * [min 24, max 512]
+   */
+  headline_size?: number;
   data?: null | {
     dataset: DatasetId;
     display?: "bar" | "number" | "counter";
@@ -849,6 +926,16 @@ export interface Media {
   audio?: "none" | "muted" | "present";
   alpha?: boolean;
   codec?: string;
+  /**
+   * Audio sample rate in Hz, measured from the stored file.
+   * [min 1, max 768000]
+   */
+  sampleRate?: number;
+  /**
+   * Number of audio channels, measured from the stored file.
+   * [min 1, max 256]
+   */
+  channels?: number;
   /**
    * Recorded crop applied to the final plate (SPEC.md 6.4: 1920x1088 -> 1920x1080).
    */

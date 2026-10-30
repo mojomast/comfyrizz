@@ -28,6 +28,7 @@ export function agentConsoleEventText(event: AgentProgressEvent): string {
   if (type === 'request') return 'Submitted brief';
   if (type === 'runner_phase') {
     const phase = String(event.phase ?? 'initial');
+    if (event.status === 'admission_retry') return `Provider at capacity; retrying once after ${seconds(event.delayMs)}`;
     if (event.status === 'validation') return `${phase} validation ${event.ok === false ? 'found issues' : 'passed'}`;
     if (event.status === 'coverage') return `Coverage split: ${event.splits ?? '?'} scene(s) → ${event.scenes ?? '?'} total shots`;
     return `${phase} ${String(event.status ?? 'updated').replaceAll('_', ' ')}`;
@@ -76,7 +77,7 @@ ${argumentsMarkup(event)}${problemsMarkup(event)}
 
 export function agentConsoleBuildMarkup(progress: AgentProgressSnapshot | null): string {
   const build = progress?.build;
-  if (!build) return '<p class="agent-console-empty">The Build view appears after the first project or clip-change tool call.</p>';
+  if (!build) return '<p class="agent-console-empty">The Build view appears when work begins on your project.</p>';
   const proposal = build.proposal && typeof build.proposal === 'object' ? build.proposal : {};
   const scenes = Array.isArray(build.scenes) ? build.scenes : [];
   const assets = Array.isArray(build.assets) ? build.assets : [];
@@ -88,7 +89,7 @@ export function agentConsoleBuildMarkup(progress: AgentProgressSnapshot | null):
 ${build.coverageScenes ? `<p class="agent-console-coverage">Coverage split: ${build.coverageScenes} total shots</p>` : ''}
 </section>
 <section><h3>Scenes · ${scenes.length}</h3><ol class="agent-console-build-scenes">${scenes.map((scene: Record<string, any>) => `<li><strong>${escapeHtml(scene.id)}</strong><span>${escapeHtml(scene.headline || scene.layout || '')}</span><small>${scene.preferredFrames ?? 0} frames · ${scene.generationCalls ?? 0} generation call${scene.generationCalls === 1 ? '' : 's'}</small></li>`).join('')}</ol></section>
-${changes.length ? `<section><h3>Clip changes · ${changes.length}</h3><ol class="agent-console-build-assets">${changes.map((change: Record<string, any>) => `<li data-status="${escapeHtml(change.status)}"><strong>${escapeHtml(change.clipId)}</strong><span>${escapeHtml(change.promptAppend || change.note)}</span><small>${escapeHtml(change.status)}</small></li>`).join('')}</ol></section>` : ''}
+${changes.length ? `<section><h3>Shot changes · ${changes.length}</h3><ol class="agent-console-build-assets">${changes.map((change: Record<string, any>) => `<li data-status="${escapeHtml(change.status)}"><strong>${escapeHtml(change.clipId)}</strong><span>${escapeHtml(change.promptAppend || change.note)}</span><small>${escapeHtml(change.status)}</small></li>`).join('')}</ol></section>` : ''}
 <section><h3>Assets · ${assets.length}</h3><ol class="agent-console-build-assets">${assets.map((asset: Record<string, any>) => `<li data-status="${escapeHtml(asset.status)}"><strong>${escapeHtml(asset.kind)} · ${escapeHtml(asset.sceneId)}</strong><span>${escapeHtml(asset.intent)}</span><small>${escapeHtml(asset.status)}</small></li>`).join('')}</ol></section>`;
 }
 

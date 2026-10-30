@@ -69,6 +69,13 @@
       "warnings": []
     },
     {
+      "file": "valid/music-lyrics.json",
+      "kind": "valid",
+      "schemaOk": true,
+      "semantic": [],
+      "warnings": []
+    },
+    {
       "file": "valid/qwen3-voice.json",
       "kind": "valid",
       "schemaOk": true,
@@ -219,6 +226,46 @@
       "schemaCodes": [],
       "semantic": [
         "SEM_AUDIO_ASSET_NOT_READY"
+      ],
+      "warnings": null
+    },
+    {
+      "file": "invalid/audio-music-trim-order.json",
+      "kind": "invalid",
+      "schemaOk": true,
+      "schemaCodes": [],
+      "semantic": [
+        "SEM_AUDIO_TRIM_INVALID"
+      ],
+      "warnings": null
+    },
+    {
+      "file": "invalid/lyrics-caption-without-cues.json",
+      "kind": "invalid",
+      "schemaOk": true,
+      "schemaCodes": [],
+      "semantic": [
+        "SEM_LYRICS_INVALID"
+      ],
+      "warnings": null
+    },
+    {
+      "file": "invalid/lyrics-without-music-trim.json",
+      "kind": "invalid",
+      "schemaOk": true,
+      "schemaCodes": [],
+      "semantic": [
+        "SEM_LYRICS_MUSIC_REQUIRED"
+      ],
+      "warnings": null
+    },
+    {
+      "file": "invalid/drawing-invalid-timing.json",
+      "kind": "invalid",
+      "schemaOk": true,
+      "schemaCodes": [],
+      "semantic": [
+        "SEM_DRAWING_TIMING"
       ],
       "warnings": null
     },

@@ -113,6 +113,8 @@ export interface CompileAck {
 }
 
 export interface EditorExtras {
+  /** Changes on every document replacement, including reopening the same package. */
+  documentGeneration(): number;
   setMeasured(measured: MeasuredInput): void;
   setSession(patch: Partial<Pick<SessionState, 'selectedSceneIds' | 'playheadFrame' | 'zoom' | 'scrollFrame'>>): void;
   noteSave(event: SaveNotice): void;
@@ -186,7 +188,7 @@ function selectionFor(before: ProjectDoc, after: ProjectDoc, command: Command, f
     if (scenes.length === 0) return [];
     return [scenes[Math.min(Math.max(index, 0), scenes.length - 1)]!.id];
   }
-  if (command.type === 'SetVoice') return fallback;
+  if (command.type === 'SetVoice' || command.type === 'SetPresenter' || command.type === 'SetPalette') return fallback;
   return after.package.scenes.some(scene => scene.id === command.sceneId) ? [command.sceneId] : fallback;
 }
 
@@ -256,6 +258,7 @@ export function createEditorStore(options: {
   let derived: DerivedState = { timeline: null, inputHash: null, compiledSequence: null, diagnostics: [], mediaRanges: [] };
   let snapshot: EditorSnapshot = { doc: committed, derived, session };
   let acked = 0;
+  let documentGeneration = 0;
   /** Server revision of the newest acknowledgement. Never part of undoable content. */
   let acknowledgedRevision: number | null = null;
   /** Server revision reported by the current conflict, or null. */
@@ -375,6 +378,7 @@ export function createEditorStore(options: {
   recompute();
 
   const store: EditorStore & EditorExtras = {
+    documentGeneration: () => documentGeneration,
     getState: () => snapshot,
     subscribe(fn) {
       listeners.add(fn);
@@ -543,6 +547,7 @@ export function createEditorStore(options: {
     statusText: () => saveStatusText(store.saveStatus(), rejectionReason),
     measuredInput: () => measuredFor(visible(), measured),
     replaceDocument(next) {
+      documentGeneration += 1;
       preview = null;
       undoStack.length = 0;
       redoStack.length = 0;

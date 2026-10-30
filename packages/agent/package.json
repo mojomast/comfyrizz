@@ -4,6 +4,7 @@
   "private": true,
   "description": "Comfyrizz agent layer (C3): zod tool validation, repair loop, asset-type router",
   "type": "module",
+  "engines": { "node": ">=22.19.0" },
   "license": "MIT",
   "main": "dist/src/index.js",
   "types": "dist/src/index.d.ts",
@@ -24,9 +25,12 @@
     "m4:two": "npm run build && node scripts/m4-two-providers.mjs"
   },
   "dependencies": {
+    "@earendil-works/pi-agent-core": "1.4.0",
+    "@earendil-works/pi-ai": "1.4.0",
     "zod": "3.23.8"
   },
   "devDependencies": {
+    "@comfyrizz/llm": "workspace:*",
     "@types/node": "22.10.2",
     "typescript": "5.6.3"
   }

@@ -21,6 +21,8 @@ export async function load(url, context, next) {
 
 const { mountEasyStudio } = await import('../src/easy/mount.ts');
 const { createSuperEasySession } = await import('../src/easy/super-easy/session.ts');
+const { defaultEasyState, planInputsHash } = await import('../src/easy/store.ts');
+const { proposalForPackage } = await import('../src/easy/super-easy/proposal.ts');
 
 const PRODUCTION_ID = 'prod_0123456789abcdef01234567';
 const PLAN_HASH = 'c'.repeat(64);
@@ -72,6 +74,9 @@ class FakeWindow {
   dispatch(type, event = {}) {
     for (const listener of Array.from(this.listeners.get(type) ?? [])) listener(event);
   }
+
+  setInterval() { return 1; }
+  clearInterval() {}
 }
 
 class FakeDocument {
@@ -79,10 +84,27 @@ class FakeDocument {
     this.defaultView = new FakeWindow();
     this.documentElement = { dataset: {}, setAttribute() {} };
     this.activeElement = null;
+    this.body = { children: [], append(element) { this.children.push(element); } };
   }
 
   getElementById() {
     return null;
+  }
+
+  createElement(tagName) {
+    const listeners = new Map();
+    const element = {
+      tagName, ownerDocument: this, children: [], open: false,
+      setAttribute() {}, replaceChildren() {},
+      append(...children) { this.children.push(...children); },
+      remove() { this.ownerDocument.body.children = this.ownerDocument.body.children.filter(child => child !== this); },
+      addEventListener(type, fn) { listeners.set(type, fn); },
+      removeEventListener(type) { listeners.delete(type); },
+      showModal() { this.open = true; },
+      close() { this.open = false; listeners.get('close')?.(); },
+      click() { listeners.get('click')?.(); },
+    };
+    return element;
   }
 }
 
@@ -95,6 +117,8 @@ class FakeRoot {
     this.dataset = {};
     this.listeners = new Map();
     this.prompt = { value: '', focus() {} };
+    this.length = { value: '30' };
+    this.proposalChange = { value: '' };
     this.makeSimple = {
       handler: null,
       addEventListener(_type, handler) { this.handler = handler; },
@@ -104,6 +128,8 @@ class FakeRoot {
 
   querySelector(selector) {
     if (selector === '#super-easy-prompt') return this.prompt;
+    if (selector === '#super-easy-proposal-change') return this.proposalChange;
+    if (selector === '[data-super-easy-length]:checked') return this.length;
     if (selector === '[data-easy-make-simple]') return this.makeSimple;
     return null;
   }
@@ -123,6 +149,31 @@ class FakeRoot {
     const form = { closest: (selector) => (selector === '[data-super-easy-form]' ? {} : null) };
     for (const listener of Array.from(this.listeners.get('submit') ?? [])) {
       listener({ target: form, preventDefault() {} });
+    }
+  }
+
+  selectLength(seconds) {
+    this.length.value = String(seconds);
+    const target = {
+      value: this.length.value,
+      closest: (selector) => (selector === '[data-super-easy-length]' ? this.length : null),
+    };
+    for (const listener of Array.from(this.listeners.get('change') ?? [])) listener({ target });
+  }
+
+  attach(files) {
+    const target = {
+      files,
+      closest: (selector) => (selector === '[data-super-easy-context-files]' ? target : null),
+    };
+    for (const listener of Array.from(this.listeners.get('change') ?? [])) listener({ target });
+  }
+
+  revise(note) {
+    this.proposalChange.value = note;
+    const target = { closest: (selector) => (selector === '[data-super-easy-revise-proposal]' ? {} : null) };
+    for (const listener of Array.from(this.listeners.get('submit') ?? [])) {
+      listener({ target, preventDefault() {} });
     }
   }
 
@@ -163,6 +214,7 @@ function planEvent(sequence, index) {
 function createBackend(options = {}) {
   const calls = [];
   let revision = 3;
+  let packageRevision = 0;
   let iteration = null;
   const planEvents = [];
   let releaseBuild = null;
@@ -170,6 +222,14 @@ function createBackend(options = {}) {
     ? new Promise((resolve) => {
         releaseBuild = resolve;
       })
+    : null;
+  let releaseConversation = null;
+  let conversationGate = options.holdConversation
+    ? new Promise((resolve) => { releaseConversation = resolve; })
+    : null;
+  let releaseUpload = null;
+  const uploadGate = options.holdUpload
+    ? new Promise((resolve) => { releaseUpload = resolve; })
     : null;
 
   function snapshot() {
@@ -204,13 +264,37 @@ function createBackend(options = {}) {
     const method = String(init.method ?? 'GET').toUpperCase();
     const path = new URL(String(input), 'http://fake.local').pathname;
 
+    if (path === '/api/conversations' && method === 'POST') {
+      calls.push({ kind: 'conversation' });
+      const generation = calls.filter(call => call.kind === 'conversation').length;
+      if (generation === 1 && conversationGate) await conversationGate;
+      return json({ chatId: generation === 1 ? 'chat_oldproject' : 'chat_newproject' });
+    }
+    if (/^\/api\/chat\/[^/]+\/references$/u.test(path) && method === 'POST') {
+      calls.push({ kind: 'upload', path, filename: decodeURIComponent(init.headers?.['x-filename'] ?? '') });
+      if (uploadGate) await uploadGate;
+      return json({
+        reference: {
+          id: `ref_${calls.filter(call => call.kind === 'upload').length}`,
+          kind: 'image',
+          label: decodeURIComponent(init.headers?.['x-filename'] ?? 'upload'),
+          usage: 'reference',
+          rightsAsserted: true,
+        },
+      });
+    }
     if (path === '/api/agent' && method === 'POST') {
-      calls.push({ kind: 'build' });
+      const body = JSON.parse(String(init.body ?? '{}'));
+      calls.push({ kind: 'build', body });
       if (buildGate) await buildGate;
-      return json({ package: { id: 'pkg_1' }, live: true });
+      if (body.proposalRevision && (body.proposalRevision.packageId !== 'pkg_1' || body.proposalRevision.baseRevision !== packageRevision)) {
+        return json({ error: { code: 'STALE_PACKAGE', message: 'The project changed.' } }, 409);
+      }
+      packageRevision += 1;
+      return json({ package: options.builtPackage ?? { id: 'pkg_1', revision: packageRevision }, live: true });
     }
     if (path === '/api/productions' && method === 'POST') {
-      calls.push({ kind: 'production' });
+      calls.push({ kind: 'production', body: JSON.parse(String(init.body ?? '{}')) });
       return json({ productionId: PRODUCTION_ID, production: { id: PRODUCTION_ID, revision } });
     }
     if (/^\/api\/productions\/[^/]+\/easy-plan$/u.test(path) && method === 'POST') {
@@ -274,6 +358,13 @@ function createBackend(options = {}) {
     calls,
     releaseBuild() {
       releaseBuild?.();
+    },
+    releaseConversation() {
+      conversationGate = null;
+      releaseConversation?.();
+    },
+    releaseUpload() {
+      releaseUpload?.();
     },
     recoverPlan() {
       options.failPlan = false;
@@ -339,20 +430,27 @@ function finalWatchState() {
   return state;
 }
 
-function mountShell(backend) {
+function mountShell(backend, options = {}) {
   const previousStorage = globalThis.localStorage;
   globalThis.localStorage = memoryStorage();
+  if (options.setup) globalThis.localStorage.setItem('comfyrizz.super-easy.setup.v1', JSON.stringify(options.setup));
   const document = new FakeDocument();
+  document.defaultView.location.search = options.search ?? '';
   const root = new FakeRoot(document);
   let watchOptions = null;
   let stopCalls = 0;
   let createCalls = 0;
-  let currentPackage = null;
+  let currentPackage = options.package ?? null;
+  let saveStatus = 'saved';
+  const saveListeners = new Set();
+  const saveState = () => ({ status: saveStatus, editSequence: 1, acknowledgedSequence: saveStatus === 'saved' ? 1 : 0,
+    acknowledgedRevision: currentPackage?.revision ?? null, currentRevision: null, error: null });
 
   const host = {
     apiFetch: backend.apiFetch,
     hasToken: () => false,
     editorStore: {
+      ...(options.saveState ? { saveState, subscribeSaveState(listener) { saveListeners.add(listener); return () => saveListeners.delete(listener); } } : {}),
       getState: () => ({
         doc: { editSequence: 1 },
         derived: { timeline: { durationInFrames: 90 }, compiledSequence: 1 },
@@ -377,6 +475,7 @@ function mountShell(backend) {
       createCalls += 1;
       return createSuperEasySession({
         ...sessionOptions,
+        ...(options.run ? { run: options.run } : {}),
         watch: (next) => {
           watchOptions = next;
           return () => {
@@ -394,6 +493,14 @@ function mountShell(backend) {
     watch: () => watchOptions,
     stopCalls: () => stopCalls,
     createCalls: () => createCalls,
+    editPackage(pkg, status = 'saved') {
+      currentPackage = pkg;
+      saveStatus = status;
+      for (const listener of saveListeners) listener(saveState());
+    },
+    savedState() {
+      return JSON.parse(globalThis.localStorage.getItem('comfyrizz.easy.new'));
+    },
     navigate() {
       document.defaultView.location.search = '';
       document.defaultView.dispatch('popstate', {});
@@ -404,6 +511,195 @@ function mountShell(backend) {
     },
   };
 }
+
+function deferred() {
+  let resolve;
+  const promise = new Promise(done => { resolve = done; });
+  return { promise, resolve };
+}
+
+async function recoveryShell(options = {}) {
+  const pkg = { id: 'pkg_recover', revision: 7, title: 'Downloaded film', scenes: [], assets: {} };
+  const offer = { runId: 'failed_paid', packageId: pkg.id, baseRevision: 7,
+    action: 'recover_downloaded_outputs', additionalGenerationCredits: 0, view: '/unused/recovery/view' };
+  const record = { runId: 'recovery_new', sourceRunId: offer.runId, packageId: pkg.id, status: 'completed' };
+  const requests = [];
+  const backend = createBackend();
+  const baseFetch = backend.apiFetch;
+  let polls = 0;
+  backend.apiFetch = async (url, init = {}) => {
+    if (!String(url).startsWith('/api/run/')) return baseFetch(url, init);
+    const method = init.method ?? 'GET';
+    requests.push({ url: String(url), method, body: init.body && JSON.parse(init.body) });
+    if (String(url).endsWith('/recovery')) {
+      if (method === 'GET') {
+        if (options.getGate) await options.getGate.promise;
+        return json(options.offer ?? { ...offer, ...options.offerOverride }, options.getStatus ?? 200);
+      }
+      if (options.postGate) await options.postGate.promise;
+      return json(options.postBody ?? { runId: record.runId, sourceRunId: offer.runId, status: 'verifying' }, options.postStatus ?? 202);
+    }
+    if (String(url).endsWith('/cancel')) return json({});
+    if (String(url).endsWith('/video')) {
+      if (options.videoGate) await options.videoGate.promise;
+      return options.videoStatus ? json({ error: 'Recovered media receipt failed verification.' }, options.videoStatus)
+        : new Response('verified fixture MP4 bytes', { headers: { 'content-type': options.videoType ?? 'video/mp4' } });
+    }
+    if (options.pollGate) await options.pollGate.promise;
+    const status = options.statuses?.[polls++] ?? 'completed';
+    return json({ run: { ...record, status, ...(options.record ?? {}) } });
+  };
+  let runCalls = 0;
+  const shell = mountShell(backend, {
+    setup: { compute: 'colab', confirmed: true, spendCap: 10 },
+    run: async (input, deps) => {
+      runCalls++;
+      deps.host.adoptBuiltPackage({ package: pkg });
+      deps.store.patch({ packageId: pkg.id, productionId: PRODUCTION_ID });
+      if (input.proposalOnly) return { ok: true, proposal: proposalForPackage(pkg, input.prompt, []), snapshot: null };
+      input.run = { pollMs: 0 };
+      deps.onRunStarted(offer.runId);
+      return { ok: false, code: 'RUN_FAILED', stage: 'run', message: 'The paid collection failed.',
+        ...(options.noKnownFailure ? {} : { failedRunId: offer.runId }) };
+    },
+  });
+  shell.root.submit(PROMPT);
+  await approveProposal(shell);
+  await waitFor(() => shell.root.innerHTML.includes('The paid collection failed.'));
+  return { ...shell, requests, backend, pkg, runCalls: () => runCalls };
+}
+
+test('normal failed-run UI explicitly recovers once, polls, then offers the new authenticated MP4 download', async () => {
+  const postGate = deferred();
+  const shell = await recoveryShell({ postGate, statuses: ['verifying', 'rendering', 'completed'] });
+  try {
+    await waitFor(() => shell.root.innerHTML.includes('data-super-easy-recover-outputs'));
+    assert.match(shell.root.innerHTML, /Uses downloaded files; no new generation credits/);
+    assert.doesNotMatch(shell.root.innerHTML, /data-super-easy-retry/);
+    assert.deepEqual(shell.requests.map(r => r.method), ['GET']);
+    shell.root.click('[data-super-easy-recover-outputs]');
+    shell.root.click('[data-super-easy-recover-outputs]');
+    assert.match(shell.root.innerHTML, /disabled>Recovering downloaded outputs/);
+    assert.deepEqual(shell.requests.filter(r => r.method === 'POST'), [
+      { url: '/api/run/failed_paid/recovery', method: 'POST', body: { baseRevision: 7 } },
+    ]);
+    postGate.resolve();
+    await waitFor(() => shell.root.innerHTML.includes('data-super-easy-download'));
+    assert.match(shell.root.innerHTML, /Your video was recovered from downloaded outputs/);
+    assert.match(shell.root.innerHTML, /href="blob:/);
+    assert.equal(shell.requests.at(-1).url, '/api/run/recovery_new/video');
+    assert.equal(shell.requests.filter(r => r.url.endsWith('/recovery')).length, 2, 'no silent review refresh');
+    assert.equal(shell.runCalls(), 2, 'only original proposal and approved run');
+    assert.equal(shell.backend.calls.some(r => ['plan', 'command', 'run', 'spend-cap', 'dispatch'].includes(r.kind)), false);
+    assert.ok(shell.requests.every(r => !r.url.includes('?') && !r.url.includes('/view')));
+  } finally { shell.dispose(); shell.restore(); }
+});
+
+test('availability refuses GET errors, unrelated packages, missing actions, and unknown run failures', async () => {
+  for (const options of [{ getStatus: 422 }, { getStatus: 409 }, { offerOverride: { packageId: 'other' } },
+    { offerOverride: { baseRevision: 8 } }, { offerOverride: { additionalGenerationCredits: 1 } },
+    { offerOverride: { runId: 'other_run' } }, { offer: {} }, { noKnownFailure: true }]) {
+    const shell = await recoveryShell(options);
+    try {
+      await new Promise(resolve => setTimeout(resolve, 10));
+      assert.doesNotMatch(shell.root.innerHTML, /data-super-easy-recover-outputs/);
+      shell.root.click('[data-super-easy-recover-outputs]');
+      assert.equal(shell.requests.filter(r => r.method === 'POST').length, 0);
+      assert.equal(shell.requests.length, options.noKnownFailure ? 0 : 1);
+    } finally { shell.dispose(); shell.restore(); }
+  }
+});
+
+test('stale recovery and corrupt or refused media never retry, regenerate, or enter the done gallery', async () => {
+  for (const options of [{ postStatus: 409, postBody: { code: 'RECOVERY_STALE', error: 'The reviewed package changed.' } },
+    { record: { status: 'failed', error: 'Downloaded media is corrupt.' } }, { videoStatus: 422 }, { videoType: 'text/html' }]) {
+    const shell = await recoveryShell(options);
+    try {
+      await waitFor(() => shell.root.innerHTML.includes('data-super-easy-recover-outputs'));
+      shell.root.click('[data-super-easy-recover-outputs]');
+      await waitFor(() => shell.root.innerHTML.includes('No new generation was requested.'));
+      assert.match(shell.root.innerHTML, /in Studio before trying recovery again/);
+      assert.doesNotMatch(shell.root.innerHTML, /data-super-easy-download|data-super-easy-recover-outputs|data-super-easy-retry/);
+      shell.root.click('[data-super-easy-recover-outputs]');
+      shell.root.click('[data-super-easy-retry]');
+      assert.equal(shell.requests.filter(r => r.method === 'POST').length, 1);
+      assert.equal(shell.runCalls(), 2);
+    } finally { shell.dispose(); shell.restore(); }
+  }
+});
+
+test('package edits invalidate the displayed review rather than silently refreshing it on click', async () => {
+  const shell = await recoveryShell();
+  try {
+    await waitFor(() => shell.root.innerHTML.includes('data-super-easy-recover-outputs'));
+    shell.editPackage({ ...shell.pkg, revision: 8 });
+    shell.root.click('[data-super-easy-recover-outputs]');
+    assert.deepEqual(shell.requests.map(r => r.method), ['GET']);
+  } finally { shell.dispose(); shell.restore(); }
+});
+
+test('changed creative inputs hide the recovery action and cannot spend its old review', async () => {
+  const shell = await recoveryShell();
+  try {
+    await waitFor(() => shell.root.innerHTML.includes('data-super-easy-recover-outputs'));
+    shell.root.selectLength(45);
+    assert.doesNotMatch(shell.root.innerHTML, /data-super-easy-recover-outputs/);
+    shell.root.click('[data-super-easy-recover-outputs]');
+    assert.deepEqual(shell.requests.map(r => r.method), ['GET']);
+  } finally { shell.dispose(); shell.restore(); }
+});
+
+test('cancel and package changes discard late availability, POST and video responses', async () => {
+  for (const phase of ['get', 'post', 'poll', 'video']) for (const change of ['cancel', 'package']) {
+    const gate = deferred();
+    const shell = await recoveryShell({ [`${phase}Gate`]: gate });
+    try {
+      if (phase !== 'get') {
+        await waitFor(() => shell.root.innerHTML.includes('data-super-easy-recover-outputs'));
+        shell.root.click('[data-super-easy-recover-outputs]');
+        if (phase === 'poll') await waitFor(() => shell.requests.some(r => r.url === '/api/run/recovery_new'));
+        if (phase === 'video') await waitFor(() => shell.requests.some(r => r.url.endsWith('/video')));
+      }
+      if (change === 'cancel') shell.root.click('[data-super-easy-make-another]');
+      else shell.editPackage({ ...shell.pkg, id: 'pkg_other' });
+      gate.resolve();
+      await new Promise(resolve => setTimeout(resolve, 10));
+      assert.doesNotMatch(shell.root.innerHTML, /data-super-easy-download|data-super-easy-recover-outputs/);
+      if (change === 'cancel' && phase !== 'get') assert.ok(shell.requests.some(r => r.url === '/api/run/recovery_new/cancel'));
+      assert.equal(shell.runCalls(), 2);
+    } finally { gate.resolve(); shell.dispose(); shell.restore(); }
+  }
+});
+
+test('a fresh Easy shell opens the saved measured failure and offers a scoped narration revision', async () => {
+  const pkg = { id: 'pkg_1', revision: 1, title: 'Story', scenes: [{ id: 's1', narration: 'The original narration.' }] };
+  const state = defaultEasyState();
+  Object.assign(state, { packageId: pkg.id, productionId: PRODUCTION_ID, chatId: 'chat_original', videoType: 'data-story', attachmentSignature: 'source-pin', attachmentRevision: 1 });
+  state.idea.text = PROMPT;
+  state.builtPackageInputsHash = planInputsHash(state);
+  state.planHash = state.builtPackageInputsHash;
+  state.plan.status = 'ready';
+  const backend = createBackend();
+  const fetchBase = backend.apiFetch;
+  backend.apiFetch = async (url, init) => String(url).endsWith('/narration-fit') ? json({
+    code: 'NARRATION_TOO_LONG', packageId: pkg.id, packageRevision: 1,
+    details: { measuredSeconds: 31, authoredSeconds: 30, scenes: [{ sceneId: 's1', measuredSeconds: 4, availableSeconds: 3, targetWords: 2 }] },
+    inputs: { state, input: { prompt: PROMPT, basePrompt: PROMPT, revisionNotes: [], conversationId: state.chatId } },
+  }) : fetchBase(url, init);
+  const shell = mountShell(backend, { search: `?package=pkg_1&production=${PRODUCTION_ID}`, package: pkg });
+  try {
+    await waitFor(() => shell.root.innerHTML.includes('data-super-easy-revise-narration'));
+    assert.match(shell.root.innerHTML, /Measured duration: 31 seconds/);
+    shell.root.click('[data-super-easy-revise-narration]');
+    await waitFor(() => backend.calls.some(call => call.kind === 'build'));
+    const request = backend.calls.find(call => call.kind === 'build').body;
+    assert.equal(request.narrationRevision.packageId, pkg.id);
+    assert.equal(request.narrationRevision.baseRevision, 1);
+    assert.equal(request.narrationRevision.recoveryProductionId, PRODUCTION_ID);
+    assert.equal(request.conversationId, 'chat_original');
+    assert.equal(backend.calls.some(call => call.kind === 'command'), false);
+  } finally { shell.dispose(); shell.restore(); }
+});
 
 async function approveProposal(shell) {
   await waitFor(() => shell.root.innerHTML.includes('data-super-easy-approve-proposal'));
@@ -434,7 +730,7 @@ test('Generate in the real Easy shell starts one Draft session on This computer'
     assert.equal(backend.calls.some((call) => call.kind === 'clips' && call.packageId === PRODUCTION_ID), false);
     const plans = backend.calls.filter((call) => call.kind === 'plan');
     assert.ok(plans.length >= 2);
-    for (const call of plans) assert.deepEqual(call.body, { level: 'draft', compute: 'cpu' });
+    for (const call of plans) assert.deepEqual(call.body, { level: 'draft', compute: 'cpu', expectedPackageRevision: 1 });
 
     const commands = backend.calls.filter((call) => call.kind === 'command').map((call) => call.command);
     const iterationSet = commands.find((command) => command.kind === 'iteration.set');
@@ -449,6 +745,36 @@ test('Generate in the real Easy shell starts one Draft session on This computer'
     assert.match(shell.root.innerHTML, /data-super-easy-progress/u);
     assert.equal((shell.root.innerHTML.match(/data-super-easy-stage=/gu) ?? []).length, 5);
     assert.match(shell.root.innerHTML, /data-super-easy-overall-gauge/u);
+  } finally {
+    shell.dispose();
+    shell.restore();
+  }
+});
+
+test('the selected duration persists through proposal revision and approval briefs', async () => {
+  const backend = createBackend();
+  const shell = mountShell(backend);
+  try {
+    await waitFor(() => shell.root.dataset.superEasyView === 'home');
+    shell.root.selectLength(60);
+    shell.root.submit(PROMPT);
+    await waitFor(() => shell.root.innerHTML.includes('data-super-easy-approve-proposal'));
+    shell.root.revise('Make the ending more playful');
+    await waitFor(() => backend.calls.filter(call => call.kind === 'build').length === 2
+      && shell.root.innerHTML.includes('data-super-easy-approve-proposal'));
+    await approveProposal(shell);
+    await waitFor(() => shell.watch() !== null);
+
+    const builds = backend.calls.filter(call => call.kind === 'build');
+    assert.equal(builds.length, 2);
+    for (const call of builds) {
+      assert.match(call.body.brief, /Length: about 60 seconds\./u);
+      assert.doesNotMatch(call.body.brief, /Length: about 30 seconds\./u);
+    }
+    assert.match(builds[1].body.brief, /Make the ending more playful/u);
+    assert.deepEqual(builds[1].body.proposalRevision, { packageId: 'pkg_1', baseRevision: 1, note: 'Make the ending more playful' });
+    assert.equal(backend.calls.find(call => call.kind === 'production')?.body?.expected?.packageRevision, 2);
+    assert.ok(backend.calls.filter(call => call.kind === 'plan').every(call => call.body.expectedPackageRevision === 2));
   } finally {
     shell.dispose();
     shell.restore();
@@ -509,6 +835,42 @@ test('a second Generate while one runs does not start a second session', async (
   }
 });
 
+test('deferred conversation and upload completions stay out of Start New projects', async () => {
+  const backend = createBackend({ holdConversation: true, holdUpload: true });
+  const shell = mountShell(backend);
+  try {
+    await waitFor(() => shell.root.dataset.superEasyView === 'home');
+    shell.root.attach([{ name: 'old.png', type: 'image/png', size: 100 }]);
+    await waitFor(() => backend.calls.filter(call => call.kind === 'conversation').length === 1);
+
+    shell.root.click('[data-super-easy-make-another]');
+    shell.root.attach([{ name: 'new.png', type: 'image/png', size: 100 }]);
+    await waitFor(() => backend.calls.filter(call => call.kind === 'conversation').length === 2);
+
+    backend.releaseConversation();
+    await waitFor(() => backend.calls.filter(call => call.kind === 'upload').length === 1);
+    assert.equal(backend.calls.find(call => call.kind === 'upload').filename, 'new.png');
+    assert.equal(backend.calls.some(call => call.kind === 'upload' && call.filename === 'old.png'), false);
+
+    shell.root.click('[data-super-easy-make-another]');
+    backend.releaseUpload();
+    await new Promise(resolve => setImmediate(resolve));
+    await new Promise(resolve => setImmediate(resolve));
+
+    const fresh = shell.savedState();
+    assert.equal(fresh.chatId, null);
+    assert.equal(fresh.attachmentSignature, null);
+    assert.equal(fresh.attachmentRevision, 0);
+    assert.equal(backend.calls.filter(call => call.kind === 'upload').length, 1);
+    assert.equal(backend.calls.some(call => call.kind === 'build'), false);
+  } finally {
+    backend.releaseConversation();
+    backend.releaseUpload();
+    shell.dispose();
+    shell.restore();
+  }
+});
+
 test('Studio and Super Easy mode switches park and resume the same planning session', async () => {
   const backend = createBackend({ holdBuild: true });
   const shell = mountShell(backend);
@@ -531,6 +893,135 @@ test('Studio and Super Easy mode switches park and resume the same planning sess
     shell.dispose();
     shell.restore();
   }
+});
+
+function morningPackage(revision = 6) {
+  return { id: 'pkg_1', revision, title: 'MORNING STILL', format: { fps: 30, width: 1920, height: 1080 },
+    scenes: [
+      { id: 's1', layout: 'title', preferredFrames: revision === 6 ? 278 : 180, copy: { headline: 'MORNING STILL' } },
+      { id: 's2', layout: 'title', preferredFrames: revision === 6 ? 82 : 180, copy: { headline: 'Take your time.' } },
+    ], assets: {} };
+}
+
+test('normal full-plan return re-reviews saved 6 → 10 timings, then explicit approval uses 10 without replanning', async () => {
+  const backend = createBackend({ builtPackage: morningPackage() });
+  const shell = mountShell(backend, { saveState: true });
+  try {
+    shell.root.submit(PROMPT);
+    await waitFor(() => shell.root.innerHTML.includes('data-super-easy-approve-proposal'));
+    shell.root.click('[data-super-easy-review-edit-plan]');
+    shell.editPackage(morningPackage(10));
+    shell.root.makeSimple.click();
+    assert.match(shell.root.innerHTML, /Review proposed changes/);
+    assert.match(shell.root.innerHTML, /Before: 6/);
+    assert.match(shell.root.innerHTML, /After: 10/);
+    assert.match(shell.root.innerHTML, /Before: 278 frames at 30 fps/);
+    assert.match(shell.root.innerHTML, /Before: 82 frames at 30 fps/);
+    assert.equal((shell.root.innerHTML.match(/After: 180 frames at 30 fps/g) ?? []).length, 2);
+    assert.equal(backend.calls.filter(c => c.kind === 'build').length, 1);
+    assert.equal(backend.calls.some(c => ['production', 'run', 'dispatch', 'spend-cap', 'command'].includes(c.kind)), false);
+    shell.root.click('[data-super-easy-approve-proposal]');
+    await waitFor(() => shell.watch() !== null);
+    assert.equal(backend.calls.find(c => c.kind === 'production').body.expected.packageRevision, 10);
+    assert.equal(backend.calls.filter(c => c.kind === 'build').length, 1);
+    // Save events during production cannot resurrect a proposal.
+    shell.editPackage(morningPackage(11));
+    await new Promise(resolve => setImmediate(resolve));
+    assert.doesNotMatch(shell.root.innerHTML, /data-super-easy-approve-proposal/);
+  } finally { shell.dispose(); shell.restore(); }
+});
+
+test('an edit after the returned review still fails the normal revision guard; approval never refreshes', async () => {
+  const backend = createBackend({ builtPackage: morningPackage() });
+  const shell = mountShell(backend, { saveState: true });
+  try {
+    shell.root.submit(PROMPT);
+    await waitFor(() => shell.root.innerHTML.includes('data-super-easy-approve-proposal'));
+    shell.root.click('[data-super-easy-review-edit-plan]');
+    shell.editPackage(morningPackage(10));
+    shell.root.makeSimple.click();
+    shell.editPackage(morningPackage(11));
+    await new Promise(resolve => setImmediate(resolve));
+    assert.match(shell.root.innerHTML, /After: 10/);
+    shell.root.click('[data-super-easy-approve-proposal]');
+    await waitFor(() => shell.root.innerHTML.includes('The reviewed package changed'));
+    assert.equal(backend.calls.some(c => c.kind === 'production'), false);
+    assert.equal(backend.calls.filter(c => c.kind === 'build').length, 1);
+  } finally { shell.dispose(); shell.restore(); }
+});
+
+test('return waits for the acknowledged save and ignores saves while the proposal is parked', async () => {
+  const backend = createBackend({ builtPackage: morningPackage() });
+  const shell = mountShell(backend, { saveState: true });
+  try {
+    shell.root.submit(PROMPT);
+    await waitFor(() => shell.root.innerHTML.includes('data-super-easy-approve-proposal'));
+    shell.root.click('[data-super-easy-review-edit-plan]');
+    shell.editPackage(morningPackage(10), 'pending');
+    shell.root.makeSimple.click();
+    assert.doesNotMatch(shell.root.innerHTML, /After: 10/);
+    shell.editPackage(morningPackage(10));
+    await waitFor(() => shell.root.innerHTML.includes('After: 10'));
+    shell.root.click('[data-super-easy-review-edit-plan]');
+    shell.editPackage(morningPackage(11));
+    await new Promise(resolve => setImmediate(resolve));
+    assert.doesNotMatch(shell.root.innerHTML, /Your film proposal/);
+    shell.root.makeSimple.click();
+    assert.match(shell.root.innerHTML, /Before: 10/);
+    assert.match(shell.root.innerHTML, /After: 11/);
+    assert.equal(backend.calls.some(c => c.kind === 'production'), false);
+    assert.equal(backend.calls.filter(c => c.kind === 'build').length, 1);
+  } finally { shell.dispose(); shell.restore(); }
+});
+
+test('pending return plus early Make this film shows a waiting dialog and recovers after save without replanning', async () => {
+  const backend = createBackend({ builtPackage: morningPackage() });
+  const shell = mountShell(backend, { saveState: true });
+  try {
+    shell.root.submit(PROMPT);
+    await waitFor(() => shell.root.innerHTML.includes('data-super-easy-approve-proposal'));
+    shell.root.click('[data-super-easy-review-edit-plan]');
+    shell.editPackage({ ...morningPackage(10), revision: 6 }, 'pending');
+    shell.root.makeSimple.click();
+    shell.root.click('[data-super-easy-approve-proposal]');
+    await waitFor(() => shell.document.body.children.some(element => element.tagName === 'dialog' && element.open));
+    const dialog = shell.document.body.children.find(element => element.tagName === 'dialog');
+    assert.equal(dialog.children[0].textContent, 'Waiting for editor save');
+    assert.match(dialog.children[1].innerHTML, /not saved yet.*review the updated proposal.*Make this film again/);
+    assert.match(shell.root.innerHTML, /data-super-easy-approve-proposal/);
+    assert.doesNotMatch(shell.root.innerHTML, /After: 10/);
+    assert.equal(backend.calls.some(c => ['production', 'run', 'dispatch', 'spend-cap', 'command'].includes(c.kind)), false);
+    shell.editPackage(morningPackage(10));
+    await waitFor(() => shell.root.innerHTML.includes('After: 10'));
+    assert.match(shell.root.innerHTML, /After: 180 frames at 30 fps/);
+    assert.equal(backend.calls.filter(c => c.kind === 'build').length, 1);
+    assert.equal(backend.calls.some(c => ['production', 'run', 'dispatch', 'spend-cap', 'command'].includes(c.kind)), false);
+    // Closing the waiting message is not approval either.
+    dialog.children[2].children[0].click();
+    await new Promise(resolve => setImmediate(resolve));
+    assert.equal(backend.calls.some(c => c.kind === 'production'), false);
+    shell.root.click('[data-super-easy-approve-proposal]');
+    await waitFor(() => shell.watch() !== null);
+    assert.equal(backend.calls.find(c => c.kind === 'production').body.expected.packageRevision, 10);
+    assert.equal(backend.calls.filter(c => c.kind === 'build').length, 1);
+  } finally { shell.dispose(); shell.restore(); }
+});
+
+test('a different host package with the same revision cannot be adopted or approved by the parked proposal', async () => {
+  const backend = createBackend({ builtPackage: morningPackage() });
+  const shell = mountShell(backend, { saveState: true });
+  try {
+    shell.root.submit(PROMPT);
+    await waitFor(() => shell.root.innerHTML.includes('data-super-easy-approve-proposal'));
+    shell.root.click('[data-super-easy-review-edit-plan]');
+    shell.editPackage({ ...morningPackage(), id: 'pkg_other', title: 'Another project' });
+    shell.root.makeSimple.click();
+    assert.match(shell.root.innerHTML, /MORNING STILL/);
+    assert.doesNotMatch(shell.root.innerHTML, /Another project/);
+    shell.root.click('[data-super-easy-approve-proposal]');
+    await waitFor(() => shell.root.innerHTML.includes('The reviewed project changed'));
+    assert.equal(backend.calls.some(c => c.kind === 'production'), false);
+  } finally { shell.dispose(); shell.restore(); }
 });
 
 test('navigation away and back preserves the same watch and finished work', async () => {

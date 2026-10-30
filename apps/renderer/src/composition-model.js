@@ -1,5 +1,6 @@
 import { narrationAudio } from './audio-model.js';
 import { resolveAudioMix } from './audio-mix-model.js';
+import { clipLyricCues, normalizeLyricsStyle, normalizeLyricsTrim } from './lyrics-model.js';
 
 /**
  * Shared narration, caption and mix decisions for the web Player and the MP4
@@ -16,16 +17,34 @@ import { resolveAudioMix } from './audio-mix-model.js';
  * @param {{ missingMedia?: string[], mixAudio?: boolean }} [options]
  */
 export function resolvePackageComposition(pkg, timeline, { missingMedia = [], mixAudio = true } = {}) {
-  const audio = narrationAudio(pkg);
+  const mix = resolveAudioMix(pkg, timeline);
+  // A supplied music-video master is the only audible source. Legacy music beds
+  // continue to coexist with narration and native dialogue exactly as before.
+  const audio = mixAudio !== false && mix.music?.master === true ? null : narrationAudio(pkg);
   const missing = new Set(missingMedia ?? []);
   const narration = audio
     ? { assetId: audio.assetId, file: audio.file, missing: missing.has(audio.file) }
     : null;
   const measured = (timeline?.captions ?? []).some(cue => !cue.estimated);
-  const mix = resolveAudioMix(pkg, timeline);
+  const masterMusic = mixAudio !== false && mix.music?.master === true;
+  const lyricsStyle = normalizeLyricsStyle(pkg?.audio?.lyricsStyle);
+  const lyricsTrim = normalizeLyricsTrim(mix.music
+    ? { startSeconds: mix.music.startSeconds, endSeconds: mix.music.endSeconds }
+    : null);
+  const lyrics = mixAudio !== false && mix.music && lyricsStyle !== 'off' && lyricsTrim
+    ? {
+        style: lyricsStyle,
+        cues: clipLyricCues(pkg.audio.lyrics, lyricsTrim),
+        trim: lyricsTrim,
+        avoidReactiveCard: Boolean(mix.music.reactive),
+      }
+    : null;
   return {
     narration,
-    captions: measured ? timeline.captions : null,
+    // A master song replaces narration, so its old narration captions are stale
+    // too. mixAudio:false deliberately retains the legacy narration/caption path.
+    captions: !masterMusic && measured ? timeline.captions : null,
+    lyrics,
     mix,
     mixAudio: mixAudio !== false && mix.enabled === true,
   };

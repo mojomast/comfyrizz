@@ -108,7 +108,7 @@ export async function probeKokoroRuntime(options = {}) {
   }
 }
 
-function normalizeRequest(input) {
+function normalizeRequest(input, maxTextChars = MAX_SAMPLE_LINE_CHARS, preserveText = false) {
   if (!isPlainObject(input)) {
     throw new KokoroSynthError('AUDITION_INVALID_INPUT', 'the audition request must be an object');
   }
@@ -118,11 +118,11 @@ function normalizeRequest(input) {
   if (typeof input.text !== 'string') {
     throw new KokoroSynthError('AUDITION_INVALID_LINE', 'the audition request must carry text');
   }
-  const text = input.text.trim();
-  if (text === '' || Array.from(text).length > MAX_SAMPLE_LINE_CHARS || CONTROL_RE.test(text)) {
+  const text = preserveText ? input.text : input.text.trim();
+  if (text.trim() === '' || Array.from(text).length > maxTextChars || CONTROL_RE.test(text)) {
     throw new KokoroSynthError(
       'AUDITION_INVALID_LINE',
-      `text must be 1 to ${MAX_SAMPLE_LINE_CHARS} characters without control characters`,
+      `text must be 1 to ${maxTextChars} characters without control characters`,
     );
   }
 
@@ -252,7 +252,8 @@ export function createKokoroSynth(options = {}) {
     ? options.timeoutMs
     : DEFAULT_KOKORO_TIMEOUT_MS;
 
-  async function generate({ voice, text }) {
+  async function generate({ voice, text, signal }) {
+    signal?.throwIfAborted();
     const hash = voiceHash(voice);
     const target = join(cacheDir, `${keyFor(hash, text)}.wav`);
     if (!within(cacheDir, target)) {
@@ -290,6 +291,13 @@ export function createKokoroSynth(options = {}) {
     ];
 
     const controller = new AbortController();
+    let rejectAbort;
+    const aborted = new Promise((_resolve, reject) => { rejectAbort = reject; });
+    const onAbort = () => {
+      controller.abort();
+      rejectAbort(signal.reason ?? new DOMException('Kokoro synthesis cancelled', 'AbortError'));
+    };
+    signal?.addEventListener('abort', onAbort, { once: true });
     let timedOut = false;
     let timer;
     const timeout = new Promise((_resolve, reject) => {
@@ -316,8 +324,9 @@ export function createKokoroSynth(options = {}) {
       }
       pending.catch(() => {});
       try {
-        await Promise.race([pending, timeout]);
+        await Promise.race([pending, timeout, aborted]);
       } catch (error) {
+        if (signal?.aborted) throw signal.reason ?? error;
         if (timedOut || error?.code === 'AUDITION_SYNTH_TIMEOUT') {
           throw new KokoroSynthError('AUDITION_SYNTH_TIMEOUT', `Kokoro synthesis timed out after ${timeoutMs} ms`);
         }
@@ -329,6 +338,7 @@ export function createKokoroSynth(options = {}) {
         });
       }
 
+      signal?.throwIfAborted();
       const produced = [join(out, 'narration.raw.wav'), join(out, 'narration', 'audition.wav')]
         .find((candidate) => readWave(candidate))
         ?? findFirstWave(out);
@@ -348,13 +358,17 @@ export function createKokoroSynth(options = {}) {
       };
     } finally {
       if (timer) clearTimeout(timer);
+      signal?.removeEventListener('abort', onAbort);
       try { rmSync(work, { recursive: true, force: true }); } catch {}
     }
   }
 
   async function synth(input) {
-    const { voice, text } = normalizeRequest(input);
-    return generate({ voice, text });
+    // Auditions retain their short-line contract; shot conditioning explicitly
+    // opts into a bounded full line without trimming or rewriting its text.
+    const maxTextChars = Number.isInteger(options.maxTextChars) ? Math.min(2000, Math.max(1, options.maxTextChars)) : MAX_SAMPLE_LINE_CHARS;
+    const { voice, text } = normalizeRequest(input, maxTextChars, options.preserveText === true);
+    return generate({ voice, text, signal: input.signal });
   }
 
   synth.cacheDir = cacheDir;

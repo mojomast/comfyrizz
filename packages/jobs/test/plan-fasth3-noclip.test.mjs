@@ -7,7 +7,8 @@
 //   * embeds the description byte-for-byte and quotes the exact line;
 //   * estimates speech at words / 2.5 seconds and checks it against the editorial slot;
 //   * folds {voiceDescription, seed} into castRef instead of the audio hash.
-// Clip mode (the default, including an absent voice) must stay byte-identical.
+// Clip mode (the default, including an absent voice) keeps its audio contract.
+// Commit 188f0d5 intentionally strengthened the shared identity prompt after VX05.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
@@ -101,15 +102,39 @@ function castRefFor(description, seed) {
   ]));
 }
 
-test('clip mode stays byte-identical to the pre-VX05 golden', () => {
+test('clip mode golden changes only for the committed first-appearance identity conditioning', () => {
   const doc = planJobs(clipPackage());
   assert.deepEqual(checkJobsDoc(doc), []);
-  assert.equal(doc.hash, '3a7bbbfc2147e9aa845cd2428a353784fc781b0281094546cfefa65b672b4971');
+  assert.equal(doc.hash, '359668b8b1196324d06f9a6993f3ca7472791954085543222eab71fdb182f383');
   const job = doc.jobs[0];
   assert.equal(job.workflow, 'workflows/fasth3_omni_ref2va.api.json');
   assert.equal(job.workflowSha256, 'd'.repeat(64));
-  assert.equal(job.cacheKey, 'd98867cbad26830522afb801fcaa61c2734b3dce31dc0c3ac60d565e0f070c35');
-  assert.equal(sha256Hex(job.params.prompt), 'cb10fcea97cfded8703df2ad75db7d61d35228a9ff3e0d86542a0a1b48629b65');
+  assert.equal(job.cacheKey, 'b893de1663818b47218a4ca4e11b8a49449cc4d3c041dce061725b274c027e12');
+  assert.equal(sha256Hex(job.params.prompt), '99c08625fe85f85e85410bdba7b04c4a7345894d77d6150a9ddee25a375c178f');
+
+  // Authoritative delta: fasth3-direction.mjs in 188f0d5 adds exactly this
+  // sentence. Removing it must reproduce ALL three original VX05 goldens;
+  // graph selection, audio references, dimensions and timing cannot drift.
+  const identity = 'At the first clear appearance of <Subject 1>, preserve this exact identity without age or design drift: one armored bear. ';
+  assert.ok(job.params.prompt.includes(`\n[Shot 1] ${identity}`));
+  const legacy = structuredClone(doc);
+  const prior = legacy.jobs[0];
+  prior.params.prompt = prior.params.prompt.replace(`\n[Shot 1] ${identity}`, '\n[Shot 1] ');
+  prior.cacheKey = cacheKeyFor({
+    workflowSha256: prior.workflowSha256, generator: prior.generator,
+    model: prior.model, modelRevision: prior.modelRevision,
+    params: prior.params, seed: prior.seed, ...prior.dims, frames: prior.frames,
+    refSha256: sha256Hex(canonical(['image', 'reference', 'audio'].map(name => {
+      const asset = clipPackage().assets.shot.gen.inputs[name];
+      return { name, asset, sha256: clipPackage().assets[asset].sha256 };
+    }))),
+  });
+  assert.equal(sha256Hex(prior.params.prompt), 'cb10fcea97cfded8703df2ad75db7d61d35228a9ff3e0d86542a0a1b48629b65');
+  assert.equal(prior.cacheKey, 'd98867cbad26830522afb801fcaa61c2734b3dce31dc0c3ac60d565e0f070c35');
+  assert.equal(sha256Hex(canonical({ ...legacy, hash: undefined })), '3a7bbbfc2147e9aa845cd2428a353784fc781b0281094546cfefa65b672b4971');
+  const explicit = clipPackage();
+  explicit.assets.shot.gen.direction.voice = { mode: 'clip' };
+  assert.deepEqual(planJobs(explicit), doc, 'absent voice still means clip mode');
 });
 
 test('prompt mode selects the no-clip template and its committed hash', () => {

@@ -153,6 +153,15 @@ function buildFixture(dir) {
       foreground: [{ asset: "a_b5_still", x: 0.7, y: 0.5, w: 0.28, anim: "fade-in" }],
       transitionOut: { type: "fade", frames: 15 },
     },
+    {
+      id: "s_generated_independent",
+      layout: "hero",
+      variant: "full-bleed",
+      preferredFrames: 120,
+      copy: { headline: "Independent plate" },
+      background: { asset: "a_b5_plate2", fit: "cover", loop: true },
+      transitionOut: { type: "cut", frames: 0 },
+    },
   ];
   mkdirSync(dir, { recursive: true });
   writeFileSync(join(dir, "package.json"), JSON.stringify(pkg, null, 2));

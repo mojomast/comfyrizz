@@ -497,6 +497,26 @@ test("a plate gets the motion guard for its flavour, and keeps its own camera di
   assert.deepEqual(kept.promptGuards.map((g) => g.guard), ["text"], "a prompt with its own camera direction gets no motion guard");
 });
 
+test("shot-directed forward moves and tracking views do not acquire a contradictory static-camera guard", () => {
+  for (const prompt of [
+    "Empty neon-lit passage. Mist drifts slowly through the coloured light.. Slow forward move pushing steadily down the passage.. One continuous shot, no cuts. Background surfaces are clean and unmarked.",
+    "A low tracking view over rain-slick pavement, reflections rippling. One continuous shot, no cuts.",
+    "Gentle backward move through the archive. One continuous shot, no cuts.",
+  ]) {
+    const pkg = fixture("package-pending.json");
+    pkg.assets.a_plate1.gen.inputs.prompt = prompt;
+    const job = planJobs(pkg).jobs.find(j => j.id === "a_plate1.plate");
+    assert.ok(job.params.prompt.startsWith(prompt));
+    assert.doesNotMatch(job.params.prompt, /static camera/);
+    assert.ok(!job.promptGuards?.some(guard => guard.guard.startsWith("motion_")));
+  }
+  const subject = fixture("package-pending.json");
+  subject.assets.a_plate1.gen.inputs.prompt = "The orange makes a slow forward move across the table.";
+  const job = planJobs(subject).jobs.find(j => j.id === "a_plate1.plate");
+  assert.match(job.params.prompt, /static camera, gentle motion, no cuts$/,
+    "subject motion does not by itself request a moving camera");
+});
+
 test("LTX's measured weak spots are warnings, not silent rewrites", () => {
   const orbit = fixture("package-pending.json");
   orbit.assets.a_plate1.gen.inputs.prompt = "a slow orbit around the battery";

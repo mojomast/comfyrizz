@@ -17,7 +17,7 @@ const voice = readFileSync(fileURLToPath(new URL('../src/voice-settings.ts', imp
 function snapshot() {
   return {
     productionId: PRODUCTION_ID,
-    production: { id: PRODUCTION_ID, revision: 4 },
+    production: { id: PRODUCTION_ID, revision: 4, iteration: { policy: { level: 'balanced' } } },
     revision: 4,
     events: [{
       id: 'evt_plan_1',

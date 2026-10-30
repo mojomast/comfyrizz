@@ -11,6 +11,8 @@
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import { collectMockContribution } from '../helpers/comfy-contribution.mjs';
+import { deriveClipState } from '../../src/takes/model.mjs';
 import { createHash } from 'node:crypto';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -244,6 +246,9 @@ test('IP11: a correction take run with no concurrent edit is still auto-selected
   assert.ok(second.gen.inputs.prompt.endsWith(change.promptAppend));
   assert.equal(entry.selected, second.takeId, 'the correction take is selected when nothing was edited');
   assert.equal(app.store.read(FIXTURE.id).assets[ASSET_ID].file, second.file);
+  const saved = app.store.read(FIXTURE.id);
+  assert.deepEqual(saved.assets[ASSET_ID].gen.inputs, built.package.assets[ASSET_ID].gen.inputs, 'the selected correction keeps its authored request');
+  assert.equal(deriveClipState({ clip: saved.assets[ASSET_ID], assetGen: saved.assets[ASSET_ID].gen, takes: entry, refs: saved }), 'review', 'a newly selected correction is fresh, not stale');
 
   const landed = app.events.entries.filter(event => event.type === 'clip.take.landed');
   assert.equal(landed.length, 1);
@@ -291,6 +296,9 @@ test('IP11: final mode rebases onto a concurrent edit to another asset', async (
     },
   }));
   const pending = app.store.read(FIXTURE.id);
+  delete pending.scenes.at(-1).transitionOut;
+  pending.scenes.forEach(scene => { delete scene.narration; });
+  collectMockContribution(pending, app.store.dir);
   pending.assets[ASSET_ID].status = 'pending';
   app.store.save(FIXTURE.id, pending, pending.revision);
 

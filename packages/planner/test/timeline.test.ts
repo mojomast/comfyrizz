@@ -34,6 +34,99 @@ test('six 150-frame scenes with five 15-frame fades compile to 825 frames', () =
   assert.deepEqual(timeline.scenes.map(s => s.transitionOutFrames), [15, 15, 15, 15, 15, 0]);
 });
 
+test('exact targets retime compiled overlaps in both directions without changing fps', () => {
+  for (const seconds of [12, 40, 45]) {
+    const source = pkg(Array.from({ length: 10 }, (_, i) => scene(`s${i}`, { preferredFrames: 150, transitionOut: { type: i === 9 ? 'cut' : 'fade', frames: i === 9 ? 0 : 15 } })));
+    source.duration = { mode: 'target', targetFrames: seconds * 30, exact: true };
+    const timeline = compileTimeline(source);
+    assert.equal(timeline.durationInFrames, seconds * 30);
+    assert.equal(timeline.fps, 30);
+    assert.equal(timeline.scenes.at(-1)!.from + timeline.scenes.at(-1)!.durationInFrames, seconds * 30);
+    assert.equal(timeline.target.requiresAcceptance, false);
+    assert.equal(source.scenes[0].preferredFrames, 150);
+  }
+});
+
+test('exact retiming protects measured narration, overlap, explicit cues, locks and edited trim', () => {
+  const source = pkg([
+    scene('a', { preferredFrames: 180, motion: { cue_seconds: [3] }, transitionOut: { type: 'fade', frames: 30 } }),
+    scene('b', { preferredFrames: 150, locked: true, transitionOut: { type: 'fade', frames: 20 } }),
+    scene('c', { preferredFrames: 150, audio_trim: { startSeconds: 0, endSeconds: 2 }, transitionOut: { type: 'cut', frames: 0 } }),
+  ]);
+  source.duration = { mode: 'target', targetFrames: 400, exact: true };
+  const options = { narration: { a: [{ text: 'Speech', seconds: 3 }] }, narrationPaddingSeconds: 0 };
+  const timeline = compileTimeline(source, options);
+  assert.equal(timeline.durationInFrames, 400);
+  assert.equal(timeline.scenes[1].durationInFrames, 150);
+  assert.ok(timeline.scenes[0].durationInFrames >= 120);
+  assert.ok(timeline.scenes[2].durationInFrames >= 150);
+  source.duration.targetFrames = 300;
+  assert.throws(() => compileTimeline(source, options), (error: unknown) => error instanceof TimelineError && error.code === 'exact-duration-impossible' && /Shorten narration/.test(error.message));
+});
+
+test('exact retiming refuses to extend or shorten video footage and preserves approximate targets', () => {
+  const source = pkg([scene('a', { background: { asset: 'video' }, transitionOut: { type: 'cut', frames: 0 } })]);
+  source.assets = { video: { kind: 'video' } };
+  source.duration = { mode: 'target', targetFrames: 120, exact: true };
+  assert.throws(() => compileTimeline(source), /Exact target.*cannot fit/);
+  source.duration = { mode: 'target', targetFrames: 120 };
+  assert.equal(compileTimeline(source).durationInFrames, 150);
+  assert.equal(compileTimeline(source).target.requiresAcceptance, true);
+});
+
+test('an under-authored two-minute video plan reports missing coverage instead of stretching footage', () => {
+  // Recorded scene windows after tool normalization: six omitted hero windows
+  // became 210 frames each. Attaching video fixes all twelve windows.
+  const frames = [193, 204, 210, 210, 210, 269, 269, 210, 249, 210, 210, 300];
+  const source = pkg(frames.map((preferredFrames, i) => scene(`s${i}`, {
+    preferredFrames, background: { asset: `v${i}` }, transitionOut: { type: 'cut', frames: 0 },
+  })));
+  source.assets = Object.fromEntries(frames.map((_, i) => [`v${i}`, { kind: 'video' }]));
+  assert.equal(compileTimeline(source).durationInFrames, 2744);
+  source.duration = { mode: 'target', targetFrames: 3600, exact: true };
+  const before = structuredClone(source);
+  assert.throws(() => compileTimeline(source), (error: unknown) => {
+    assert.ok(error instanceof TimelineError);
+    assert.equal(error.code, 'exact-duration-impossible');
+    assert.match(error.message, /available 2744–2744 frames/);
+    assert.match(error.message, /Shortfall 856 project frames at 30 fps; 12 video scene windows are fixed/);
+    assert.match(error.message, /preferredFrames totalling 3600 frames \(0 overlap\)/);
+    assert.match(error.message, /source footage at each source's fps/);
+    return true;
+  });
+  assert.deepEqual(source, before);
+});
+
+test('twelve explicitly covered shots fit exact 120 seconds with overlaps, speech and authored holds intact', () => {
+  for (const overlap of [0, 15]) {
+    const source = pkg(Array.from({ length: 12 }, (_, i) => scene(`s${i}`, {
+      preferredFrames: 300 + (i < 11 ? overlap : 0),
+      background: { asset: `v${i}`, loop: false },
+      media: [{ asset: `v${i}`, speed: 1, holdFrames: 0 }],
+      narration: 'Measured narration fits inside the authored window.',
+      transitionOut: { type: overlap ? 'fade' : 'cut', frames: i < 11 ? overlap : 0 },
+    })));
+    source.assets = Object.fromEntries(source.scenes.map((s, i) => [`v${i}`, {
+      kind: 'video', media: { fps: 24, frames: i < 11 && overlap ? 257 : 241 },
+    }]));
+    source.duration = { mode: 'target', targetFrames: 3600, exact: true };
+    source.voice = { enabled: true };
+    const before = structuredClone(source);
+    const narration = Object.fromEntries(source.scenes.map(s => [s.id, [{ text: s.narration!, seconds: 8 }]]));
+    const timeline = compileTimeline(source, { narration, narrationPaddingSeconds: 0.25 });
+    assert.equal(timeline.durationInFrames, 3600);
+    assert.equal(timeline.fps, 30);
+    assert.equal(timeline.provisional, false);
+    assert.equal(timeline.scenes.at(-1)!.from + timeline.scenes.at(-1)!.durationInFrames, 3600);
+    assert.deepEqual(timeline.scenes.map(s => s.durationInFrames), source.scenes.map(s => s.preferredFrames));
+    for (const s of timeline.scenes) {
+      const media = source.assets![source.scenes.find(item => item.id === s.id)!.background!.asset!]!.media!;
+      assert.ok(media.frames! / media.fps! >= s.durationInFrames / timeline.fps);
+    }
+    assert.deepEqual(source, before, 'compilation must not edit playback, source frames, holds, narration or transitions');
+  }
+});
+
 test('a cut is a hard cut even if it carries frames', () => {
   const timeline = compileTimeline(pkg([
     scene('s1', { transitionOut: { type: 'cut', frames: 15 } }),

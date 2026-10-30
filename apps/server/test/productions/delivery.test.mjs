@@ -16,7 +16,8 @@ import { createHash } from 'node:crypto';
 import * as fs from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import test from 'node:test';
+import test, { after } from 'node:test';
+import { collectMockContribution, recordMockRender } from '../helpers/comfy-contribution.mjs';
 
 import {
   DELIVERY_SCHEMA,
@@ -26,6 +27,11 @@ import {
 } from '../../src/productions/delivery.mjs';
 
 const AT = '2026-10-23T10:00:00.000Z';
+const mockRoot = fs.mkdtempSync(join(tmpdir(), 'mock-publish-'));
+const mockDir = join(mockRoot, 'package');
+after(() => fs.rmSync(mockRoot, { recursive: true, force: true }));
+const mockPackage = JSON.parse(fs.readFileSync(new URL('../../../../examples/launch-demo/package.json', import.meta.url)));
+collectMockContribution(mockPackage, mockDir);
 
 function hash(data) {
   return createHash('sha256').update(data).digest('hex');
@@ -62,9 +68,13 @@ function makeInput(overrides = {}) {
   } catch {
     captionRender = { sha256: hex('e') };
   }
-  const videoBytes = overrides.videoBytes ?? Buffer.from('verified delivery video bytes', 'utf8');
+  const videoBytes = overrides.video?.bytes ?? (overrides.video?.path ? fs.readFileSync(overrides.video.path) : overrides.videoBytes ?? Buffer.from('verified delivery video bytes', 'utf8'));
+  const mockVideo = join(mockDir, 'mock.mp4');
+  fs.writeFileSync(mockVideo, videoBytes);
+  recordMockRender(mockPackage, mockDir, mockVideo);
 
   return {
+    packageDir: mockDir,
     productionId: 'prod_ip55',
     idempotencyKey: 'idem_ip55_1',
     pins: { packageRevision: 3, editorRevision: 5, productionRevision: 7 },
@@ -351,8 +361,7 @@ test('the same idempotency key replays the same version and conflicts on new con
   assert.equal(replay.version, 1);
   assert.equal(replay.deliveryId, first.deliveryId);
 
-  const changed = makeInput();
-  changed.video = { bytes: Buffer.from('changed video bytes', 'utf8') };
+  const changed = makeInput({ video: { bytes: Buffer.from('changed video bytes', 'utf8') } });
   assert.equal(errorCode(() => store.publish(changed)), 'IDEMPOTENCY_CONFLICT');
 });
 

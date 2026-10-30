@@ -9,7 +9,6 @@
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
 import { once } from "node:events";
-import { createHash } from "node:crypto";
 import {
   existsSync,
   mkdtempSync,
@@ -26,13 +25,11 @@ import { ColabCli } from "../src/cli.mjs";
 import { createColabBackend } from "../src/colab-backend.mjs";
 import { planJobs } from "../../jobs/src/index.mjs";
 import { FAKE_SOURCE, installFakeColab, readLog, readState } from "./helpers.mjs";
+import { KLEIN_SHA, mockCapture, mockOutput, assertCollectedReceipt } from "./mock-generation.mjs";
 
 const REPO = resolve(fileURLToPath(new URL(".", import.meta.url)), "..", "..", "..");
 const LAUNCH_DEMO = join(REPO, "examples", "launch-demo", "package.json");
-const SHA = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
 const LATE_FILE = "zzz-ip16-late.bin";
-
-const sha256 = (text) => createHash("sha256").update(text).digest("hex");
 
 /** A valid package with one pending generated still. */
 function fixture(assetId = "a_ip16_still") {
@@ -45,13 +42,14 @@ function fixture(assetId = "a_ip16_still") {
     gen: {
       generator: "flux3-klein",
       workflow: "workflows/flux3_klein_t2i.api.json",
-      workflow_sha256: SHA,
+      workflow_sha256: KLEIN_SHA,
       model: "flux-3-image-klein",
       caption: "A wide abstract nebula for the fault-injection test.",
       inputs: { prompt: "A wide abstract nebula.", width: 960, height: 544, seed: 16, steps: 16 },
     },
     model_license: { id: "LicenseRef-FLUX.3-Image-Klein" },
   };
+  pkg.scenes[0].background = { asset: assetId, fit: "cover" };
   return pkg;
 }
 
@@ -70,7 +68,7 @@ function manifestFor(doc, content) {
         status: "succeeded",
         job_id: "job_ip16",
         attempt_id: "att_ip16_01",
-        outputs: [{ file: job.output, relative: job.output, sha256: sha256(content), bytes: Buffer.byteLength(content) }],
+        outputs: [mockOutput(job, content)],
       },
     ],
   };
@@ -174,6 +172,7 @@ test("a run killed mid-collect resumes its verified output without paying for th
   const [job] = doc.jobs;
   const content = "IP16-COLLECTED-BYTES";
   const manifest = manifestFor(doc, content);
+  const capture = mockCapture(job);
   const pkgPath = join(work, "package.json");
   writeFileSync(pkgPath, `${JSON.stringify(pkg, null, 2)}\n`);
 
@@ -187,7 +186,8 @@ test("a run killed mid-collect resumes its verified output without paying for th
         "run_jobs.py": {
           output: JSON.stringify({ v: 1, event: "job_done", job: job.id }),
           files: [
-            { path: `/content/comfyrizz/out/${job.output}`, content },
+             { path: `/content/comfyrizz/out/${job.output}`, content },
+             { path: `/content/comfyrizz/out/${capture.relative}`, content: capture.content },
             { path: "/content/comfyrizz/out/manifest.json", content: JSON.stringify(manifest) },
             { path: `/content/comfyrizz/out/${LATE_FILE}`, content: "late" },
           ],
@@ -280,6 +280,7 @@ test("a run killed mid-collect resumes its verified output without paying for th
   assert.equal(result.health.recovered, true);
   assert.equal(result.applied.length, 1);
   assert.equal(result.package.assets.a_ip16_still.status, "ready");
+  assertCollectedReceipt(result, "a_ip16_still");
   assert.equal(result.teardown.state, "stopped", "the VM that the killed host left is stopped and confirmed");
   assert.ok(events.some((event) => event.type === "collect_recovered"), JSON.stringify(events.map((event) => event.type)));
   assert.ok(events.some((event) => event.type === "run_recovered"));

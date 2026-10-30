@@ -1,4 +1,5 @@
 export * from './timeline.js';
+export * from './lyrics.js';
 export type {
   AnimationRecipeId,
   CaptionOverride,

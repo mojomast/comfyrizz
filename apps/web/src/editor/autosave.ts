@@ -52,6 +52,18 @@ export function createAutosave(store: Editor, options: {
   let lastTried = -1;
   /** The current edit's last attempt failed offline, so an explicit Save may re-send it. */
   let failedOffline = false;
+  let generation = store.documentGeneration();
+
+  function syncGeneration() {
+    const next = store.documentGeneration();
+    if (next === generation) return;
+    generation = next;
+    attempted = -1;
+    lastTried = -1;
+    failedOffline = false;
+    if (timer != null) cancel(timer);
+    timer = null;
+  }
 
   function enqueue(task: () => Promise<void>): Promise<void> {
     const run = chain.then(task, task);
@@ -75,10 +87,13 @@ export function createAutosave(store: Editor, options: {
   }
 
   async function runSave(force: boolean) {
+    syncGeneration();
     if (disposed || store.getState().session.previewing || store.saveStatus() === 'conflict' || !store.isDirty()) return;
     const doc = store.getState().doc;
     if (!doc.package.id) return;
     const sequence = doc.editSequence;
+    const savingGeneration = generation;
+    const isCurrent = () => !disposed && store.documentGeneration() === savingGeneration;
     // Explicit Save may retry the current sequence after an offline failure;
     // the automatic paths only ever send an edit that has not been tried yet.
     const retriable = sequence > lastTried || (force && sequence > attempted && failedOffline);
@@ -95,6 +110,7 @@ export function createAutosave(store: Editor, options: {
     };
     try {
       await persist('draft', doc);
+      if (!isCurrent()) return;
       store.noteSave({ type: 'start' });
       let result: SaveResult;
       try {
@@ -102,12 +118,14 @@ export function createAutosave(store: Editor, options: {
       } catch {
         result = { ok: false, status: 'offline' };
       }
+      if (!isCurrent()) return;
       if (result.ok) {
         attempted = Math.max(attempted, payload.editSequence);
         store.noteSave({ type: 'ack', editSequence: payload.editSequence, revision: result.revision });
       } else if (result.status === 'conflict') {
         attempted = Math.max(attempted, payload.editSequence);
         await persist('recovery', payloadAsDoc(payload));
+        if (!isCurrent()) return;
         store.noteSave({ type: 'conflict', currentRevision: result.currentRevision });
       } else if (result.status === 'offline') {
         // Offline keeps the edit retriable: an explicit Save (flush) sends this sequence again.
@@ -121,10 +139,17 @@ export function createAutosave(store: Editor, options: {
       if (newer && store.isDirty() && store.saveStatus() !== 'conflict') await runSave(false);
     } finally {
       inFlight = false;
+      // A different project may have been edited while this request was in flight.
+      // Its sequence starts at zero and must not inherit the old attempt cursor.
+      if (!disposed && store.documentGeneration() !== savingGeneration) {
+        syncGeneration();
+        await runSave(false);
+      }
     }
   }
 
   const unsubscribe = store.subscribe(() => {
+    syncGeneration();
     if (disposed || inFlight || store.getState().session.previewing || store.saveStatus() === 'conflict' || !store.isDirty()) return;
     if (store.getState().doc.editSequence <= lastTried) return;
     if (timer != null) cancel(timer);

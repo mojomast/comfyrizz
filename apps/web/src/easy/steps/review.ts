@@ -9,6 +9,7 @@
 import { COPY, fill } from '../copy.ts';
 import { escapeHtml } from '../components.ts';
 import { adoptPlayer, currentPlayer } from '../preview-slot.ts';
+import { narrationPending } from '../narration-status.ts';
 import { mountShotCard, type ShotCardController, type ShotCardModel, type ShotCardVersion } from '../shot-card.ts';
 import { bindShotText, renderShotText, type ShotTextScene, type ShotTextStore } from '../shot-text.ts';
 import type { ClipSummary, TakesResponse } from '../../takes/api.ts';
@@ -349,6 +350,7 @@ export function renderReview(view: ReviewView): string {
   return `<section class="easy-review" data-easy-review>
 ${notice}
 ${renderPlayerSlot()}
+${narrationPending(view.package) ? '<p role="status">Narration is planned but not yet available. This preview may be silent.</p>' : ''}
 <div class="easy-review-strip">
 <h2 class="easy-review-shots-heading">${escapeHtml(COPY.review.shots)}</h2>
 ${strip}

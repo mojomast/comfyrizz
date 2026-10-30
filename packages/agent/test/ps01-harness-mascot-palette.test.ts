@@ -1,6 +1,6 @@
 // PS01: harness regressions behind the planning-stress HTTP 500s.
 // 1. The shared mascot must have bytes on disk, not just a declared file.
-// 2. A CPU slice below the four-SVG floor returns draft + problems, never a naked throw.
+// 2. A CPU slice can complete with only the SVG assets its scenes need.
 // 3. generateSvg and inlineGeneratedAssets share pkg.theme.palette and report a
 //    typed 422 with the asset id when the palette or render check fails.
 
@@ -55,7 +55,7 @@ test('PS01 mascot: propose persists a_cast_pip.svg before packaging inlines it',
   }
 });
 
-test('PS01 cpu-slice: fewer than four ready llm-svg assets returns draft + problems', async () => {
+test('PS01 cpu-slice: two requested SVG assets complete without a global quota', async () => {
   const model = createScriptedModel([
     {
       name: 'storyboard.propose',
@@ -82,11 +82,8 @@ test('PS01 cpu-slice: fewer than four ready llm-svg assets returns draft + probl
   });
 
   assert.equal(slice.svgAssets.length, 2);
-  assert.equal(slice.ok, false);
-  const problems = (slice as any).problems;
-  assert.ok(Array.isArray(problems) && problems.length > 0, 'the slice must report structured problems');
-  const codes = problems.map((problem: any) => typeof problem === 'string' ? problem : problem.code);
-  assert.ok(codes.includes('SVG_ASSET_FLOOR'), `expected SVG_ASSET_FLOOR, got ${codes.join(', ')}`);
+  assert.equal(slice.ok, true);
+  assert.deepEqual(slice.problems, []);
   assert.equal(slice.package.scenes.length, 2);
 });
 

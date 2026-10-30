@@ -19,6 +19,12 @@ const D15_VALUES = [
   { label: 'West', value: 7 },
 ];
 
+// Authored plates: the normalizer must retain these, never manufacture them.
+const MEDIA = [
+  { procedural: { pattern: 'gradient', palette: ['#125090', '#ffffff'], seed: 12 } },
+  { procedural: { pattern: 'grid', palette: ['#900012', '#ffffff'], seed: 19 } },
+];
+
 function toolset() {
   return createToolset({ now: () => '2026-10-28T12:00:00.000Z' });
 }
@@ -38,13 +44,13 @@ test('PS12 D13 keeps a comparison layout and shares one exact user dataset', asy
     scenes: [
       { id: 's_chart', layout: 'chart', copy: { headline: 'Regions' }, data: { dataset: 'd_north', display: 'bar' } },
       { id: 's_stat', layout: 'stat', copy: { headline: 'South', body: '19' }, data: { dataset: 'd_east', display: 'number' } },
-      { id: 's_compare', layout: 'hero', copy: { headline: 'North versus South' }, data: { dataset: 'd_north', display: 'bar' } },
+      { id: 's_compare', layout: 'compare', copy: { headline: 'North versus South' }, data: { dataset: 'd_north', display: 'bar' }, media: MEDIA },
     ],
   }) as any;
 
   assert.ok(result.package.scenes.some((scene: any) => scene.layout === 'compare'), 'comparison brief must keep a compare layout');
   const compare = result.package.scenes.find((scene: any) => scene.layout === 'compare');
-  assert.equal(compare.media.length, 2, 'compare scenes need the two schema plates');
+  assert.deepEqual(compare.media, MEDIA, 'compare scenes retain the two authored plates');
 
   const datasetIds = Object.keys(result.package.datasets);
   assert.equal(datasetIds.length, 1, 'a shared user dataset must not be split');
@@ -72,7 +78,7 @@ test('PS12 D15 keeps comparison and shares one dataset with every scene, includi
     scenes: [
       { id: 's_chart', layout: 'chart', copy: { headline: 'Regions' }, data: { dataset: 'd_north', display: 'bar' } },
       { id: 's_stat', layout: 'stat', copy: { headline: 'North', body: '1250' }, data: { dataset: 'd_south', display: 'number' } },
-      { id: 's_compare', layout: 'hero', copy: { headline: 'North versus South' }, data: { dataset: 'd_north', display: 'bar' } },
+      { id: 's_compare', layout: 'compare', copy: { headline: 'North versus South' }, data: { dataset: 'd_north', display: 'bar' }, media: MEDIA },
       { id: 's_outro', layout: 'title', copy: { headline: 'WEST WINS' } },
     ],
   }) as any;
@@ -100,7 +106,7 @@ test('PS12 edit keeps the comparison layout and shared dataset after a local pat
     scenes: [
       { id: 's_chart', layout: 'chart', copy: { headline: 'Regions' }, data: { dataset: 'd_regions', display: 'bar' } },
       { id: 's_stat', layout: 'stat', copy: { headline: 'South', body: '19' }, data: { dataset: 'd_regions', display: 'number' } },
-      { id: 's_compare', layout: 'hero', copy: { headline: 'North versus South' }, data: { dataset: 'd_regions', display: 'bar' } },
+      { id: 's_compare', layout: 'compare', copy: { headline: 'North versus South' }, data: { dataset: 'd_regions', display: 'bar' }, media: MEDIA },
     ],
   }) as any;
 
@@ -116,7 +122,7 @@ test('PS12 edit keeps the comparison layout and shared dataset after a local pat
   for (const scene of edited.package.scenes) assert.equal(scene.data.dataset, datasetId);
 });
 
-test('PS12 a scene headline asking for versus still becomes a compare scene', async () => {
+test('PS12 a versus headline preserves the explicitly authored hero layout', async () => {
   const result = await toolset()['storyboard.propose'].run({
     brief: 'Create a three-scene motion-graphics sequence with a chart, a stat and a closing scene. No narration.',
     datasets: { d_regions: { unit: 'regions', values: D13_VALUES, source: 'user' } },
@@ -127,8 +133,8 @@ test('PS12 a scene headline asking for versus still becomes a compare scene', as
     ],
   }) as any;
 
-  assert.deepEqual(result.package.scenes.map((scene: any) => scene.layout), ['chart', 'stat', 'compare']);
-  assert.equal(result.package.scenes[2].media.length, 2);
+  assert.deepEqual(result.package.scenes.map((scene: any) => scene.layout), ['chart', 'stat', 'hero']);
+  assert.equal(result.package.scenes[2].media, undefined);
 });
 
 test('PS12 a data brief without a shared-dataset request keeps separate datasets', async () => {

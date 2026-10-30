@@ -13,6 +13,7 @@ export type { CaptionOverride, CompileOptions, ComfyrizzPackage };
 export type CompiledTimeline = Timeline;
 export { projectFps, speechFloorFrames, TimelineError } from './timeline.js';
 export { measuredFromReport } from './measured.js';
+export * from './lyrics.js';
 
 /** Measured durations and optional word alignment. Alignment fills words the duration chunks omit. */
 export interface MeasuredInput {

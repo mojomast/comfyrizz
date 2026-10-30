@@ -52,3 +52,11 @@ test('pending media and internal H3 silent conditioning are not hydrated', () =>
   assert.deepEqual(plan.requests, []);
   assert.deepEqual(plan.missingMedia, []);
 });
+
+test('declared fonts wait for scoped authenticated blobs', () => {
+  const pkg = { revision: 3, theme: { fonts: [{ family: 'Anton', file: 'assets/anton.ttf' }] } };
+  const plan = previewMediaPlan(pkg);
+  assert.deepEqual(plan.requests, [{ assetId: '', file: 'assets/anton.ttf', cacheKey: 'font:3:assets/anton.ttf', kind: 'font' }]);
+  assert.deepEqual(plan.sources, {});
+  assert.deepEqual(previewMediaPlan(pkg, { 'assets/anton.ttf': 'blob:font' }).requests, []);
+});

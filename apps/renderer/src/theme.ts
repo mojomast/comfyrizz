@@ -85,14 +85,19 @@ const loadedBrandFonts = new Set<string>();
  * download. A missing file makes Remotion fail loudly rather than fall back
  * silently.
  */
-export function ensureBrandFonts(pkg?: PackageV1): void {
+export function ensureBrandFonts(pkg?: PackageV1, previewSources?: Record<string, string> | null): void {
   for (const font of brandFontEntries(pkg as PackageV1)) {
-    const key = `${font.family}:${font.file}:${font.weight ?? ''}`;
+    // In the web Player a package path is not public: wait for its authenticated
+    // blob instead of requesting it from the static web server.
+    const url = previewSources == null ? staticFile(font.file) : previewSources[font.file];
+    if (!url) continue;
+    const key = `${font.family}:${url}:${font.weight ?? ''}`;
     if (loadedBrandFonts.has(key)) continue;
     loadedBrandFonts.add(key);
     void loadFont({
       family: font.family,
-      url: staticFile(font.file),
+      url,
+      ...(previewSources == null ? {} : { format: 'truetype' as const }),
       weight: String(font.weight ?? '400'),
       display: 'block',
     });

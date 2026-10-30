@@ -365,12 +365,13 @@ test('IP63F regression: the compliant edit and CLI guard stay intact', () => {
   }
 });
 
-test('IP63 CLI: the committed cassette is stale and reports NOT RECORDED', () => {
+test('IP63 CLI: the committed cassette replays and passes', () => {
   const env = { ...process.env };
   delete env.COMFYRIZZ_EVAL_CASSETTE;
   const result = spawnSync(process.execPath, [fileURLToPath(scriptUrl)], { encoding: 'utf8', env });
-  assert.equal(result.status, 1, result.stdout + result.stderr);
-  assert.match(result.stdout, /NOT RECORDED/);
+  assert.equal(result.status, 0, result.stdout + result.stderr);
+  assert.match(result.stdout, /cassette replay/);
+  assert.match(result.stdout, /RESULT PASS/);
 });
 
 test('IP63 record scoring keeps the single live execution', async () => {

@@ -22,7 +22,7 @@ export async function handleCompile({ request, response, url, readJson, sendJson
   let measured = body.measured;
   if (measured == null && doc.package?.id) {
     try {
-      measured = measuredOptionsFromDir(dirname(store.path(doc.package.id)));
+      measured = measuredOptionsFromDir(dirname(store.path(doc.package.id)), doc.package);
     } catch {
       measured = {};
     }

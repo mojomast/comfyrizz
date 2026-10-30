@@ -15,6 +15,7 @@
 import { createHash } from 'node:crypto';
 import * as fs from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
+import { assertRenderedContribution } from '../../../../packages/jobs/src/model-contribution.mjs';
 
 export const DELIVERY_SCHEMA = 'comfyrizz.delivery/v1';
 export const DELIVERY_BUNDLE_SCHEMA = 'comfyrizz.delivery-bundle/v1';
@@ -817,6 +818,7 @@ export function createDeliveryStore(options = {}) {
     }
 
     const video = materializeVideo(input);
+    const modelContribution = assertRenderedContribution({ packageDir: input.packageDir, videoSha256: video.sha256 });
     const captions = normalizeCaptions(input, output);
     const hashes = { ...normalizedHashes.hashes };
     const hashReasons = { ...normalizedHashes.reasons };
@@ -875,6 +877,7 @@ export function createDeliveryStore(options = {}) {
 
     const content = {
       schema: DELIVERY_SCHEMA,
+      modelContribution,
       productionId,
       pins,
       selections,
@@ -939,6 +942,7 @@ export function createDeliveryStore(options = {}) {
 
       const base = {
         schema: DELIVERY_SCHEMA,
+        modelContribution,
         version,
         deliveryId,
         productionId,
@@ -1128,6 +1132,10 @@ export function createDeliveryStore(options = {}) {
     const productionId = assertSafeId(input.productionId, 'productionId');
     const snapshot = normalizeBundleSnapshot(input.snapshot);
     const files = normalizeBundleFiles(input.files);
+    const modelContribution = snapshot.intent === 'final' ? files.filter(file => file.kind === 'video' || /\.(mp4|webm|mov)$/i.test(file.path)).map(file =>
+      assertRenderedContribution({ packageDir: input.packageDir, videoSha256: file.sha256,
+        packageId: snapshot.packageId, packageHash: input.snapshot.packageHash, timelineHash: snapshot.timelineHash })) : [];
+    if (snapshot.intent === 'final' && !modelContribution.length) fail('COMFY_RENDER_RECEIPT_REQUIRED', 'A final bundle must include its verified rendered video');
     let idempotencyKey = null;
     if (input.idempotencyKey !== undefined && input.idempotencyKey !== null) {
       idempotencyKey = assertGeneralId(input.idempotencyKey, 'idempotencyKey');
@@ -1137,6 +1145,7 @@ export function createDeliveryStore(options = {}) {
 
     const content = {
       schema: DELIVERY_BUNDLE_SCHEMA,
+      modelContribution,
       productionId,
       snapshot,
       files: files.map((file) => ({ path: file.path, kind: file.kind, sha256: file.sha256, bytes: file.bytes })),
@@ -1184,6 +1193,7 @@ export function createDeliveryStore(options = {}) {
       const bundleId = `bnd_${hashText(`bundle\u0000${productionId}\u0000${version}\u0000${contentHash}`).slice(0, 24)}`;
       const base = {
         schema: DELIVERY_BUNDLE_SCHEMA,
+        modelContribution,
         version,
         bundleId,
         productionId,

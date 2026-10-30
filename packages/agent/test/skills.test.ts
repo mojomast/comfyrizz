@@ -12,7 +12,7 @@ const words = (text: string) => text.trim().split(/\s+/).length;
 const VERSIONS: Record<string, string> = {
   'video-brief': '1.1.0',
   'explainer-script': '1.2.0',
-  'storyboard-direction': '1.4.0',
+  'storyboard-direction': '1.4.1',
   'project-revision': '1.3.0',
 };
 
@@ -34,7 +34,7 @@ test('skills: deterministic selection includes drafting guidance and at most thr
       }
     }
   }
-  assert.equal(SKILL_CATALOG_VERSION, '1.5.0');
+  assert.equal(SKILL_CATALOG_VERSION, '1.5.1');
 });
 
 test('skills: compiled loader includes canonical bodies and excludes metadata and research links', () => {
@@ -83,4 +83,10 @@ test('skills: returned metadata cannot mutate the bundled catalog', () => {
   const fresh = composeConversationSkills(context);
   assert.equal(fresh.skills.length, 3);
   assert.ok(fresh.skills.every(skill => skill.version === VERSIONS[skill.id]));
+});
+
+test('conversation skills describe drawing intent without unavailable builder calls', () => {
+  const { text } = composeConversationSkills({ hasPlan: false, hasProject: false });
+  assert.match(text, /conversational plan describes the visual intent/);
+  assert.doesNotMatch(text, /storyboard\.(draw|extend_drawing|inspect_drawing)|<d>\[English\]/);
 });

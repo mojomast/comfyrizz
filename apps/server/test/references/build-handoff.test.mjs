@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { tmpdir } from 'node:os';
 import { conversationPlanSchema } from '../../../../packages/agent/dist/src/index.js';
 import { planJobs } from '../../../../packages/jobs/src/plan.mjs';
 import { validatePackage } from '../../../../packages/schema/src/index.mjs';
@@ -36,7 +37,7 @@ function makePlan() {
 
 function setup(t) {
   mkdirSync('/tmp/opencode', { recursive: true });
-  const runtimeDir = mkdtempSync('/tmp/opencode/build-handoff-');
+  const runtimeDir = mkdtempSync(join(tmpdir(), 'build-handoff-'));
   t.after(() => rmSync(runtimeDir, { recursive: true, force: true }));
   const store = createReferenceStore({ rootDir: runtimeDir, chatId: CHAT_ID });
   return { runtimeDir, store };

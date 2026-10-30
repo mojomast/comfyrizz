@@ -10,10 +10,12 @@ export const ROLES = Object.freeze([
   'product',
   'palette',
   'composition',
+  'song',
   'other',
 ]);
 
-export const KINDS = Object.freeze(['image', 'video']);
+export const KINDS = Object.freeze(['image', 'video', 'audio']);
+export const USAGES = Object.freeze(['reference', 'editorial']);
 
 export const STORED_EXTENSIONS = Object.freeze([
   'png',
@@ -24,6 +26,8 @@ export const STORED_EXTENSIONS = Object.freeze([
   'mp4',
   'mov',
   'webm',
+  'wav',
+  'mp3',
 ]);
 
 export const MAX_NOTE_CHARS = 1000;
@@ -37,6 +41,8 @@ const EXTENSIONS_BY_MIME = Object.freeze({
   'video/mp4': ['mp4'],
   'video/quicktime': ['mov'],
   'video/webm': ['webm'],
+  'audio/wav': ['wav'],
+  'audio/mpeg': ['mp3'],
 });
 
 const EXTENSION_BY_MIME = Object.freeze(
@@ -98,6 +104,27 @@ function kindValue(value) {
     fail('INVALID_KIND', 'kind', `kind must be one of: ${KINDS.join(', ')}`);
   }
   return value.trim().toLowerCase();
+}
+
+function usageValue(value) {
+  if (typeof value !== 'string' || !USAGES.includes(value.trim().toLowerCase())) {
+    fail('INVALID_USAGE', 'usage', `usage must be one of: ${USAGES.join(', ')}`);
+  }
+  return value.trim().toLowerCase();
+}
+
+function audioValue(value) {
+  if (typeof value !== 'string' || !['none', 'muted', 'present'].includes(value.trim().toLowerCase())) {
+    fail('INVALID_AUDIO', 'audio', 'audio must be one of: none, muted, present');
+  }
+  return value.trim().toLowerCase();
+}
+
+function positiveNumber(value, field) {
+  if (typeof value !== 'number' || !Number.isFinite(value) || value <= 0) {
+    fail('INVALID_NUMBER', field, `${field} must be a finite number greater than 0`);
+  }
+  return value;
 }
 
 function mimeValue(value, kind) {
@@ -194,19 +221,45 @@ export function makeReference(input = {}) {
     : storedFile(id, raw.file, mime);
 
   const bytes = integerValue(raw.bytes, 'bytes');
-  const width = integerValue(raw.width, 'width', { min: 1 });
-  const height = integerValue(raw.height, 'height', { min: 1 });
+  const width = kind === 'audio' ? undefined : integerValue(raw.width, 'width', { min: 1 });
+  const height = kind === 'audio' ? undefined : integerValue(raw.height, 'height', { min: 1 });
 
   let durationSec;
+  if (kind === 'audio' && (raw.durationSec === undefined || raw.durationSec === null)) {
+    fail('INVALID_DURATION', 'durationSec', 'audio durationSec must be a known finite number greater than 0');
+  }
   if (raw.durationSec !== undefined) {
     if (raw.durationSec !== null
-      && (typeof raw.durationSec !== 'number' || !Number.isFinite(raw.durationSec) || raw.durationSec < 0)) {
-      fail('INVALID_DURATION', 'durationSec', 'durationSec must be a finite number greater than or equal to 0');
+      && (typeof raw.durationSec !== 'number' || !Number.isFinite(raw.durationSec) || raw.durationSec < 0
+        || (kind === 'audio' && raw.durationSec === 0))) {
+      fail(
+        'INVALID_DURATION',
+        'durationSec',
+        kind === 'audio'
+          ? 'audio durationSec must be a known finite number greater than 0'
+          : 'durationSec must be a finite number greater than or equal to 0',
+      );
     }
     durationSec = raw.durationSec;
   }
 
+  const codec = raw.codec === undefined || raw.codec === null
+    ? undefined
+    : textValue(raw.codec, 'codec', { max: 64, allowEmpty: false });
+  const sampleRate = raw.sampleRate === undefined || raw.sampleRate === null
+    ? undefined
+    : integerValue(raw.sampleRate, 'sampleRate', { min: 1 });
+  const channels = raw.channels === undefined || raw.channels === null
+    ? undefined
+    : integerValue(raw.channels, 'channels', { min: 1 });
+  const fps = raw.fps === undefined || raw.fps === null ? undefined : positiveNumber(raw.fps, 'fps');
+  const frameCount = raw.frameCount === undefined || raw.frameCount === null
+    ? undefined
+    : integerValue(raw.frameCount, 'frameCount', { min: 1 });
+  const audio = raw.audio === undefined || raw.audio === null ? undefined : audioValue(raw.audio);
+
   const role = raw.role === undefined || raw.role === null ? 'other' : roleValue(raw.role);
+  const usage = raw.usage === undefined || raw.usage === null ? 'reference' : usageValue(raw.usage);
   const note = raw.note === undefined || raw.note === null
     ? ''
     : textValue(raw.note, 'note', { max: MAX_NOTE_CHARS });
@@ -222,11 +275,20 @@ export function makeReference(input = {}) {
     file,
     bytes,
     sha256,
-    width,
-    height,
   };
+  if (kind !== 'audio') {
+    record.width = width;
+    record.height = height;
+  }
   if (durationSec !== undefined) record.durationSec = durationSec;
+  if (codec !== undefined) record.codec = codec;
+  if (sampleRate !== undefined) record.sampleRate = sampleRate;
+  if (channels !== undefined) record.channels = channels;
+  if (fps !== undefined) record.fps = fps;
+  if (frameCount !== undefined) record.frameCount = frameCount;
+  if (audio !== undefined) record.audio = audio;
   record.role = role;
+  record.usage = usage;
   record.note = note;
   record.label = label;
   record.createdAt = createdAtValue(raw.createdAt);
@@ -235,7 +297,7 @@ export function makeReference(input = {}) {
 
 export function validatePatch(input = {}) {
   const raw = objectInput(input, 'patch');
-  const allowed = new Set(['role', 'note', 'label']);
+  const allowed = new Set(['role', 'note', 'label', 'usage', 'editorialScope']);
   const patch = {};
 
   for (const key of Object.keys(raw)) {
@@ -245,9 +307,19 @@ export function validatePatch(input = {}) {
     const value = raw[key];
     if (value === undefined) continue;
     if (key === 'role') patch.role = roleValue(value);
+    if (key === 'usage') patch.usage = usageValue(value);
+    if (key === 'editorialScope') {
+      if (!['custom', 'product-walkthrough', 'music-video'].includes(value)) {
+        fail('INVALID_EDITORIAL_SCOPE', 'editorialScope', 'editorialScope must identify Custom, Product Walkthrough or Music Video');
+      }
+      patch.editorialScope = value;
+    }
     if (key === 'note') patch.note = textValue(value, 'note', { max: MAX_NOTE_CHARS });
     if (key === 'label') patch.label = textValue(value, 'label', { max: MAX_LABEL_CHARS });
   }
 
+  if (patch.editorialScope !== undefined && patch.usage !== 'editorial') {
+    fail('INVALID_EDITORIAL_SCOPE', 'editorialScope', 'editorialScope requires an explicit editorial usage selection');
+  }
   return Object.freeze(patch);
 }

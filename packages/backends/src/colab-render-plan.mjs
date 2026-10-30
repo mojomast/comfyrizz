@@ -34,6 +34,8 @@ export const RENDER_BUNDLE_DIRS = Object.freeze([
   "packages/planner/src",
   "packages/vector/src",
   "packages/compositions/src",
+  "packages/jobs/src",
+  "workflows",
 ]);
 
 export const RENDER_BUNDLE_FILES = Object.freeze([
