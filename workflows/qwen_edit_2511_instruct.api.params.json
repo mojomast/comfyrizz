@@ -1,0 +1,14 @@
+{
+  "v": 1,
+  "generator": "qwen-edit-2511",
+  "kind": "still",
+  "note": "Single-image instruction edit on Qwen-Image-Edit-2511. Ported from mojomast/open-higgsfield-skills @5a1a2d4 skills/image-edit/workflows/qwen_edit_2511_instruct.api.json (MIT, core ComfyUI nodes only), including pack fix 49b3cab. image feeds LoadImage(41); instruction fills TextEncodeQwenImageEditPlus(100).prompt, the positive branch; the negative branch stays on the empty TextEncodeQwenImageEditPlus(112). Do not swap positive/negative. Models (Apache-2.0, unverified): qwen_image_edit_2511_fp8mixed, qwen_2.5_vl_7b_fp8_scaled, qwen_image_vae. No new node packs; all nodes are ComfyUI core.",
+  "files": ["image"],
+  "map": {
+    "image": ["41", "image"],
+    "instruction": ["100", "prompt"],
+    "seed": ["106", "seed"],
+    "steps": ["106", "steps"],
+    "cfg": ["106", "cfg"]
+  }
+}
