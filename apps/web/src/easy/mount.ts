@@ -964,7 +964,7 @@ export function mountEasyStudio(root: HTMLElement, baseHost: EasyHost, deps: Eas
 
   function clearEditorViewForEasy(): void {
     const params = new URLSearchParams(search().replace(/^\?/, ''));
-    if (!params.has('view')) return;
+    if (params.get('view') !== 'editor') return;
     params.delete('view');
     const query = params.toString();
     const url = query ? `?${query}` : (view?.location?.pathname ?? './');
