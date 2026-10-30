@@ -1,4 +1,6 @@
 import { REF_DIMENSIONS, REF_SEVERITIES, REF_VERDICT_SCHEMA, validateRefVerdict } from '@comfyrizz/schema/ref-review';
+import type { RefVerdict } from '@comfyrizz/schema/ref-review';
+import { refReviewSkill } from './skills/index.js';
 import type { ChatMessage, ImagePart } from './types.js';
 
 interface ReviewRequest {
@@ -36,6 +38,8 @@ function buildPrompt(request: ReviewRequest): string {
       }).join('\n')
     : '- none';
   return [
+    refReviewSkill().body,
+    '',
     'Review one generated reference still before it feeds the LTX video stage.',
     '',
     'Shot prompt:',
@@ -85,7 +89,7 @@ function parseVerdict(reply: unknown): unknown {
   return undefined;
 }
 
-function errorVerdict(request: ReviewRequest): Record<string, any> {
+function errorVerdict(request: ReviewRequest): RefVerdict {
   return {
     schema: REF_VERDICT_SCHEMA,
     jobId: request.jobId,
@@ -104,7 +108,7 @@ async function ask(model: ReviewStillOptions['model'], messages: ChatMessage[], 
   return reply;
 }
 
-export async function reviewStill({ request, image, model, signal }: ReviewStillOptions): Promise<Record<string, any>> {
+export async function reviewStill({ request, image, model, signal }: ReviewStillOptions): Promise<RefVerdict> {
   signal?.throwIfAborted();
   const messages: ChatMessage[] = [{ role: 'user', content: buildPrompt(request), images: [image] }];
 
@@ -118,7 +122,7 @@ export async function reviewStill({ request, image, model, signal }: ReviewStill
 
   const first = parseVerdict(reply);
   const firstCheck = verdictCheck(first);
-  if (firstCheck.ok) return first as Record<string, any>;
+  if (firstCheck.ok) return first as RefVerdict;
 
   const repairMessages: ChatMessage[] = [
     ...messages,
@@ -133,6 +137,6 @@ export async function reviewStill({ request, image, model, signal }: ReviewStill
 
   const second = parseVerdict(reply);
   const secondCheck = verdictCheck(second);
-  if (secondCheck.ok) return second as Record<string, any>;
+  if (secondCheck.ok) return second as RefVerdict;
   return errorVerdict(request);
 }

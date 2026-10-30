@@ -39,3 +39,8 @@ After a second invalid reply the review becomes `overall: "error"`. An error nev
 Import dimensions, severities, schemas, caps, and validators from `@comfyrizz/schema/ref-review`. Do not redefine them. The per-still cap is `REF_POLICY_DEFAULTS.maxRegensPerStill` and the production regen cap is `refRegenJobCap(n)`. The gate opens only for `accepted` or `overridden`.
 
 Review is read-only: report evidence and end-state hints, never edit the still. Keep credentials and authorization headers out of prompts, verdicts, errors, and logs.
+
+## Sources
+- [FLUX 3 Image Klein in ComfyUI: write the result, not the change](https://docs.comfy.org/tutorials/flux/flux-3-klein)
+- [Multi-VLM gates: decomposed identity and anatomy questions with bias calibration](https://safaia.net/Booyaka101/comfyui-vlm-gates)
+- [WeGen consistency judge deduction categories](https://huggingface.co/yinggzhang/WeGenBench-Consistency-COT)

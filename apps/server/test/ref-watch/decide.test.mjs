@@ -109,3 +109,12 @@ test('decision table: 12 rows', () => {
     if (row.action === 'replace_ref') assert.ok(typeof decision.replaceRef === 'string' && decision.replaceRef.length > 0, `${row.name}: replaceRef present`);
   }
 });
+
+test('a verdict that fails validation escalates (pass that contradicts a hard failure)', () => {
+  const sha = 'a'.repeat(64);
+  const verdict = { schema: REF_VERDICT_SCHEMA, jobId: 'still_x', keyframeSha256: sha, reviewer: 'pi', overall: 'pass',
+    checks: [{ dimension: 'anatomy', pass: false, severity: 'hard', evidence: 'six fingers' }], fixHints: [] };
+  const d = decide({ verdict, attempt: 0, regenJobsUsed: 0, stillCount: 8, identityFailures: 0 });
+  assert.equal(d.action, 'escalate');
+  assert.equal(validateRefDecision(d).ok, true);
+});

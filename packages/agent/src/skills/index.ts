@@ -1,6 +1,6 @@
 import { readFileSync } from 'node:fs';
 
-export const SKILL_CATALOG_VERSION = '1.5.2';
+export const SKILL_CATALOG_VERSION = '1.6.0';
 
 export const BUNDLED_SKILL_IDS = [
   'video-brief',
@@ -8,6 +8,7 @@ export const BUNDLED_SKILL_IDS = [
   'storyboard-direction',
   'project-revision',
   'motion-style',
+  'ref-review',
 ] as const;
 
 export type SkillId = typeof BUNDLED_SKILL_IDS[number];
@@ -68,6 +69,12 @@ function loadSkill(id: SkillId): BundledSkill {
 
 // Only this fixed allowlist reaches the filesystem; mode and caller data never do.
 const catalog = new Map(BUNDLED_SKILL_IDS.map(id => [id, loadSkill(id)]));
+
+/** Reference-watch review procedure for the Pi judge (RW03); not a conversation skill. */
+export function refReviewSkill(): { id: 'ref-review'; version: string; body: string } {
+  const skill = catalog.get('ref-review')!;
+  return { id: 'ref-review', version: skill.version, body: skill.body };
+}
 
 /** Builder-only guidance; never include builder tool calls in conversation skills. */
 export function proceduralDrawingBuilderGuidance(): string {
