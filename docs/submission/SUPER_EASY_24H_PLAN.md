@@ -1105,3 +1105,38 @@ Spoon pre-approval attempts are separately preserved: `spoon-files-final` found 
 The fresh `spoon-files-ready` runtime is frozen at `35a2572`. Real UI proposal reload passed; normal editor chat saved the exact scoped r23→r24 duplicate-headline correction. Preflight verifies five ordered scenes, 900 frames at 30 fps, two native H3 lines with shared reference identity and real conditioning, two LTX clips, two contained Klein suspect photographs, and ten total planned generation jobs. Final quote 2.734, campaign reservation 9, starting balance 206.99, no pre-existing sessions. Production `prod_e63b9c1a3aea37cb3ca8839f` is in progress, not yet delivered. Reconcile account and shutdown before starting the speaking teaser. No other paid production has started.
 
 Verification boundaries: 222 focused schema/agent-finishing/server/renderer checks passed for the finishing changes; 94 web checks passed before the final checkpoint follow-ups; subsequent timing, checkpoint, routing and typechecks are separately logged under `/tmp/opencode/`. These are focused checks, not a blanket full-suite sign-off. Live restored Studio preview showed a 19-second player counter although server package/compiled preflight were exact 30 seconds; final MP4 timing still requires independent ffprobe verification.
+
+## 2026-10-30 continuation — Spoon corrected export and agent inspection branch
+
+Spoon completed all ten generation jobs for **1.88 actual credits**; original run
+`run_8b3abf9d8459` is stopped and its reservation settled. CPU ASR found the original
+export clipped “vanished”; normal editor controls saved two 0.75-second native
+source trims without changing any media bytes or scene windows. Review exposed
+pending-reference take fingerprints and selected-take staging paths. The original
+run, stale records, revision-conflict attempt and missing-speech export are retained.
+Fixes `26333e0` and `706d93a` address future ingestion, take staging, missing-active-
+media preflight and current-revision saved-export reopening.
+
+A separate frozen CPU-only replay exported **r31**, **30 seconds / 900 frames /
+1920×1080 / 30 fps**, with trusted H3/LTX/Klein and final-byte receipts. Download,
+fresh-browser reopen and reload returned identical bytes:
+`94115740340c6f124cc845fe5c2909ef67fdce0e8462167f4798c0a3923f1742`.
+Unprompted CPU ASR recognizes both complete lines; sampled final frames show CASE
+CLOSED after the admission. Automated 1× playback ended normally. Human listening
+and lip-sync acceptance remain pending. Review link:
+http://100.72.41.9:8766/the-spoon-files.mp4
+
+Campaign before teaser approval: **8.00 spent / 0 reserved / 52.00 remaining**;
+last fresh balance **205.11**, zero assignments/sessions, 0.00/hour. The unchanged
+speaking brief produced an eleven-shot, exact-45-second unapproved proposal; review
+found hands-only speaking coverage and independent identity images. Its original
+planning namespace stopped with **zero paid requests** and is preserved while its
+checkpoint is resumed for normal full-plan edits on frozen `3e9e609`.
+
+User-requested self-review research and implementation are separately pushed on
+`feat/agent-self-review-and-repair`, latest `6302f3b`, unmerged. Source inspection
+and two-batch bounded source-in repairs bind package/revision/media evidence;
+selected-take path handling passed nineteen focused tests and a read-only real
+Spoon ffprobe smoke. Automatic final-render inspection/re-rendering is the next
+stage. Research and explicit capability limits are in that branch's
+`docs/AGENT_SELF_REVIEW.md`.
