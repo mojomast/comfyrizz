@@ -4,6 +4,7 @@ import {
   refRegenJobCap,
   validateRefVerdict,
 } from '../../../../packages/schema/src/ref-review.mjs';
+import { EDIT_PLACEHOLDER, planEdit } from './edit-plan.mjs';
 
 const STEER_PLACEHOLDER = '<steer>';
 const REPLACE_REF_PLACEHOLDER = '<replace-ref>';
@@ -33,7 +34,7 @@ function capExhaustedReason({ attempt, policy, regenJobsUsed, stillCount }) {
   return 'production regen cap exhausted';
 }
 
-export function decide({ verdict, attempt, regenJobsUsed, stillCount, identityFailures, policy = REF_POLICY_DEFAULTS, untrustedDimensions = REF_UNTRUSTED_DIMENSIONS }) {
+export function decide({ verdict, attempt, regenJobsUsed, stillCount, identityFailures, editsTried, policy = REF_POLICY_DEFAULTS, untrustedDimensions = REF_UNTRUSTED_DIMENSIONS }) {
   const checks = Array.isArray(verdict?.checks) ? verdict.checks : [];
   const base = {
     schema: REF_DECISION_SCHEMA,
@@ -52,7 +53,8 @@ export function decide({ verdict, attempt, regenJobsUsed, stillCount, identityFa
       reason: softFailures(checks).length ? 'overall pass; soft checks failed' : 'all checks passed',
     };
   }
-  if (verdict?.overall === 'fail' && hardFailures(checks, untrustedDimensions).length === 0) {
+  const editPlan = verdict?.overall === 'fail' ? planEdit(verdict) : null;
+  if (verdict?.overall === 'fail' && hardFailures(checks, untrustedDimensions).length === 0 && !editPlan) {
     const untrustedOnly = checks.some((check) => isFailed(check) && check.severity === 'hard');
     return { ...base, action: 'accept', reason: untrustedOnly ? 'only untrusted or soft checks failed' : 'only soft checks failed' };
   }
@@ -76,7 +78,18 @@ export function decide({ verdict, attempt, regenJobsUsed, stillCount, identityFa
     };
   }
 
-  const dimensions = [...new Set(failures.map((check) => check.dimension))];
+  if (editPlan && !(Number.isSafeInteger(editsTried) && editsTried >= 1)) {
+    return {
+      ...base,
+      action: 'targeted_edit',
+      reason: `localized hard checks failed: ${editPlan.dimensions.join(', ')}`,
+      editInstruction: EDIT_PLACEHOLDER,
+      editDimension: editPlan.dimension,
+    };
+  }
+
+  const failedDimensions = failures.map((check) => check.dimension);
+  const dimensions = [...new Set(failedDimensions.length > 0 ? failedDimensions : editPlan?.dimensions ?? [])];
   return {
     ...base,
     action: 'reprompt',
