@@ -99,3 +99,8 @@ SESSION_FULL.webm t=0 ≈ 05:53:13 UTC. Event timestamps are in `assets/ui-raw/t
 - `/workspace/submission-demo/out/seg/*.mp4` (intermediate segments; regenerate with assemble.py)
 
 **Local code tweaks** (planning timeout env, chat step limit 6→14 env) are in a separate, clearly labelled commit on this branch. Both default to the old behaviour when the env var is unset.
+
+## v5 (cleanup: no broken tiles, no duplicate Mira)
+- **Duplicate Mira:** Klein still `a_img_ac76142ca8b2d684` ("Visual reference 8") shows Mira twice. It is hidden in the gallery: the real VR9 tile is moved into its slot. **Film shot 2** (lantern room) opens with a second Mira behind her (FILM_BEFORE 6.0–7.7 s). `06_film` now plays 0–6 s (shot 1, unchanged), then 7.7–13.7 s (rest of shot 2 and the start of shot 3). It is still 12 s, and the film audio uses the same cuts.
+- **Blank/broken tiles:** These are painted with the page background (#0a0a12). That covers the Video tile and the Shot 1–4 tiles in the gallery, the thumbnail row under the result player, the "Shots 1–4" placeholders on the review screen (07/08), and the plan-page Preview box. The gallery now fast-forwards from 3499 s, after all the stills have arrived (323 s at about 18×).
+- Timings, VO offsets and the total (1:57.07) are unchanged. There is no music and no new Google Colab spend. The raw still stays in `stills/` for the record but is not shown.

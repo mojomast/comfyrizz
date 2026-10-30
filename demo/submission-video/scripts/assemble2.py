@@ -5,22 +5,37 @@ V='fps=30,format=yuv420p'
 def ff(args):
     if os.path.exists(args[-1]) and not os.environ.get('REBUILD'): return
     subprocess.run(['nice','-n','10','ffmpeg','-v','error','-y',*args,'-an','-c:v','libx264','-preset','veryfast','-crf','20','-threads','2'],check=True)
-def ui(name, parts, cap=None):
+BG='0x0a0a12'
+def fixes(fx):
+    # fx: list of ('box',x,y,w,h) paint page background, or ('move',sx,sy,w,h,dx,dy) reposition a real tile
+    out=''
+    for i,f in enumerate(fx):
+        if f[0]=='box': out+=f',drawbox=x={f[1]}:y={f[2]}:w={f[3]}:h={f[4]}:color={BG}:t=fill'
+    return out
+def movechain(lbl,fx,tag):
+    fl=[];cur=lbl
+    for i,f in enumerate(fx):
+        if f[0]=='move':
+            _,sx,sy,w,h,dx,dy=f
+            fl.append(f'{cur}split[m{tag}a{i}][m{tag}b{i}];[m{tag}b{i}]crop={w}:{h}:{sx}:{sy}[m{tag}c{i}];[m{tag}a{i}][m{tag}c{i}]overlay={dx}:{dy}[m{tag}d{i}]'); cur=f'[m{tag}d{i}]'
+    return fl,cur
+def ui(name, parts, cap=None, fx=()):
     # parts: list of (start, srcdur, speed)
     ins=[]; fl=[]
     for i,(st,d,sp) in enumerate(parts):
         ins+=['-ss',str(st),'-t',str(d),'-i',UI]
-        fl.append(f'[{i}:v]crop=1600:900:0:0,scale=1920:1080,setpts=PTS/{sp}-STARTPTS,{V}[p{i}]')
+        mf,cur=movechain(f'[{i}:v]',fx,i); fl+=mf
+        fl.append(f'{cur}crop=1600:900:0:0{fixes(fx)},scale=1920:1080,setpts=PTS/{sp}-STARTPTS,{V}[p{i}]')
     n=len(parts); fl.append(''.join(f'[p{i}]' for i in range(n))+f'concat=n={n}:v=1[c]')
     last='[c]'
     if cap: ins+=['-i',f'{C}/{cap}.png']; fl.append(f'[c][{n}:v]overlay=0:0[o]'); last='[o]'
     ff([*ins,'-filter_complex',';'.join(fl),'-map',last,f'{S}/{name}.mp4'])
 OV='/workspace/submission-demo/assets/chat-overlay'
-def ui2(name, parts, cap=None, tail=None):
+def ui2(name, parts, cap=None, tail=None, fx=None):
     ins=[]; fl=[]; k=0; labels=[]
-    for (st,d,sp,ovs) in parts:
+    for pi,(st,d,sp,ovs) in enumerate(parts):
         ins+=['-ss',str(st),'-t',str(d),'-i',UI]; src=k; k+=1
-        cur=f'[{src}:v]crop=1600:900:0:0[c{src}]'; fl.append(cur); last=f'[c{src}]'
+        cur=f'[{src}:v]crop=1600:900:0:0{fixes(fx[pi] if fx else [])}[c{src}]'; fl.append(cur); last=f'[c{src}]'
         for j,(png,t0,t1,x,y) in enumerate(ovs):
             ins+=['-i',f'{OV}/{png}.png']; oi=k; k+=1
             fl.append(f"{last}[{oi}:v]overlay={x}:{y}:enable='between(t,{t0},{t1})'[o{oi}]"); last=f'[o{oi}]'
@@ -49,11 +64,14 @@ def add(n,d,vo=None): segs.append((n,d,vo))
 still('01_title',f'{C}/title.png',9); add('01_title',9,'vo01')
 ui('02_prompt',[(2789,13,1)],'cap01'); add('02_prompt',13,'vo02')
 ui('03_proposal',[(2991,12,1)],'cap02'); add('03_proposal',12,'vo03')
-ui('04_gallery',[(3003,4,1),(3430,392,28)],'cap03'); add('04_gallery',18,'vo04')
-ui('05_result',[(3908,6,1)],'cap04'); add('05_result',6,'vo05')
-film('06_film',f'{A}/film-before/FILM_BEFORE.mp4',0,12); add('06_film',12,None)
-ui2('07_chat',[(4119,8,1,[('type1', 0.9, 1.52, 1181, 104), ('type2', 1.52, 2.15, 1181, 104), ('type3', 2.15, 2.77, 1181, 104), ('type4', 2.77, 3.4, 1181, 104), ('type5', 3.4, 4.03, 1181, 104), ('type6', 4.03, 4.65, 1181, 104), ('type7', 4.65, 5.28, 1181, 104), ('type8', 5.28, 5.9, 1181, 104), ('sent', 5.9, 9, 1181, 104)]),(4127,70,10,[('sent',0,64,1181,104),('reply',64,99,1181,104)])],'cap05'); add('07_chat',15,'vo06')
-ui2('08_regen',[(4408,244,40,[('reply',0,60,1181,104),('ready',60,999,1181,104)]),(4676,4,1,[])],'cap06',tail=f'{A}/film-after/shot4_take2_storm.mp4'); add('08_regen',18,'vo07')
+GAL=[('move',579,335,144,114,431,335),('box',577,333,745,118),('box',280,215,148,117)]
+ui('04_gallery',[(3499,323,323/18)],'cap03',fx=GAL); add('04_gallery',18,'vo04')
+ui('05_result',[(3908,6,1)],'cap04',fx=[('box',0,830,1600,70)]); add('05_result',6,'vo05')
+FB=f'{A}/film-before/FILM_BEFORE.mp4'
+FILMCUTS=[(0,6),(7.7,12),(12,13.7)]  # skip shot 2 opening (6.0-7.7s): a second Mira stands behind her
+ff([*sum([['-ss',str(a),'-t',str(b-a),'-i',FB] for a,b in FILMCUTS],[]),'-filter_complex',''.join(f'[{i}:v]scale=1920:1080,setpts=PTS-STARTPTS,{V}[f{i}];' for i in range(3))+'[f0][f1][f2]concat=n=3:v=1[c]','-map','[c]',f'{S}/06_film.mp4']); add('06_film',12,None)
+ui2('07_chat',[(4119,8,1,[('type1', 0.9, 1.52, 1181, 104), ('type2', 1.52, 2.15, 1181, 104), ('type3', 2.15, 2.77, 1181, 104), ('type4', 2.77, 3.4, 1181, 104), ('type5', 3.4, 4.03, 1181, 104), ('type6', 4.03, 4.65, 1181, 104), ('type7', 4.65, 5.28, 1181, 104), ('type8', 5.28, 5.9, 1181, 104), ('sent', 5.9, 9, 1181, 104)]),(4127,70,10,[('sent',0,64,1181,104),('reply',64,99,1181,104)])],'cap05',fx=[[('box',255,800,925,100)],[('box',255,800,925,100)]]); add('07_chat',15,'vo06')
+ui2('08_regen',[(4408,244,40,[('reply',0,60,1181,104),('ready',60,999,1181,104)]),(4676,4,1,[])],'cap06',fx=[[('box',255,215,505,135)],[('box',975,355,370,250)]],tail=f'{A}/film-after/shot4_take2_storm.mp4'); add('08_regen',18,'vo07')
 split('09_split'); add('09_split',8,'vo08')
 still('10_end',f'{C}/end.png',6); add('10_end',6,'vo09')
 with open(f'{S}/list.txt','w') as f:
@@ -72,7 +90,7 @@ ins+=['-i',f'{A}/film-before/FILM_BEFORE.mp4']; fi=k; k+=1
 fl=vo[:]
 fl.append(''.join('[v'+l.split('[v')[1] for l in vo)+f'amix=inputs={len(vo)}:normalize=0,apad,atrim=0:{t}[vob]')
 fl.append('[vob]anull[vo1]')
-fl.append(f"[{fi}:a]aresample=48000,atrim=0:12,afade=t=out:st=11:d=1,adelay={int(film_t*1000)}:all=1,apad,atrim=0:{t}[film]")
+fl.append(f"[{fi}:a]asplit=3[fa0][fa1][fa2];"+''.join(f'[fa{i}]atrim={a}:{b},asetpts=PTS-STARTPTS[fb{i}];' for i,(a,b) in enumerate(FILMCUTS))+"[fb0][fb1][fb2]concat=n=3:v=0:a=1,"+f"aresample=48000,afade=t=out:st=11:d=1,adelay={int(film_t*1000)}:all=1,apad,atrim=0:{t}[film]")
 pass
 pass
 fl.append(f'[vo1][film]amix=inputs=2:normalize=0,loudnorm=I=-16:TP=-1.5:LRA=11,aresample=48000[mix]')
