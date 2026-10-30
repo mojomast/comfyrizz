@@ -222,3 +222,11 @@ def test_asr_language_strips_the_graph_code():
     assert cn.asr_language("English (en)") == "English"
     assert cn.asr_language("French (fr)") == "French"
     assert cn.asr_language("") == "English"
+
+
+def test_take_seconds_read_a_non_wav_take(tmp_path, monkeypatch):
+    # Google Colab e2e 2026-10-30: a FLAC take crashed _take_report with "file does not start with RIFF id".
+    take = tmp_path / "take.flac"
+    take.write_bytes(b"fLaC" + b"\0" * 64)
+    monkeypatch.setattr(narrate, "_read_audio", lambda path: (np.zeros(48000, dtype=np.float32), 24000))
+    assert narrate._result_seconds(None, take) == 2.0

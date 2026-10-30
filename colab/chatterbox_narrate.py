@@ -37,7 +37,7 @@ TTS_PY = Path(__file__).resolve().parents[1] / "packages" / "tts" / "py"
 if str(TTS_PY) not in sys.path:
     sys.path.insert(0, str(TTS_PY))
 
-from chatterbox import DEFAULT_GRAPH, DEFAULT_LANGUAGE, DEFAULT_TAKES_PER_LINE, synth_lines  # noqa: E402
+from chatterbox import DEFAULT_GRAPH, DEFAULT_LANGUAGE, DEFAULT_TAKES_PER_LINE, _read_audio, synth_lines  # noqa: E402
 from qwen import to_sample_rate  # noqa: E402
 from synth import SAMPLE_RATE, split_sentences, write_wav  # noqa: E402
 from take_select import select_take  # noqa: E402
@@ -259,8 +259,14 @@ def _result_path(result) -> Path | None:
 
 
 def _wav_seconds(path: Path) -> float:
-    with wave.open(str(path), "rb") as handle:
-        return handle.getnframes() / handle.getframerate()
+    # ComfyUI saves a take as FLAC under whatever name it picks; on Google Colab the take report
+    # crashed on "file does not start with RIFF id". The engine's reader handles both.
+    try:
+        with wave.open(str(path), "rb") as handle:
+            return handle.getnframes() / handle.getframerate()
+    except wave.Error:
+        samples, rate = _read_audio(path)
+        return len(samples) / rate
 
 
 def _result_seconds(result, path: Path | None) -> float:
