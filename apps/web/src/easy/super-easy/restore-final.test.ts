@@ -51,6 +51,33 @@ test('incomplete, cross-project, non-final, stale-plan and newer failed journals
   for (const snapshot of variants) assert.equal(completedFinalRun(snapshot, { productionId, packageId }), null);
 });
 
+test('a later receipt-verified editor export restores the current revision instead of the original run', async () => {
+  const h = harness({
+    getPackage: async () => ({ package: { id: packageId, revision: 5 } }),
+    getRunVideo: async () => { throw Error('Must not return obsolete original run bytes'); },
+    getSavedRenderVideo: async (id, revision) => {
+      assert.equal(id, packageId); assert.equal(revision, 5);
+      return { blob: new Blob(['verified edited bytes']), exportId: 'r_123456789abc' };
+    },
+  });
+  await h.session.restoreFinalVideo(journal());
+  assert.equal(h.session.status(), 'done');
+  assert.equal(h.session.snapshot().finalVideo.exportId, 'r_123456789abc');
+  assert.equal(await (await fetch(h.session.snapshot().finalVideo.url)).text(), 'verified edited bytes');
+  h.session.stop();
+});
+
+test('unexported edits never fall back to the old run when current-revision lookup fails', async () => {
+  const h = harness({
+    getPackage: async () => ({ package: { id: packageId, revision: 5 } }),
+    getRunVideo: async () => { throw Error('Must not fall back'); },
+    getSavedRenderVideo: async () => { throw Error('No verified current-revision export'); },
+  });
+  await h.session.restoreFinalVideo(journal());
+  assert.equal(h.session.status(), 'error');
+  assert.doesNotMatch(h.session.progressHtml(), /data-super-easy-download/);
+});
+
 test('wrong run identity, newer package edits and rejected receipt prevent a finished movie claim', async () => {
   for (const overrides of [
     { getRun: async () => ({ run: { runId, productionId: 'other', packageId, status: 'done', revision: 4 } }) },
