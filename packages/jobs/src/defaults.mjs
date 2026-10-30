@@ -24,6 +24,40 @@ export const MOTION_GUARD = {
   i2v: "static camera, gentle motion, no cuts",
 };
 
+/**
+ * Stage-2 refinement schedules for the two-stage LTX-2.5 graphs.
+ *
+ * `template` is the Comfy-Org built-in `video_ltx2_5_t2v` stage-2 ManualSigmas value, also used
+ * by the open graphs (leafreel, openfield): `0.85, 0.7250, 0.4219, 0.0`.
+ * `lightricks` is the opt-in A/B from the Lightricks advanced Two Stage Distilled example:
+ * `0.909375, 0.725, 0.421875, 0.0`. Both are distilled routes, not the full/dev + distilled-LoRA
+ * route; the stage-2 rounding differs, so this is an experiment rather than a replacement
+ * (docs/research/COMFY_LTX_QUALITY.md, section 2).
+ */
+export const STAGE2_SIGMAS = Object.freeze({
+  template: "0.85, 0.7250, 0.4219, 0.0",
+  lightricks: "0.909375, 0.725, 0.421875, 0.0",
+});
+
+/**
+ * Apply a stage-2 refinement schedule to a job's params, in place.
+ *
+ * The template is already the graph default, so it leaves `params` untouched. `lightricks` writes
+ * `stage2_sigmas` for the graphs whose params map declares it (i2v, i2v upscale, a2v); t2v has no
+ * such param and stays on the template schedule.
+ *
+ * @param {object} params            the job's params (mutated only for `lightricks`)
+ * @param {"template"|"lightricks"} [preset]
+ * @returns {object} the same params object
+ */
+export function applyStage2SigmasPreset(params, preset = "template") {
+  if (!Object.hasOwn(STAGE2_SIGMAS, preset)) {
+    throw new Error(`unknown stage-2 sigmas preset: ${preset}`);
+  }
+  if (preset === "lightricks") params.stage2_sigmas = STAGE2_SIGMAS.lightricks;
+  return params;
+}
+
 /** A prompt that already directs the camera keeps its own direction. */
 export const CAMERA_MENTIONED = /\b(camera|dolly|pan|tilt|orbit|zoom|push[- ]?in|handheld)\b|\btracking\s+(?:shot|view)\b|(?:^|[.!?]\s*)(?:(?:slow|gentle|steady)\s+)?(?:forward|backward|lateral)\s+move\b/i;
 
