@@ -119,3 +119,25 @@ test("the doc validator accepts the optional shot fields", () => {
   const doc = planJobs(pkg);
   assert.deepEqual(checkJobsDoc(doc), []);
 });
+
+test("SPW integration: consecutive scenes sharing `sequence` are shots of one story scene", () => {
+  const pkg = {
+    schemaVersion: 1, revision: 1, id: "pkg_sequence", format: { width: 1920, height: 1080, fps: 30 },
+    scenes: [
+      { id: "a1", sequence: "storm", background: { asset: "p1" } },
+      { id: "a2", sequence: "storm", background: { asset: "p2" } },
+      { id: "b1", sequence: "dawn", background: { asset: "p3" } },
+      { id: "b2", sequence: "dawn", background: { asset: "p4" } },
+      { id: "solo", background: { asset: "p5" } },
+    ],
+    assets: { p1: plateAsset(1), p2: plateAsset(2), p3: plateAsset(3), p4: plateAsset(4), p5: plateAsset(5),
+      t: { kind: "image", origin: "generated", status: "pending", gen: { generator: "flux3-klein", workflow: "workflows/flux3_klein_t2i.api.json", workflow_sha256: SHA, model: "flux-3-image-klein", inputs: { prompt: "x", width: 1024, height: 576, seed: 1 } } } },
+    titleCards: [{ asset: "t", text: "Title" }],
+  };
+  const plates = plateJobs(planJobs(pkg));
+  assert.deepEqual(plates.p1.shot, { sceneId: "storm", index: 0 });
+  assert.deepEqual(plates.p2.shot, { sceneId: "storm", index: 1 });
+  assert.deepEqual(plates.p3.shot, { sceneId: "dawn", index: 0 });
+  assert.deepEqual(plates.p4.shot, { sceneId: "dawn", index: 1 });
+  assert.deepEqual(plates.p5.shot, { sceneId: "solo", index: 0 });
+});

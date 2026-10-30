@@ -285,11 +285,18 @@ function platePositionsByScene(pkg) {
   const scenes = Array.isArray(pkg.scenes) ? pkg.scenes : [];
   const assets = pkg.assets && typeof pkg.assets === "object" ? pkg.assets : {};
   const positions = new Map();
+  // A story scene is a run of consecutive package scenes sharing `sequence` (each package scene is
+  // one shot); a scene without `sequence` is its own story scene. Indexes count across the run.
+  let key = null;
+  let index = 0;
   for (const scene of scenes) {
-    let index = 0;
+    const sequence = typeof scene?.sequence === "string" && scene.sequence ? `seq:${scene.sequence}` : null;
+    const sceneKey = sequence ?? scene?.id ?? null;
+    if (sequence === null || sceneKey !== key) index = 0;
+    key = sceneKey;
     for (const id of sceneAssetIds(scene)) {
       if (GENERATOR_KIND[assets[id]?.gen?.generator] !== "plate") continue;
-      if (!positions.has(id)) positions.set(id, index);
+      if (!positions.has(id)) positions.set(id, { sceneId: sequence ? scene.sequence : scene.id, index });
       index += 1;
     }
   }
@@ -984,7 +991,7 @@ export function planJobs(pkg, opts = {}) {
     if (kind === "plate") {
       const position = platePositions.get(assetId);
       if (sceneIndex >= 0 && position !== undefined) {
-        job.shot = { sceneId: scene, index: position };
+        job.shot = { sceneId: position.sceneId, index: position.index };
         if (gen.cut === true || gen.transition === "hard") job.shot.cut = true;
       }
       if (typeof gen.chainFromPrevious === "boolean") job.chainFromPreviousOverride = gen.chainFromPrevious;
