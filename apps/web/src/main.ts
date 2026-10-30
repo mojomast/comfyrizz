@@ -872,6 +872,10 @@ async function hydratePreviewAudio(requests: PreviewAudioRequest[]): Promise<voi
 
 /** Every existing preview call goes through here so take swaps and audio sources are never lost. */
 function updatePreview(nextPkg: PackageV1, nextTimeline: Timeline, nextAssets?: Record<string, InlineAsset>): void {
+  // A paused Player need not emit frameupdate when a different project is
+  // adopted. Refresh its counter immediately instead of showing the demo's time.
+  const frame = Math.max(0, Math.min(player?.getCurrentFrame() ?? 0, nextTimeline.durationInFrames - 1));
+  $('time').textContent = `${formatTime(frame, nextTimeline.fps)} / ${formatTime(nextTimeline.durationInFrames, nextTimeline.fps)}`;
   resetPreviewMedia(nextPkg);
   const previewPackage = withTakePreview(nextPkg);
   const plan = previewMediaPlan(previewPackage, previewMediaSources);
