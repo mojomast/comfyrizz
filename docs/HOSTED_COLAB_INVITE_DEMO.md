@@ -181,7 +181,30 @@ was recorded as `verified_no_allocation` at 0 CU, and left the invite active
 with its full budget and film quota. The same package then passed preflight,
 Kokoro synthesis, and measured timing with the pinned environment.
 
-Hosted planning now streams guest-scoped agent activity. The guest UI polls
+### Recovering an interrupted render from retained media
++
++A host restart can interrupt a local render after paid media has completed. The
++run directory keeps the ready package, generated image, narration, workflow
++sidecars and generation receipt. Recovery must copy those bytes into the
++package store and the trust ledger at `runtime/.comfy-provenance/` (the
++contribution store is the parent of `packages/`, not a subdirectory of it),
++save the retained package revision with its base revision, then author a
++zero-CU `backendId: 'cpu'` final action. CPU final actions are priced at zero
++instead of the usual Google Colab estimate. The normal outbox pipeline then
++reuses ready media with no media jobs, renders locally, verifies model
++contribution and audio, and records the completed film in the gallery.
++
++On October 30, the interrupted run `pipe_59385b1543714fe59ffe7198f4ea415c`
++(render killed at 167/942 frames by a deployment restart) was recovered as
++`pipe_db1c98fd1dfb41718bd6454039668eb9`. The local run completed all 942
++frames, verified a 1920x1080 H.264/AAC 31.4-second film with the retained FLUX
++3 Image Klein still and Kokoro narration, and recorded generation
++`gen_mvv9a58y_10` with **0 CU**. Guest and private admin range playback both
++returned HTTP 206; no Google Colab session was active. The interrupted paid
++attempt's 3-CU reservation remains explicitly unresolved because no final
++session usage receipt exists.
++
++Hosted planning now streams guest-scoped agent activity. The guest UI polls
 `GET /api/agent/progress?sessionId=…`; the server accepts it only for a session
 started with the same redeemed guest token. Another guest, a missing session,
 and the owner's newest-progress fallback all return 404 to guests. Events are

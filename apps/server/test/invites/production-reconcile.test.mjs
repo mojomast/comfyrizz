@@ -155,13 +155,15 @@ test('invalid, partial, foreign or over-cap receipts never release the hold', t 
 
 test('CPU completion neither reserves CU nor consumes another paid film slot', t => {
   const f = fixture(t);
-  f.run.origin.actionId = 'act_invite_cpu';
+  f.run.origin.actionId = 'act_invite_cpu_recover';
   f.run.budget = { ceilingUnits: 0 }; f.run.runtimes = {};
+  f.run.result = { accounting: { status: 'not_required', actualSpendCu: 0, costSource: 'cpu_no_colab_spend' } };
   const before = f.ledger.get(f.invite.id);
   f.reconcile(); f.restart(); f.reconcile();
   assert.deepEqual(f.ledger.get(f.invite.id), { ...before, generations: before.generations + 1 });
-  assert.equal(f.ledger.actionReservation('prod_1', 'act_invite_cpu'), null);
+  assert.equal(f.ledger.actionReservation('prod_1', 'act_invite_cpu_recover'), null);
   assert.equal(f.ledger.listGenerations()[0].details.accounting.actualSpendCu, 0);
+  assert.equal(f.ledger.listGenerations()[0].status, 'ready');
 });
 
 test('historically settled reservations remain explicitly estimated after restart', t => {

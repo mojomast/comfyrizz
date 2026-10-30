@@ -1485,9 +1485,12 @@ export function createApp({
     readPackage: (packageId) => {
       try { return store.read(packageId); } catch { return null; }
     },
-    estimateFinalRun: async ({ productionId }) => {
+    estimateFinalRun: async ({ productionId, body }) => {
       const production = productionStore.read(productionId);
       if (!production?.packageId) throw new Error('the final plan has no bound package');
+      // A local final action reuses ready media and never allocates Google
+      // Colab. It has no spend price even though ordinary finals are priced.
+      if (body?.payload?.actions?.[0]?.backendId === 'cpu') return 0;
       const pkg = store.read(production.packageId);
       // The browser's easy-plan ceiling is only a placeholder. Price against the
       // user-configured production cap, then replace that placeholder with the estimate.

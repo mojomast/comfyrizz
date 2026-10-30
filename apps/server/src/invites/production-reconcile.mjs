@@ -11,8 +11,11 @@ export function reconcileInvitePipeline({ ledger, run, readPackage = () => null 
   const actionId = run.origin?.actionId;
   if (!productionId || !actionId) return false;
   const owner = ledger.resourceOwner('production', productionId);
-  const cpu = actionId === 'act_invite_cpu' && run.budget?.ceilingUnits === 0 && owner;
-  const reservation = ledger.actionReservation(productionId, actionId) ?? (cpu ? { inviteId: owner, units: 0 } : null);
+  const existing = actionId ? ledger.actionReservation(productionId, actionId) : null;
+  // Local final actions carry no invite reservation and a zero ceiling. Any
+  // named CPU recovery action must still produce a gallery generation.
+  const cpu = Boolean(owner && !existing && run.budget?.ceilingUnits === 0);
+  const reservation = existing ?? (cpu ? { inviteId: owner, units: 0 } : null);
   if (!reservation) return false;
   const terminal = ['completed', 'failed', 'cancelled', 'interrupted'].includes(run.status);
   let accounting = cpu
