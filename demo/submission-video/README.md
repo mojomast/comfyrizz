@@ -1,3 +1,5 @@
+**v3 (10:15 AM ET):** music bed removed. The audio is now the narration only, plus the film's own audio while the film plays full-screen (0:58–1:10). Integrated loudness -15.7 LUFS. Same timings.
+
 # v2 (Oct 30, ~10:10 AM ET): corrected edit story, new voice
 
 **Current cut:** `film/DEMO_DRAFT.mp4`, 1:57.0, built by `scripts/assemble2.py`. The previous cut is kept as `film/DEMO_DRAFT_v1.mp4`. No new Google Colab spend (still 2.67 CU in total).

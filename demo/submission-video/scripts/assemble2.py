@@ -59,7 +59,7 @@ still('10_end',f'{C}/end.png',6); add('10_end',6,'vo09')
 with open(f'{S}/list.txt','w') as f:
     for n,_,_ in segs: f.write(f"file '{S}/{n}.mp4'\n")
 subprocess.run(['ffmpeg','-v','error','-y','-f','concat','-safe','0','-i',f'{S}/list.txt','-c','copy',f'{S}/picture.mp4'],check=True)
-# audio v2: VO bus + film audio + ducked music bed (film's own score), loudnorm -16 LUFS
+# audio v3: VO + film audio only during the full-screen film (0:58-1:10); no music bed; loudnorm -16 LUFS
 t=0; ins=[]; vo=[]; fx=[]; k=1; film_t=None
 for n,d,v in segs:
     if v:
@@ -68,14 +68,14 @@ for n,d,v in segs:
     if n=='09_split': split_t=t
     t+=d
 ins+=['-i',f'{A}/film-before/FILM_BEFORE.mp4']; fi=k; k+=1
-ins+=['-stream_loop','-1','-i',f'{A}/film-before/FILM_BEFORE.mp4']; bi=k; k+=1
+
 fl=vo[:]
 fl.append(''.join('[v'+l.split('[v')[1] for l in vo)+f'amix=inputs={len(vo)}:normalize=0,apad,atrim=0:{t}[vob]')
-fl.append('[vob]asplit=2[vo1][vosc]')
+fl.append('[vob]anull[vo1]')
 fl.append(f"[{fi}:a]aresample=48000,atrim=0:12,afade=t=out:st=11:d=1,adelay={int(film_t*1000)}:all=1,apad,atrim=0:{t}[film]")
-fl.append(f"[{bi}:a]aresample=48000,atrim=0:{t},volume='if(between(t,{film_t},{film_t+12}),0,0.22)':eval=frame,afade=t=in:d=2,afade=t=out:st={t-3}:d=3[bed0]")
-fl.append('[bed0][vosc]sidechaincompress=threshold=0.03:ratio=8:attack=20:release=400[bed]')
-fl.append(f'[vo1][film][bed]amix=inputs=3:normalize=0,loudnorm=I=-16:TP=-1.5:LRA=11,aresample=48000[mix]')
+pass
+pass
+fl.append(f'[vo1][film]amix=inputs=2:normalize=0,loudnorm=I=-16:TP=-1.5:LRA=11,aresample=48000[mix]')
 subprocess.run(['nice','ffmpeg','-v','error','-y','-i',f'{S}/picture.mp4',*ins,'-filter_complex',';'.join(fl),'-map','0:v','-map','[mix]','-c:v','copy','-c:a','aac','-b:a','192k','-t',str(t),f'{O}/DEMO_DRAFT.mp4'],check=True)
 json.dump([{'seg':n,'dur':d,'vo':vo} for n,d,vo in segs],open(f'{O}/edl.json','w'),indent=1)
 print('total',t)
