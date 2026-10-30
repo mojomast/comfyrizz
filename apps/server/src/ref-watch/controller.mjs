@@ -17,6 +17,7 @@ import {
   validateRefReviewRequest,
   validateRefVerdict,
 } from '../../../../packages/schema/src/ref-review.mjs';
+import { TITLE_CARD_BATCH, titleCardJobs } from '../compositing/title-card.mjs';
 import { refuseStaleVideo } from '../productions/keyframe-staleness.mjs';
 import { chainDefaultFor, planChainedShot } from './chain.mjs';
 import { decide as decideDefault } from './decide.mjs';
@@ -137,6 +138,7 @@ export function createRefWatchController({
   const runId = typeof jobsDoc.runId === 'string' && jobsDoc.runId ? jobsDoc.runId : 'run';
   const caps = { ...REF_POLICY_DEFAULTS, ...(policy ?? {}) };
   const stillJobs = jobs.filter(isStill);
+  const titleCards = Array.isArray(jobsDoc.titleCards) ? jobsDoc.titleCards.filter(isObject) : [];
   const stillIds = new Set(stillJobs.map((job) => job.id));
   const stillCount = stillJobs.length;
   const steerPrompt = steer?.steerPrompt ?? steerDefault.steerPrompt;
@@ -147,6 +149,7 @@ export function createRefWatchController({
   const acceptedSha = new Map();
   const acceptedStills = [];
   const submittedVideos = new Set();
+  const queuedTitleCutouts = new Set();
   const refusedVideos = new Set();
   const deferredVideos = new Set();
   let regenJobsUsed = 0;
@@ -393,6 +396,28 @@ export function createRefWatchController({
       submittedVideos.add(video.id);
     }
     if (ready.length > 0) await submitJobs({ batch: 'video', jobs: ready });
+  }
+
+  async function queueTitleCutouts(jobId) {
+    if (queuedTitleCutouts.has(jobId)) return;
+    const titles = titleCards.filter((title) => title.stillJobId === jobId);
+    if (titles.length === 0) return;
+    if (!refGateOpen(states.get(jobId)?.state)) return;
+    const { jobs: cutouts } = titleCardJobs({
+      jobsDoc: { ...jobsDoc, jobs: [...live.values()] },
+      acceptedStills,
+      titles,
+    });
+    if (cutouts.length === 0) return;
+    queuedTitleCutouts.add(jobId);
+    await submitJobs({ batch: TITLE_CARD_BATCH, jobs: cutouts });
+    for (const cutout of cutouts) {
+      emit({
+        type: 'ref_title_cutout_queued',
+        jobId,
+        cutoutJobId: cutout.id,
+      });
+    }
   }
 
   function rememberAccepted(job, seed, verdict) {
@@ -759,6 +784,7 @@ export function createRefWatchController({
         keyframeSha256: seed.keyframeSha256,
         state: record.state,
       });
+      await queueTitleCutouts(seed.jobId);
       await maybeReleaseVideos();
       return;
     }
