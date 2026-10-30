@@ -12,6 +12,7 @@ import { fileURLToPath } from 'node:url';
 import { dirname } from 'node:path';
 import { renderPackage, upscaledVariant, preferUpscaledAssets } from '../scripts/render-package-lib.mjs';
 import { compileTimeline } from '../../../packages/planner/dist/src/index.js';
+import { collectMockContribution } from '../../server/test/helpers/comfy-contribution.mjs';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const tiny = JSON.parse(readFileSync(join(here, 'fixtures', 'tiny', 'package.json'), 'utf8'));
@@ -26,7 +27,7 @@ function solidPng(file, color, width, height) {
   assert.equal(result.status, 0, `ffmpeg could not write ${file}: ${result.stderr}`);
 }
 
-/** 12-frame media-only package at the working 960×544 resolution. */
+/** Two-second media-only package, including one second of stable contribution visibility. */
 function buildFixture() {
   const dir = mkdtempSync(join(tmpdir(), 'comfyrizz-a9-'));
   scratch.push(dir);
@@ -44,7 +45,7 @@ function buildFixture() {
       layout: 'hero',
       variant: 'full-bleed',
       media_only: true,
-      preferredFrames: 12,
+      preferredFrames: 60,
       copy: { headline: 'Final render' },
       background: { asset: 'a_bg', fit: 'cover' },
     },
@@ -64,6 +65,9 @@ function buildFixture() {
     },
   };
   pkg.compliance.backends_used = ['colab:G4'];
+  // Keep the base/variant bytes intact; the separate synthetic inset supplies
+  // receipt-backed admission for this resolution/variant contract test only.
+  collectMockContribution(pkg, dir);
   const withVariant = structuredClone(pkg);
   withVariant.id = 'pkg_a9final0002';
   withVariant.assets.a_bg.variants = { upscaled: { file: 'assets/up.png', width: 1920, height: 1080 } };
@@ -102,7 +106,7 @@ test('upscaledVariant / preferUpscaledAssets choose only existing media variants
 
 test('preview keeps the working resolution and does not use the variant', { timeout: 300_000 }, () => {
   const { dir } = buildFixture();
-  const rendered = renderPackage(join(dir, 'variant.json'), join(dir, 'preview.mp4'));
+  const rendered = renderPackage(join(dir, 'variant.json'), join(dir, 'preview.mp4'), { intent: 'draft' });
   assert.equal(rendered.final, undefined, 'no final option means no 1080p override');
   const probe0 = probe(join(dir, 'preview.mp4'));
   assert.equal(probe0.width, 960);

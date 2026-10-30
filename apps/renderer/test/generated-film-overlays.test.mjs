@@ -7,6 +7,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { renderPackage } from '../scripts/render-package-lib.mjs';
 import { checkVideo } from '../scripts/frame-qa.mjs';
+import { collectMockContribution } from '../../server/test/helpers/comfy-contribution.mjs';
 
 function fixture(work, width, height) {
   const assets = join(work, 'assets');
@@ -62,23 +63,28 @@ for (const [label, width, height] of [['landscape', 960, 540], ['portrait', 540,
     const work = mkdtempSync(join(tmpdir(), `comfyrizz-hybrid-${label}-`));
     try {
       const packagePath = join(work, 'package.json');
-      writeFileSync(packagePath, JSON.stringify(fixture(work, width, height), null, 2));
+      const source = fixture(work, width, height);
+      // A synthetic receipt fixture, never a real-model quality claim. Give the
+      // opener one stable second after entry while retaining both native bookends.
+      source.scenes[0].preferredFrames = 60;
+      collectMockContribution(source, work);
+      writeFileSync(packagePath, JSON.stringify(source, null, 2));
       const output = join(work, 'hybrid.mp4');
       const rendered = renderPackage(packagePath, output);
       const pkg = rendered.package;
       const timeline = rendered.timeline;
 
-      assert.equal(timeline.durationInFrames, 135);
+      assert.equal(timeline.durationInFrames, 150);
       assert.deepEqual(pkg.scenes.map(scene => [scene.layout, scene.variant ?? null, scene.media_only ?? null]), [
         ['title', 'centered', false], ['list', null, true], ['title', 'outro', false],
       ]);
       assert.ok(pkg.scenes.every(scene => scene.background.asset === 'a_footage'));
       assert.ok(accentInk(output, 22) > 1000, 'the opener contains native accent title ink');
-      assert.equal(accentInk(output, 67), 0, 'the footage-only middle shot has no title overlay');
-      assert.ok(accentInk(output, 134) > 1000, 'the outro contains native accent title ink');
+      assert.equal(accentInk(output, 82), 0, 'the footage-only middle shot has no title overlay');
+      assert.ok(accentInk(output, 149) > 1000, 'the outro contains native accent title ink');
 
-      const penultimate = rawFrame(output, 133);
-      const final = rawFrame(output, 134);
+      const penultimate = rawFrame(output, 148);
+      const final = rawFrame(output, 149);
       assert.ok(penultimate.equals(final), 'the outro is fully settled on the final visible frame');
       const qa = checkVideo({ mp4: output, timeline, pkg });
       assert.deepEqual(qa.findings, [], JSON.stringify(qa.findings, null, 2));

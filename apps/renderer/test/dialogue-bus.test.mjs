@@ -99,7 +99,7 @@ test('a package with no dialogue plates plans exactly the previous music/ambienc
   };
   const duck = { enabled: true, reductionDb: AUDIO_MIX_DEFAULTS.duckReductionDb, attackMs: AUDIO_MIX_DEFAULTS.duckAttackMs, releaseMs: AUDIO_MIX_DEFAULTS.duckReleaseMs };
   assert.deepEqual(planAudioBuses({ pkg, timeline }), [
-    { kind: 'music', file: 'audio/music.wav', gainDb: -18, duck, loop: true, fadeIn: 0, fadeOut: 0 },
+    { kind: 'music', file: 'audio/music.wav', gainDb: -18, duck, loop: true, fadeIn: 0.5, fadeOut: 1 },
     { kind: 'ambience', file: 'assets/plate.mp4', gainDb: AUDIO_MIX_DEFAULTS.ambienceGainDb, duck, from: 0, seconds: 5 },
     { kind: 'ambience', file: 'assets/plate.mp4', gainDb: AUDIO_MIX_DEFAULTS.ambienceGainDb, duck, from: 150, seconds: 5 },
     { kind: 'sfx', file: 'audio/sfx.wav', gainDb: AUDIO_MIX_DEFAULTS.sfxGainDb, from: 0, seconds: 0.3 },

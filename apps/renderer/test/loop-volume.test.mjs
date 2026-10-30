@@ -11,6 +11,7 @@ import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { renderPackage } from '../scripts/render-package-lib.mjs';
+import { collectMockContribution } from '../../server/test/helpers/comfy-contribution.mjs';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const tiny = JSON.parse(readFileSync(join(here, 'fixtures', 'tiny', 'package.json'), 'utf8'));
@@ -60,6 +61,7 @@ function buildLoopFixture() {
     sha256: 'a'.repeat(64),
     bytes: 1000,
   };
+  collectMockContribution(pkg, dir, { sceneId: 's_outro' });
   writeFileSync(join(dir, 'package.json'), JSON.stringify(pkg, null, 2));
   return { dir };
 }

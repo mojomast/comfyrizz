@@ -128,8 +128,13 @@ Local graph/planner inspection:
 At the inspected baseline, three-plus-reference legacy lists upload and record
 additional files but do not select a graph connecting every reference. Prompt
 wording cannot repair this. Do not teach `<ref_image_2>` etc. as available just
-because `reference_3` appears in provenance. This is a separate workflow/planner
-limitation for the parent implementation to address.
+because `reference_3` appears in provenance. The integration follow-up now rejects
+unsupported third/higher sources, alias conflicts and implicit cast overflow at
+tool planning, JS job validation, Python preflight and receipt boundaries. It also
+removes unconnected upload declarations from the single-reference map. Supported
+one/two-image ordering is retained; arbitrary N-reference graphs remain deferred.
+See the [reference-integrity addendum](COMFY_KLEIN_RUNTIME.md) for implementation
+and tests, including an actual two-input submission to the local fake runner.
 
 For the generated LTX start frame, the tool requests `[composition, identity]`;
 the verified two-file case is therefore composition `<ref_image_0>`, identity

@@ -5,6 +5,7 @@ import { join } from 'node:path';
 import { compileTimeline } from '../../../packages/planner/dist/src/index.js';
 import { loadCompositionManifest } from '../../../packages/compositions/src/index.mjs';
 import { renderPackageIncremental } from '../scripts/render-incremental.mjs';
+import { collectMockContribution } from '../../server/test/helpers/comfy-contribution.mjs';
 
 const source = new URL('../../../examples/composition-stories/', import.meta.url);
 
@@ -12,6 +13,7 @@ test('composition incremental requests always use full preparation, never cached
   const dir = mkdtempSync('/tmp/opencode/composition-incremental-');
   t.after(() => rmSync(dir, { recursive: true, force: true }));
   const pkg = JSON.parse(readFileSync(new URL('package.json', source)));
+  collectMockContribution(pkg, dir);
   const manifest = JSON.parse(readFileSync(new URL('compositions/manifest.json', source)));
   const path = join(dir, 'package.json');
   const cacheDir = join(dir, 'cache');
@@ -59,6 +61,7 @@ test('invalid composition manifests fail instead of silently rendering the proce
   const dir = mkdtempSync('/tmp/opencode/composition-incremental-invalid-');
   t.after(() => rmSync(dir, { recursive: true, force: true }));
   const pkg = JSON.parse(readFileSync(new URL('package.json', source)));
+  collectMockContribution(pkg, dir);
   mkdirSync(join(dir, 'compositions'));
   writeFileSync(join(dir, 'package.json'), JSON.stringify(pkg));
   writeFileSync(join(dir, 'compositions/manifest.json'), '{"version":99,"scenes":[]}');

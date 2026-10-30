@@ -4,6 +4,7 @@ import assert from 'node:assert/strict';
 import { mkdirSync, mkdtempSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { createServer } from 'node:http';
 import { join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { createApp } from '../../server/src/app.mjs';
 import { createContextAttachmentStore } from '../../server/src/context-attachments.mjs';
 import { applyNarrationRevision } from '../../server/src/narration-revision.mjs';
@@ -14,7 +15,9 @@ import { restoreNarrationFit } from '../src/easy/resume.ts';
 import { createSuperEasySession } from '../src/easy/super-easy/session.ts';
 
 test('approved measured failure survives a fresh client and revises only the pinned narration before reapproval', async t => {
-  const root = mkdtempSync(join(new URL('../../../.tmp/', import.meta.url).pathname, 'narration-resume-'));
+  const temporaryRoot = fileURLToPath(new URL('../../../.tmp/', import.meta.url));
+  mkdirSync(temporaryRoot, { recursive: true });
+  const root = mkdtempSync(join(temporaryRoot, 'narration-resume-'));
   const token = 'integration-recovery-token';
   const chat = 'chat_recovery_test01';
   const docs = createContextAttachmentStore({ rootDir: root, chatId: chat });

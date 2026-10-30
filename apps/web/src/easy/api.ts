@@ -278,7 +278,7 @@ export function createEasyApi(fetchImpl: FetchImpl) {
     async getSavedRenderVideo(packageId: string, revision: number): Promise<{ blob: Blob; exportId: string }> {
       const saved = await request('GET', `/api/render/artifacts/latest?packageId=${encodeURIComponent(packageId)}`);
       if (saved?.packageId !== packageId || saved?.revision !== revision || saved?.intent !== 'final') {
-        throw new Error('The saved export does not match the current project revision.');
+        throw new Error('The saved export does not match the current project version.');
       }
       const { loadRenderedArtifact } = await import('./render-artifact-client.ts');
       return loadRenderedArtifact(fetchImpl, { exportId: saved.exportId, packageId, revision });

@@ -25,6 +25,7 @@ import {
 } from '../src/render-parity.js';
 import { planAudioBuses } from '../scripts/incremental-audio.mjs';
 import { measureFrameContent, probeVideo, renderParity } from '../scripts/render-parity.mjs';
+import { collectMockContribution } from '../../server/test/helpers/comfy-contribution.mjs';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const tiny = JSON.parse(readFileSync(join(here, 'fixtures', 'tiny', 'package.json'), 'utf8'));
@@ -396,7 +397,9 @@ function toneWav(file, { frequency, seconds, volumeDb }) {
 }
 
 /**
- * 3 x 2 s at 320x180, 24 fps. Scene 1 is a FastH3-style dialogue plate whose
+ * Two 2 s scenes and a 2.5 s outro at 320x180, 24 fps. The outro includes a
+ * synthetic receipt-backed inset; it is not real model-quality evidence.
+ * Scene 1 is a FastH3-style dialogue plate whose
  * 3 s native audio is trimmed 0..3, so it keeps speaking for 1 s after the
  * visual cut into scene 2 (an L-cut). A music bed spans the whole timeline and
  * the two later plates carry quiet ambience. All media is generated at runtime.
@@ -442,7 +445,7 @@ function buildAvFixture() {
       layout: 'hero',
       variant: 'full-bleed',
       media_only: true,
-      preferredFrames: 48,
+      preferredFrames: 60,
       copy: { headline: 'Out' },
       background: { asset: 'a_plate3' },
     },
@@ -510,6 +513,7 @@ function buildAvFixture() {
     ambience: {},
   };
   const packagePath = join(dir, 'package.json');
+  collectMockContribution(pkg, dir, { sceneId: 's3' });
   writeFileSync(packagePath, JSON.stringify(pkg, null, 2));
   return { dir, packagePath };
 }

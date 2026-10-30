@@ -30,6 +30,15 @@ No paid inference, model-weight downloads or live runtime mutations were used fo
 this research. CPU contract checks establish wiring and geometry, not improved
 visual quality. LTX text encoding remains local.
 
+Integration also closes the unsupported-reference path: local Klein tools and
+execution accept at most two connected conditioning images, including implicit
+cast references. Third/higher sources and conflicting aliases fail before
+generation rather than being uploaded and claimed as consumed. Historical LTX
+receipt reading recognizes only the three explicitly pinned prior graph hashes
+from `804d7c2`, backed by existing trusted completed receipts. New receipt creation
+and pending jobs still require current workflow bytes; no package hashes are
+silently upgraded.
+
 ## Super Easy review and repair
 
 The finished-video flow offers owner-authenticated review of the actual saved MP4.
@@ -61,3 +70,29 @@ existing guarded outbox path.
 
 Focused implementation results are recorded in the component research documents.
 Final integration checks and merge information will be recorded below before release.
+
+Completed checks before the shared-invite-gallery merge:
+
+- Rebuilt workspace libraries; agent suite **592 passed**; jobs suite **172 passed**.
+- Full Python suite **455 passed, 1 skipped**, using the existing local development
+  interpreter. Its cast fixture now stages the actual selected two-reference
+  graph and verifies both submitted image-node bindings, not just uploads.
+- Schema/backend checks **447 passed, 1 skipped**. The schema cross-language
+  test now honors the repository's portable Python resolver.
+- Other library suites: compositions **15**, MCP **10**, LLM **16**, planner **62**,
+  TTS **17**, sources **16**, vector **12**, all passed.
+- QA **41 passed** after migrating two already-fixed known-defect checks to
+  regressions and updating admission coverage for the current contribution gate.
+- Genuine Spoon read-only receipt/root smoke **38 passed** with original input,
+  completion state, video and receipt hashes/mtimes unchanged.
+- Web's first broad run had **1,691 passed, 2 failed, 1 skipped**. Both failures
+  were corrected (plain-language export error copy and a missing test temp-root
+  directory); their focused rerun passed. Later lifecycle and gallery integration
+  require the final web checks below.
+
+The user subsequently requested integration of `feat/shared-invite-gallery`
+through `f396974`: shared generation gallery, automatic hosted DeepSeek/Colab
+setup, concurrent hosted generation, and editing/CPU rendering after invite
+credits are exhausted. Its merge and affected-surface verification are part of
+this same release; earlier test counts above are not presented as validation of
+those later changes.

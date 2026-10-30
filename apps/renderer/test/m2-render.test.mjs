@@ -11,6 +11,7 @@ import { fileURLToPath } from 'node:url';
 import { dirname } from 'node:path';
 import { renderPackage } from '../scripts/render-package-lib.mjs';
 import { hasAudioStream, measureLoudness } from '../scripts/mix-loudness.mjs';
+import { collectMockContribution } from '../../server/test/helpers/comfy-contribution.mjs';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const tiny = JSON.parse(readFileSync(join(here, 'fixtures', 'tiny', 'package.json'), 'utf8'));
@@ -55,6 +56,7 @@ function buildFixture() {
   pkg.assets.a_narr = asset('audio/narration.wav');
   pkg.assets.a_music = asset('audio/music.wav');
   pkg.assets.a_sfx = asset('audio/sfx.wav', { media: { durationSeconds: 0.3 } });
+  collectMockContribution(pkg, dir, { sceneId: 's_outro' });
   writeFileSync(join(dir, 'package.json'), JSON.stringify(pkg, null, 2));
   return { dir, pkg };
 }
