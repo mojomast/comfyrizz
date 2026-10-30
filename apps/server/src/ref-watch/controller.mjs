@@ -2,7 +2,8 @@
 // until every keyframe it uses is accepted or overridden. Regen jobs reserve
 // the same production budget ledger self-repair spends from, and only after
 // the regen estimate. Nothing here calls Google Colab, Comfy, or the network.
-import { mkdirSync, renameSync, writeFileSync } from 'node:fs';
+import { createHash } from 'node:crypto';
+import { mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { cacheKeyFor } from '../../../../packages/jobs/src/plan.mjs';
 import {
@@ -17,7 +18,9 @@ import {
   validateRefVerdict,
 } from '../../../../packages/schema/src/ref-review.mjs';
 import { refuseStaleVideo } from '../productions/keyframe-staleness.mjs';
+import { chainDefaultFor, planChainedShot } from './chain.mjs';
 import { decide as decideDefault } from './decide.mjs';
+import { EDIT_PLACEHOLDER, buildEditInstruction, fillEditDecision } from './edit-plan.mjs';
 import { estimateRegen } from './estimate.mjs';
 import * as steerDefault from './steer.mjs';
 import { runT0Checks } from './t0-checks.mjs';
@@ -27,6 +30,19 @@ const VIDEO_KINDS = new Set(['plate', 'upscale', 'presenter']);
 const STEER_PLACEHOLDER = '<steer>';
 const REPLACE_PLACEHOLDER = '<replace-ref>';
 const SECRET = /(api[_-]?key|token|secret|authorization|bearer)\s*[:=]\s*\S+/gi;
+const QWEN_EDIT_WORKFLOW = 'workflows/qwen_edit_2511_instruct.api.json';
+const QWEN_EDIT_MODEL = 'qwen_image_edit_2511_fp8mixed';
+const QWEN_EDIT_STEPS = 40;
+const QWEN_EDIT_CFG = 4;
+let qwenEditWorkflowSha256 = null;
+
+function qwenEditWorkflowSha() {
+  if (qwenEditWorkflowSha256 === null) {
+    const file = new URL(`../../../../${QWEN_EDIT_WORKFLOW}`, import.meta.url);
+    qwenEditWorkflowSha256 = createHash('sha256').update(readFileSync(file)).digest('hex');
+  }
+  return qwenEditWorkflowSha256;
+}
 
 const isObject = (value) => value !== null && typeof value === 'object' && !Array.isArray(value);
 
@@ -108,6 +124,9 @@ export function createRefWatchController({
   reviewTimeoutMs = 60_000,
   measure,
   currentKeyframeSha,
+  extractLastFrame,
+  reviewKeyframe,
+  planChained = planChainedShot,
 } = {}) {
   if (!isObject(jobsDoc)) throw new TypeError('createRefWatchController requires a jobsDoc object');
   if (typeof submitJobs !== 'function') throw new TypeError('createRefWatchController requires submitJobs');
@@ -134,7 +153,7 @@ export function createRefWatchController({
   let chain = Promise.resolve();
 
   for (const job of stillJobs) {
-    states.set(job.id, { state: 'pending', attempt: 0, identityFailures: 0 });
+    states.set(job.id, { state: 'pending', attempt: 0, identityFailures: 0, editsTried: 0 });
   }
 
   function emit(event) {
@@ -193,7 +212,7 @@ export function createRefWatchController({
   }
 
   function ensure(jobId) {
-    if (!states.has(jobId)) states.set(jobId, { state: 'pending', attempt: 0, identityFailures: 0 });
+    if (!states.has(jobId)) states.set(jobId, { state: 'pending', attempt: 0, identityFailures: 0, editsTried: 0 });
     return states.get(jobId);
   }
 
@@ -245,6 +264,54 @@ export function createRefWatchController({
     });
   }
 
+  function isLtxI2v(job) {
+    if (!isVideo(job) || job.generator !== 'ltx25') return false;
+    if (typeof job.workflow === 'string' && job.workflow !== '' && !/ltx25_i2v/.test(job.workflow)) return false;
+    return keyframeDeps(job).length > 0;
+  }
+
+  function previousLtxVideo(video) {
+    const list = gatedVideos.filter(isLtxI2v);
+    const index = list.findIndex((job) => job.id === video.id);
+    return index > 0 ? list[index - 1] : null;
+  }
+
+  async function chainPlanFor(video) {
+    if (!isLtxI2v(video) || !isObject(video.shot)) return null;
+    const previous = previousLtxVideo(video);
+    const chainFromPrevious = chainDefaultFor({
+      shot: video.shot,
+      previousShot: isObject(previous?.shot) ? previous.shot : null,
+      override: video.chainFromPreviousOverride,
+    });
+    video.chainFromPrevious = chainFromPrevious;
+    if (!chainFromPrevious || !previous) return null;
+    if (typeof extractLastFrame !== 'function' || typeof reviewKeyframe !== 'function') {
+      video.chainFallback = 'keyframe';
+      video.chainFallbackReason = 'chained frame review is not wired';
+      return null;
+    }
+    try {
+      const plan = await planChained({
+        previousClip: previous,
+        chainFromPrevious: true,
+        characters: charactersFor(video),
+        extractLastFrame,
+        reviewKeyframe,
+      });
+      if (plan?.fallback === 'keyframe') {
+        video.chainFallback = 'keyframe';
+        video.chainFallbackReason = plan.reason ?? 'identity check failed';
+        return null;
+      }
+      return plan;
+    } catch (error) {
+      video.chainFallback = 'keyframe';
+      video.chainFallbackReason = redact(error?.message ?? 'chain plan failed');
+      return null;
+    }
+  }
+
   async function maybeReleaseVideos() {
     const ready = [];
     for (const video of gatedVideos) {
@@ -267,7 +334,13 @@ export function createRefWatchController({
         });
         continue;
       }
-      ready.push(structuredClone(live.get(video.id) ?? video));
+      const next = structuredClone(live.get(video.id) ?? video);
+      const chainPlan = await chainPlanFor(next);
+      if (chainPlan?.loadImage) {
+        next.loadImage = chainPlan.loadImage;
+        next.imgToVideoInplace = chainPlan.imgToVideoInplace;
+      }
+      ready.push(next);
       submittedVideos.add(video.id);
     }
     if (ready.length > 0) await submitJobs({ batch: 'video', jobs: ready });
@@ -303,6 +376,47 @@ export function createRefWatchController({
     const status = budgetLedger.status();
     if (status.capped !== true) return true;
     return typeof status.available === 'number' && status.available >= hold;
+  }
+
+  function buildQwenEditJob(previous, seed, decision, attempt) {
+    const seedValue = freshSeed(previous.seed ?? previous.params?.seed, attempt);
+    const edit = structuredClone(previous);
+    edit.kind = 'still';
+    edit.batch = 'stills';
+    edit.outputKind = 'image';
+    edit.output = previous.output ?? seed.imagePath;
+    edit.generator = 'qwen-edit-2511';
+    edit.workflow = QWEN_EDIT_WORKFLOW;
+    edit.workflowSha256 = qwenEditWorkflowSha();
+    edit.model = QWEN_EDIT_MODEL;
+    edit.modelRevision = null;
+    edit.seed = seedValue;
+    edit.prompt = previous.prompt ?? previous.params?.prompt ?? '';
+    edit.params = {
+      image: seed.imagePath,
+      instruction: decision.editInstruction,
+      seed: seedValue,
+      steps: QWEN_EDIT_STEPS,
+      cfg: QWEN_EDIT_CFG,
+    };
+    edit.fileInputs = [{ param: 'image', from: 'package', path: seed.imagePath }];
+    edit.refEdit = {
+      attempt: attempt + 1,
+      dimension: decision.editDimension,
+      instruction: decision.editInstruction,
+    };
+    edit.cacheKey = cacheKeyFor({
+      workflowSha256: edit.workflowSha256,
+      generator: edit.generator,
+      model: edit.model,
+      modelRevision: edit.modelRevision,
+      params: edit.params,
+      seed: seedValue,
+      width: edit.dims?.width,
+      height: edit.dims?.height,
+      frames: edit.frames,
+    });
+    return edit;
   }
 
   async function reviewSeed(seed) {
@@ -379,6 +493,7 @@ export function createRefWatchController({
       regenJobsUsed,
       stillCount,
       identityFailures: record.identityFailures,
+      editsTried: record.editsTried,
       policy: caps,
     });
     if (!validateRefDecision(decision).ok) {
@@ -392,26 +507,44 @@ export function createRefWatchController({
       };
     }
 
-    if (decision.action === 'reprompt' || decision.action === 'replace_ref') {
+    const regenAction = decision.action === 'reprompt'
+      || decision.action === 'replace_ref'
+      || decision.action === 'targeted_edit';
+    if (regenAction) {
       const previous = live.get(seed.jobId);
-      const nextPrompt = steerPrompt({
-        previousPrompt: previous.params?.prompt ?? previous.prompt ?? '',
-        verdict,
-        characters,
-      });
-      const replaceRef = chooseReplacementRef({
-        characterId: characters[0]?.characterId,
-        primaryImage: previous.primaryImage ?? previous.params?.reference,
-        acceptedStills,
-      });
-      decision = fillDecision(decision, { nextPrompt, replaceRef });
-      const unfilled = (decision.action === 'reprompt' && (!decision.nextPrompt || decision.nextPrompt === STEER_PLACEHOLDER))
-        || (decision.action === 'replace_ref' && (!decision.replaceRef || decision.replaceRef === REPLACE_PLACEHOLDER));
+      const targetedEdit = decision.action === 'targeted_edit';
+      let nextPrompt;
+      let replaceRef;
+      if (decision.action === 'reprompt') {
+        nextPrompt = steerPrompt({
+          previousPrompt: previous.params?.prompt ?? previous.prompt ?? '',
+          verdict,
+          characters,
+        });
+      }
+      if (decision.action === 'replace_ref') {
+        replaceRef = chooseReplacementRef({
+          characterId: characters[0]?.characterId,
+          primaryImage: previous.primaryImage ?? previous.params?.reference,
+          acceptedStills,
+        });
+      }
+      if (targetedEdit) {
+        decision = fillEditDecision(decision, {
+          editInstruction: buildEditInstruction({ verdict, characters }),
+        });
+      } else {
+        decision = fillDecision(decision, { nextPrompt, replaceRef });
+      }
+      const unfilled = targetedEdit
+        ? (!decision.editInstruction || decision.editInstruction === EDIT_PLACEHOLDER)
+        : (decision.action === 'reprompt' && (!decision.nextPrompt || decision.nextPrompt === STEER_PLACEHOLDER))
+          || (decision.action === 'replace_ref' && (!decision.replaceRef || decision.replaceRef === REPLACE_PLACEHOLDER));
       let estimateResult = null;
       if (!unfilled) {
         try {
           estimateResult = await estimate({
-            decision,
+            decision: targetedEdit ? { ...decision, action: 'reprompt' } : decision,
             shot: { id: request.shotId, kind: 'still' },
             regenJobsUsed,
             stillCount,
@@ -443,7 +576,9 @@ export function createRefWatchController({
         decision = {
           ...decision,
           action: 'escalate',
-          reason: estimateResult?.reason || (unfilled ? 'steering did not fill the regen' : 'regen estimate blocked'),
+          reason: estimateResult?.reason || (unfilled
+            ? (targetedEdit ? 'the targeted edit instruction was empty' : 'steering did not fill the regen')
+            : 'regen estimate blocked'),
         };
       } else {
         const hold = holdUnits(estimateResult);
@@ -461,7 +596,7 @@ export function createRefWatchController({
               collectAndStopReserve: 0,
               idempotencyKey: `ref-regen-hold:${productionId ?? 'production'}:${seed.jobId}:${record.attempt}`,
               evidence: {
-                reason: 'ref_regen',
+                reason: targetedEdit ? 'ref_targeted_edit' : 'ref_regen',
                 label: estimateResult.label,
                 jobId: seed.jobId,
                 keyframeSha256: seed.keyframeSha256,
@@ -518,6 +653,33 @@ export function createRefWatchController({
         });
         emitEstimate();
         await submitJobs({ batch: 'regen', jobs: [structuredClone(regen)] });
+        emit({
+          type: 'ref_regen_queued',
+          jobId: seed.jobId,
+          keyframeSha256: seed.keyframeSha256,
+          state: 'regenerating',
+        });
+        return;
+      }
+
+      if (decision.action === 'targeted_edit') {
+        const edit = buildQwenEditJob(previous, seed, decision, record.attempt);
+        live.set(seed.jobId, edit);
+        record.attempt += 1;
+        record.editsTried = (Number.isSafeInteger(record.editsTried) ? record.editsTried : 0) + 1;
+        record.state = 'regenerating';
+        regenJobsUsed += 1;
+        persist(seed.keyframeSha256, verdicts, decision);
+        emit({
+          type: 'ref_review_verdict',
+          jobId: seed.jobId,
+          keyframeSha256: seed.keyframeSha256,
+          state: 'regenerating',
+          verdict,
+          decision,
+        });
+        emitEstimate();
+        await submitJobs({ batch: 'regen', jobs: [structuredClone(edit)] });
         emit({
           type: 'ref_regen_queued',
           jobId: seed.jobId,
