@@ -3,6 +3,7 @@ import {
   refRegenJobCap,
 } from '../../../../packages/schema/src/ref-review.mjs';
 import { estimateIteration } from '../productions/iteration-estimate.mjs';
+import { ITERATION_PRESETS } from '../productions/iteration.mjs';
 
 const ESTIMATE_ACTIONS = new Set(['reprompt', 'replace_ref']);
 
@@ -32,6 +33,8 @@ export function estimateRegen({
 
   const estimate = estimateIteration({
     ...(iteration ?? {}),
+    // A package run (no production iteration settings) still needs a policy to price the regen.
+    policy: iteration?.policy ?? ITERATION_PRESETS.balanced,
     shots: [{ ...shot, kind: 'still' }],
   });
 
