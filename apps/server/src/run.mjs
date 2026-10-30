@@ -16,6 +16,65 @@ import { admissionRefusal, canTransition } from './productions/contract.mjs';
 import { createProductionAdmission } from './productions/admission.mjs';
 import { fingerprint } from './pipeline-contract.mjs';
 import { fingerprintJobFiles } from '../../../packages/backends/src/approved-files.mjs';
+import { createPiRefReviewer } from './ref-watch/pi-reviewer.mjs';
+
+const REF_WATCH_MODEL = 'deepseek-v4.1-flash';
+
+function refWatchRequested(value, env) {
+  if (value === true || value === '1' || value === 'true') return true;
+  if (value !== null && typeof value === 'object') return true;
+  return env?.REF_WATCH === '1' || env?.REF_WATCH === 'true';
+}
+
+function defaultRefWatchLoadImage(imagePath) {
+  return { path: imagePath, mediaType: 'image/png' };
+}
+
+function createRefWatchGate({ refWatch = false, env = process.env } = {}) {
+  if (!refWatchRequested(refWatch, env)) return null;
+  const config = refWatch !== null && typeof refWatch === 'object' ? refWatch : {};
+  let production = null;
+  const productionDeps = () => {
+    if (!production) {
+      production = Promise.all([
+        import('../../../packages/agent/dist/src/ref-review.js'),
+        import('../../../packages/llm/dist/src/index.js'),
+      ]).then(([agent, llm]) => {
+        const provider = llm.resolveProvider('opencode-go', { model: REF_WATCH_MODEL });
+        const chatModel = llm.createOpenAICompatibleModel(provider);
+        return {
+          reviewStill: agent.reviewStill,
+          model: async (messages) => {
+            let reply = '';
+            const signal = new AbortController().signal;
+            for await (const chunk of chatModel.stream({ system: '', messages, tools: [], signal, sessionId: 'ref-review' })) {
+              if (chunk.type === 'text') reply += chunk.delta;
+              else if (chunk.type === 'error') throw new Error(chunk.message ?? chunk.code);
+            }
+            return reply;
+          },
+        };
+      });
+    }
+    return production;
+  };
+  const reviewStill = config.reviewStill ?? (async (input) => (await productionDeps()).reviewStill(input));
+  const model = config.model ?? (async (messages) => (await productionDeps()).model(messages));
+  const loadImage = config.loadImage ?? defaultRefWatchLoadImage;
+  const reviewer = config.reviewer ?? createPiRefReviewer({ reviewStill, model, loadImage });
+  const gate = async (context = {}) => {
+    const { createRefWatchController } = await import('./ref-watch/controller.mjs');
+    return createRefWatchController({
+      ...config,
+      jobsDoc: context.jobsDoc,
+      onEvent: context.onEvent,
+      submitJobs: context.submitJobs,
+      receiptsDir: context.receiptsDir,
+      reviewer,
+    });
+  };
+  return Object.assign(gate, config, { reviewer });
+}
 
 /** Kept as the exported name earlier code and tests reference; the value is the shared default (PO-3). */
 export const G4_RATE_PER_HOUR = DEFAULT_RATE_PER_HOUR;
@@ -268,13 +327,18 @@ function durableAction(events, planHash, actionId) {
  * @param {{read: Function, list?: Function, readEvents: Function, commit: Function}|null} [options.productionStore]
  *   the IP17 production journal; when present, a package bound to a production must
  *   present the IP20 authority that dispatched its action slot
+ * @param {boolean|object} [options.refWatch]
+ *   enable reference watch, or pass its controller settings (including a reviewer)
+ * @param {object} [options.refWatchEnv]
+ *   the environment holding REF_WATCH; defaults to process.env
  */
-export function createRunController({ backendFactory, events = null, runtimeDir, prepareWorkDir = null, prepareNarration = null, onComplete = null, gpu = DEFAULT_GPU, isBusy = () => false, ledgerFor = null, productionStore = null, readPackage = null } = {}) {
+export function createRunController({ backendFactory, events = null, runtimeDir, prepareWorkDir = null, prepareNarration = null, onComplete = null, gpu = DEFAULT_GPU, isBusy = () => false, ledgerFor = null, productionStore = null, readPackage = null, refWatch = false, refWatchEnv = process.env } = {}) {
   if (typeof backendFactory !== 'function') throw new Error('createRunController needs a backendFactory');
   if (ledgerFor !== null && typeof ledgerFor !== 'function') throw new Error('ledgerFor must be a function');
   if (productionStore !== null && (typeof productionStore.read !== 'function' || typeof productionStore.readEvents !== 'function' || typeof productionStore.commit !== 'function')) {
     throw new Error('productionStore must be a production journal');
   }
+  const refWatchGate = createRefWatchGate({ refWatch, env: refWatchEnv });
   const runsDir = join(runtimeDir, 'runs');
   mkdirSync(runsDir, { recursive: true });
 
@@ -1100,6 +1164,7 @@ export function createRunController({ backendFactory, events = null, runtimeDir,
       outDir: join(workDir, 'out'),
       scratchDir: workDir,
       comfyuiUrl,
+      refWatch: refWatchGate,
     });
     const described = await instance.describe();
     // A dry run is the same plan the real run will use: nothing is started and nothing is billed.
@@ -1166,6 +1231,7 @@ export function createRunController({ backendFactory, events = null, runtimeDir,
         instance = await backend(backendId, {
           budgetUnits, ratePerHour, comfyuiUrl, packageId: pkg.id,
           workDir: record.workDir, outDir: record.outputDir, scratchDir: dirname(record.outputDir),
+          refWatch: refWatchGate,
         });
       } catch (error) {
         // A cancel that landed while dispatching wins over the factory failure:
