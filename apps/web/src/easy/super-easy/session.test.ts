@@ -23,8 +23,8 @@ test('cold proposal reload restores reviewed revision and original revision note
   const store = createEasyStore({ key: 'test', storage: { getItem: () => stored, setItem() {}, removeItem() {} } });
   let pkg = first.pkg, runs = 0;
   const session = createSuperEasySession({ store, go() {},
-    api: { getPackage: async () => ({ package: pkg }) },
-    host: { getPackage: () => pkg, adoptBuiltPackage: body => { pkg = body.package; }, editorStore: {} },
+    api: { getPackage: async () => ({ package: pkg }), compilePackage: async body => { assert.equal(body.revision, 6); return { timeline: { durationInFrames: 360 } }; } },
+    host: { getPackage: () => pkg, adoptBuiltPackage: body => { assert.equal(body.timeline.durationInFrames, 360); assert.equal(body.revision, 6); pkg = body.package; }, editorStore: {} },
     run: async input => { runs++; assert.equal(input.reviewedPackageRevision, 6); assert.deepEqual(input.revisionNotes, first.input.revisionNotes); return { ok: false, stage: 'compute', code: 'GOOGLE_COLAB_CONFIRM_REQUIRED', message: 'test boundary' }; },
   });
   await session.restoreProposal();
@@ -48,7 +48,7 @@ test('cold proposal checkpoints reject newer edits, changed inputs and existing 
     if (change === 'production') store.patch({ productionId: PRODUCTION_ID });
     let release;
     const session = createSuperEasySession({ store, go() {}, host: {},
-      api: { getPackage: async () => {
+      api: { compilePackage: async () => { throw Error('Invalid checkpoint must not compile'); }, getPackage: async () => {
         if (change === 'late') await new Promise(resolve => { release = resolve; });
         return { package: { ...first.pkg, revision: change === 'revision' ? 7 : 6 } };
       } }, run: () => { throw Error('Must not run'); },

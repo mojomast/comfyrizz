@@ -537,7 +537,7 @@ export function createSuperEasySession(options: SuperEasySessionOptions): SuperE
 
   async function restoreProposal(): Promise<void> {
     const state = options.store.get(), saved = state.proposalCheckpoint;
-    if (status !== 'idle' || phase !== 'idle' || stopped || !saved || !options.api.getPackage
+    if (status !== 'idle' || phase !== 'idle' || stopped || !saved || !options.api.getPackage || !options.api.compilePackage
       || state.productionId || state.packageId !== saved.packageId
       || state.builtPackageInputsHash !== saved.inputsHash || planInputsHash(state) !== saved.inputsHash) return;
     const ticket = ++epoch;
@@ -546,7 +546,13 @@ export function createSuperEasySession(options: SuperEasySessionOptions): SuperE
     const current = options.store.get();
     if (stopped || ticket !== epoch || current.productionId || current.packageId !== saved.packageId
       || planInputsHash(current) !== saved.inputsHash || pkg?.id !== saved.packageId || pkg.revision !== saved.revision) return;
-    options.host.adoptBuiltPackage(body);
+    // GET package is not an agent/build response: the host also requires its
+    // compiled timeline. Compile the saved bytes without planning or rendering.
+    const compiled = await options.api.compilePackage({ package: pkg, revision: pkg.revision,
+      ...(body.editor ? { editor: body.editor } : {}) }).catch(() => null);
+    if (!compiled?.timeline || stopped || ticket !== epoch || options.store.get().productionId
+      || options.store.get().packageId !== saved.packageId || planInputsHash(options.store.get()) !== saved.inputsHash) return;
+    options.host.adoptBuiltPackage({ ...body, package: pkg, revision: pkg.revision, timeline: compiled.timeline });
     reviewedPackage = structuredClone(pkg);
     proposal = { ...proposalForPackage(pkg, saved.basePrompt, saved.revisionNotes), motionModel: state.motionModel ?? 'auto' };
     lastInput = withLiveInputs({ prompt: state.idea.text, basePrompt: saved.basePrompt, revisionNotes: saved.revisionNotes,

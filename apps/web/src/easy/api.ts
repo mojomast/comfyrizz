@@ -244,6 +244,9 @@ export function createEasyApi(fetchImpl: FetchImpl) {
     getPackage(id: string) {
       return request('GET', `/api/package/${encodeURIComponent(id)}`);
     },
+    compilePackage(body: { package: unknown; revision: number; editor?: unknown }) {
+      return request('POST', '/api/compile', body);
+    },
     getRunRecovery(id: string) {
       return request('GET', `/api/run/${encodeURIComponent(id)}/recovery`);
     },

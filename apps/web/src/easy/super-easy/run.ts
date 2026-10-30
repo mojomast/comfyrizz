@@ -55,6 +55,7 @@ export interface SuperEasyApi {
   startRun(body: unknown): Promise<unknown>;
   getRun(id: string): Promise<unknown>;
   getPackage?(id: string): Promise<any>;
+  compilePackage?(body: { package: unknown; revision: number; editor?: unknown }): Promise<any>;
   getRunRecovery?(id: string): Promise<unknown>;
   recoverRunOutputs?(id: string, body: { baseRevision: number }): Promise<unknown>;
   cancelRun?(id: string): Promise<unknown>;
