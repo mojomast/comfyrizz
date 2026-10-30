@@ -187,7 +187,7 @@ export function mountEasyStudio(root: HTMLElement, baseHost: EasyHost, deps: Eas
     onStatus: () => superEasy?.syncAttachments(),
   });
 
-  settings = mountEasyAgentSettings({ apiFetch: (input, init) => host.apiFetch(input, init) });
+  if (!hostedInviteView) settings = mountEasyAgentSettings({ apiFetch: (input, init) => host.apiFetch(input, init) });
   ask = createAskDrawer({
     root,
     state: () => store.get(),
@@ -384,6 +384,7 @@ export function mountEasyStudio(root: HTMLElement, baseHost: EasyHost, deps: Eas
   }
 
   async function openSuperEasySetup(): Promise<void> {
+    if (hostedInviteView) return;
     const { openDialog, confirmDialog } = await import('./dialog.ts');
     const { renderCompute, mountCompute, computeBlockReason } = await import('./compute-choice.ts');
     const saved = readSuperEasySetup();
@@ -456,7 +457,7 @@ export function mountEasyStudio(root: HTMLElement, baseHost: EasyHost, deps: Eas
 
   async function onSuperEasyGenerate(input: SuperEasyGenerateInput): Promise<void> {
     const setup = readSuperEasySetup();
-    store.patch({ compute: input.compute, spendCap: setup.spendCap });
+    if (!hostedInviteView) store.patch({ compute: input.compute, spendCap: setup.spendCap });
     const session = ensureSuperEasySession();
     const status = session.status();
     if (status === 'running' || status === 'stopping') return;
@@ -575,7 +576,9 @@ export function mountEasyStudio(root: HTMLElement, baseHost: EasyHost, deps: Eas
         requestFullPlanReview(current.productionId ?? 'new');
         openStudioFromSuperEasy('plan', packageId);
       },
-      setup: () => readSuperEasySetup(),
+      setup: () => hostedInviteView
+        ? { ...readSuperEasySetup(), compute: 'colab', confirmed: true, spendCap: store.get().spendCap ?? 0 }
+        : readSuperEasySetup(),
       onMotionModelChange: (motionModel) => {
         saveSuperEasySetup({ ...readSuperEasySetup(), motionModel });
         superEasy?.render({ forceHome: true });

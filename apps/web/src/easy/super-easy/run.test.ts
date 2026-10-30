@@ -276,6 +276,29 @@ test('hosted Super Easy refuses before planning when the invite session is unava
   assert.deepEqual(kinds(calls), ['invite-session']);
 });
 
+test('hosted Super Easy uses available invite credits despite a stale local CPU setup and cap', async () => {
+  const { api, host, store } = harness({ hosted: true, session: { role: 'guest', backendId: 'colab', budgetUnits: 7.5, spendEnabled: true, invite: { status: 'active' } } });
+  store.patch({ compute: 'cpu', spendCap: 500 });
+  host.aiSelection = async () => { throw new Error('Owner settings must not be requested'); };
+  const result = await runSuperEasy({ prompt: PROMPT, compute: 'cpu', setupConfirmed: false, hostedInvite: true }, { api, host, store, go: () => {} });
+  assert.equal(result.ok, true, JSON.stringify(result));
+  assert.equal(store.get().compute, 'colab');
+  assert.equal(store.get().spendCap, 7.5);
+});
+
+test('hosted Super Easy blocks paused spending and exhausted film quotas before planning', async () => {
+  for (const session of [
+    { role: 'guest', backendId: 'colab', budgetUnits: 7.5, spendEnabled: false, invite: { status: 'active' } },
+    { role: 'guest', backendId: 'colab', budgetUnits: 7.5, spendEnabled: true, invite: { status: 'exhausted' } },
+  ]) {
+    const { api, host, calls, store } = harness({ hosted: true, session });
+    const result = await runSuperEasy({ prompt: PROMPT, hostedInvite: true }, { api, host, store, go: () => {} });
+    assert.equal(result.ok, false);
+    assert.equal(result.code, 'INVITE_UNAVAILABLE');
+    assert.deepEqual(kinds(calls), ['invite-session']);
+  }
+});
+
 function kinds(calls) {
   return calls.map((call) => call.kind);
 }

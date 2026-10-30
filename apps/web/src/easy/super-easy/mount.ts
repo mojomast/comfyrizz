@@ -240,6 +240,37 @@ export function mountSuperEasy(options: SuperEasyMountOptions): SuperEasyMountHa
     }
   }
 
+  const hostedInvite = new URLSearchParams(currentSearch()).get('demo') === '1';
+  let inviteReady = false;
+  let checkingInvite = false;
+  async function refreshInviteCredits(): Promise<void> {
+    if (!hostedInvite || destroyed || checkingInvite || !root.querySelector('[data-guest-credits]')) return;
+    checkingInvite = true;
+    let message = 'Invite unavailable. Return to the gallery and open your invite again.';
+    inviteReady = false;
+    try {
+      const response = await options.previewFetch?.('/api/invites/session');
+      if (!response?.ok) throw new Error('Invite unavailable');
+      const session = await response.json();
+      if (session.role !== 'guest' || session.backendId !== 'colab' || !Number.isFinite(session.budgetUnits)) throw new Error('Invite unavailable');
+      const credits = Math.max(0, session.budgetUnits);
+      inviteReady = session.spendEnabled === true && session.invite?.status === 'active' && credits > 0;
+      message = `${credits.toLocaleString(undefined, { maximumFractionDigits: 3 })} invite credits available`;
+      if (session.invite?.status === 'exhausted') message += ' · Invite limit reached. You can still watch the gallery.';
+      else if (session.invite?.status !== 'active') message += ' · This invite is unavailable.';
+      else if (!session.spendEnabled) message += ' · Generation is paused by the host.';
+    } catch { /* Fail closed; the server also checks the invite at planning and dispatch. */ }
+    finally {
+      checkingInvite = false;
+      if (!destroyed) {
+        const status = root.querySelector<HTMLElement>('[data-guest-credits]');
+        if (status) status.textContent = message;
+        const generate = root.querySelector<HTMLButtonElement>('[data-super-easy-generate]');
+        if (generate) generate.disabled = !inviteReady || fontPending;
+      }
+    }
+  }
+
   function openEditor(): void {
     const packageId = options.state().packageId;
     if (options.onOpenEditor) {
@@ -556,7 +587,9 @@ export function mountSuperEasy(options: SuperEasyMountOptions): SuperEasyMountHa
       }
       showLyricsError();
     }
-    const setup = options.setup?.() ?? DEFAULT_SUPER_EASY_SETUP;
+    if (hostedInvite && !inviteReady) { void refreshInviteCredits(); return; }
+    const savedSetup = options.setup?.() ?? DEFAULT_SUPER_EASY_SETUP;
+    const setup = hostedInvite ? { ...savedSetup, compute: 'colab' as const, confirmed: true } : savedSetup;
     if (setup.compute === 'colab' && !setup.confirmed) {
       options.onSetup?.();
       return;
@@ -923,7 +956,14 @@ export function mountSuperEasy(options: SuperEasyMountOptions): SuperEasyMountHa
       syncAttachments();
       loadAttachments();
     }
-    if (new URLSearchParams(currentSearch()).get('demo') === '1' && !root.querySelector('[data-guest-gallery]')) {
+    if (hostedInvite) {
+      root.querySelectorAll('[data-super-easy-setup], [data-super-easy-more-control], [data-super-easy-open-studio], [data-super-easy-open-editor], [data-super-easy-review-edit-plan], [data-super-easy-review]').forEach(element => element.remove());
+      root.querySelectorAll('.super-easy-progress-mode-actions').forEach(element => element.remove());
+      const generate = root.querySelector<HTMLButtonElement>('[data-super-easy-generate]');
+      if (generate) generate.disabled = !inviteReady || fontPending;
+      void refreshInviteCredits();
+    }
+    if (hostedInvite && !root.querySelector('[data-guest-gallery]')) {
       const gallery = root.ownerDocument.createElement('a');
       gallery.dataset.guestGallery = '';
       gallery.className = 'btn btn-secondary';
@@ -935,6 +975,7 @@ export function mountSuperEasy(options: SuperEasyMountOptions): SuperEasyMountHa
   };
 
   render();
+  const inviteTimer = hostedInvite ? setInterval(() => { void refreshInviteCredits(); }, 15000) : null;
   root.addEventListener('click', onClick);
   root.addEventListener('submit', onSubmit);
   root.addEventListener('change', onChange);
@@ -954,6 +995,7 @@ export function mountSuperEasy(options: SuperEasyMountOptions): SuperEasyMountHa
     destroy() {
       if (destroyed) return;
       destroyed = true;
+      if (inviteTimer !== null) clearInterval(inviteTimer);
       unsubscribe();
       songPreview?.destroy();
       root.removeEventListener('click', onClick);

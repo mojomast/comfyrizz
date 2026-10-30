@@ -108,7 +108,8 @@ export function renderSuperEasyVideoTypes(selected: VideoType | null | undefined
 export function renderSuperEasyHome(options: SuperEasyHomeOptions = {}): string {
   const prompt = typeof options.prompt === 'string' ? options.prompt : '';
   const moreControlHref = escapeToStudio(options.search ?? '', options.packageId ?? null);
-  const colab = options.setup?.compute === 'colab' && options.setup.confirmed;
+  const hosted = new URLSearchParams(options.search ?? '').get('demo') === '1';
+  const colab = hosted || (options.setup?.compute === 'colab' && options.setup.confirmed);
   const selectedType = videoTypeMetadata(options.videoType);
   const hint = selectedType
     ? selectedType.inputHint
@@ -142,7 +143,7 @@ ${lengthSegments(lengthS)}
 </div>
 ${options.capture ? renderProcedureToggle({ armed: options.capture.armed, id: 'super-easy-capture' }) : ''}
 </form>
-<div class="super-easy-home-setup"><span>${escapeHtml(setupText)}</span><button type="button" class="btn btn-secondary btn-sm" data-super-easy-setup>${colab ? 'Change setup' : 'Set up AI & Google Colab'}</button></div>
+${hosted ? '<div class="super-easy-home-setup"><span>DeepSeek V4.1 Flash · Google Colab · configured for you</span></div><p data-guest-credits role="status">Checking available invite credits…</p><p>Colab spending is approved up to your invite’s available credits. Credits are shared by everyone using this link.</p>' : `<div class="super-easy-home-setup"><span>${escapeHtml(setupText)}</span><button type="button" class="btn btn-secondary btn-sm" data-super-easy-setup>${colab ? 'Change setup' : 'Set up AI & Google Colab'}</button></div>`}
 <label class="super-easy-home-motion-model">Motion model<select data-super-easy-motion-model aria-label="Motion model"><option value="auto"${motionModel === 'auto' ? ' selected' : ''}>Auto — H3 acting + LTX camera</option><option value="h3"${motionModel === 'h3' ? ' selected' : ''}>MiniMax H3 — characters + native sound</option><option value="ltx"${motionModel === 'ltx' ? ' selected' : ''}>LTX-2.5 — cinematic motion plates</option><option value="klein"${motionModel === 'klein' ? ' selected' : ''}>Klein only — stills + code motion</option></select></label>
 <div class="super-easy-home-ideas">
 <p class="super-easy-home-ideas-label" id="super-easy-ideas-label">${escapeHtml(COPY.home.ideasLabel)}</p>
@@ -150,6 +151,6 @@ ${options.capture ? renderProcedureToggle({ armed: options.capture.armed, id: 's
 ${ideaChips()}
 </ul>
 </div>
-<p class="super-easy-home-more"><a class="super-easy-home-more-link" href="${escapeHtml(moreControlHref)}" data-super-easy-more-control>${escapeHtml(COPY.home.moreControl)}</a></p>
+${hosted ? '' : `<p class="super-easy-home-more"><a class="super-easy-home-more-link" href="${escapeHtml(moreControlHref)}" data-super-easy-more-control>${escapeHtml(COPY.home.moreControl)}</a></p>`}
 </section>`;
 }

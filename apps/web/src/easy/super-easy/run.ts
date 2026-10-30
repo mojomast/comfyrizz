@@ -61,7 +61,7 @@ export interface SuperEasyApi {
   getRunVideo(id: string): Promise<Blob>;
   generateLocalNarration?(body: { packageId: string; productionId: string; baseRevision: number; recoveryInputs?: unknown }): Promise<any>;
   colabStatus(): Promise<{ backendId?: string } | null>;
-  inviteSession?(): Promise<{ role?: string; backendId?: string; budgetUnits?: number }>;
+  inviteSession?(): Promise<{ role?: string; backendId?: string; budgetUnits?: number; spendEnabled?: boolean; invite?: { status?: string } }>;
   guestResult?(id: string): Promise<{ status: string; url?: string }>;
 }
 
@@ -518,6 +518,7 @@ export async function runSuperEasy(input: RunSuperEasyInput, deps: RunSuperEasyD
     try {
       const session = await deps.api.inviteSession?.();
       if (session?.role !== 'guest' || session.backendId !== 'colab'
+          || session.spendEnabled === false || (session.invite?.status !== undefined && session.invite.status !== 'active')
           || typeof session.budgetUnits !== 'number' || !Number.isFinite(session.budgetUnits) || session.budgetUnits <= 0) {
         return failure('INVITE_UNAVAILABLE', 'compute', 'This invite is unavailable or has no compute remaining.');
       }

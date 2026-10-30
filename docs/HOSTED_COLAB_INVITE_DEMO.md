@@ -65,6 +65,23 @@ The host uses OpenCode Go `deepseek-v4.1-flash`. Its key is stored only in the
 host runtime's mode-0600 provider settings; it is absent from repository files
 and guest requests. The provider's tool-use probe passed.
 
+Invite Super Easy pages automatically use the host planner and Colab. They
+omit API/provider and Colab setup controls and owner Studio navigation. The
+guest's saved local compute choice, setup confirmation, and per-video cap do
+not override the invite: planning reads the current server-reported available
+credits and uses that allowance as its cap. The home shows available shared
+credits, refreshes them every 15 seconds without replacing the prompt draft,
+and disables generation for unavailable/exhausted invites or paused spending.
+Guests still approve the creative proposal with “Make this film”; there is no
+separate connection or spending-setup step. Durable server admission checks
+remain authoritative when simultaneous guests consume the shared allowance.
+
+The automatic-setup UI was verified on the deployed desktop/mobile pages with
+a temporary 7.5-CU invite (revoked afterward) and an exhausted invite. No GPU
+generation was started by those checks. Typecheck, hosted build, and 91 focused
+Super Easy tests passed, including overriding stale local setup and blocking
+paused/exhausted invites before planning.
+
 Two isolated browser contexts redeemed the same invite, entered the public
 gallery, opened Super Easy, selected Klein-only generation, submitted distinct
 eight-second silent-film prompts, and approved both proposals through the UI.

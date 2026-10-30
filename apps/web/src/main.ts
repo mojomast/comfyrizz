@@ -2772,7 +2772,9 @@ function init(opened: OpenedProject): void {
   void iterationLevelMount.refresh();
   mountSettingsDialog(document.body);
 
-  agentSettings = mountAgentSettings(apiFetch, logActivity);
+  agentSettings = hostedInviteView
+    ? { ready: Promise.resolve(), selection: async () => ({ provider: 'none', model: '' }) }
+    : mountAgentSettings(apiFetch, logActivity);
   state.activity = [{ at: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }), text: opened.activity }];
   renderActivity();
 
