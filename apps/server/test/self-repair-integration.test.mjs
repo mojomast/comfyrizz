@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { createServer, request as httpRequest } from 'node:http';
 import { createHash } from 'node:crypto';
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { canonicalJson, compileTimeline } from '../../../packages/planner/dist/src/index.js';
 import { createApp } from '../src/app.mjs';
@@ -34,6 +34,96 @@ function adapters(options = {}) {
   return createSelfRepairAdapters({ store: { read: () => structuredClone(pkg) },
     projectChat: {}, renderRoutes: {}, findBoundProduction: () => null, providerSettings, ...options });
 }
+
+function repairReport(pkg) {
+  return { reviewId: `rr_${'a'.repeat(64)}`, packageId: pkg.id, packageRevision: pkg.revision,
+    packageHash: createHash('sha256').update(canonicalJson(pkg)).digest('hex'),
+    artifact: { renderId: 'r_123456abcdef', videoSha256: 'b'.repeat(64), timelineHash: 'c'.repeat(64) },
+    acceptance: 'not_assessed', checksStatus: 'needs_review',
+    capabilities: { finalRender: 'inspected', renderProbe: 'measured', contribution: 'receipt_verified', speechTiming: 'measured' },
+    findings: [{ check: 'duration', status: 'pass' }, { check: 'detected_speech_coverage', sceneId: 's1', status: 'needs_review' }],
+    speech: { status: 'measured', provider: 'synthetic', uncertaintySeconds: 0.1, segments: [{ start: 0, end: 1, text: 'synthetic' }] },
+    windows: [{ sceneId: 's1', startSeconds: 0, endSeconds: 2, segments: [{ start: 0, end: 1, text: 'synthetic' }] }] };
+}
+
+test('read-only readiness adapter uses fixed final gate and current production intent/revision without route dispatch', async () => {
+  const pkg = { id: 'pkg_test', revision: 3, scenes: [] };
+  const calls = [];
+  let production = { id: 'prod_server', revision: 8, intent: 'active' };
+  let blocked = { status: 409, body: { code: 'RENDER_GATE_BLOCKED', error: 'Take approvals are stale',
+    blocking: [{ clipId: 's1:background', state: 'stale' }] } };
+  const host = adapters({
+    renderGate: (...args) => { calls.push(args); return blocked; },
+    findBoundProduction: () => production,
+    renderRoutes: { handle: () => assert.fail('Readiness must not dispatch rendering') },
+    projectChat: { send: () => assert.fail('Readiness must not call Pi') },
+  });
+  const args = { pkg, packageId: pkg.id, expectedRevision: pkg.revision };
+  assert.deepEqual(await host.checkRenderReadiness(args), { ok: false, code: 'RENDER_GATE_BLOCKED',
+    message: 'Take approvals are stale', blocking: blocked.body.blocking });
+  assert.deepEqual(calls[0], [pkg, { intent: 'final' }, '/api/self-repairs']);
+  blocked = null;
+  assert.deepEqual(await host.checkRenderReadiness(args), { ok: true });
+  for (const intent of ['paused', 'archived', 'cancel_requested']) {
+    production = { ...production, intent };
+    const result = await host.checkRenderReadiness(args);
+    assert.equal(result.ok, false);
+    assert.equal(result.code, 'PRODUCTION_NOT_ACTIVE');
+    assert.match(result.message, new RegExp(intent));
+  }
+  production = { ...production, intent: 'active', revision: null };
+  assert.equal((await host.checkRenderReadiness(args)).code, 'SELF_REPAIR_RENDER');
+  production = null;
+  assert.deepEqual(await host.checkRenderReadiness(args), { ok: true });
+  const abort = new AbortController(); abort.abort();
+  const count = calls.length;
+  await assert.rejects(host.checkRenderReadiness({ ...args, signal: abort.signal }), { name: 'AbortError' });
+  assert.equal(calls.length, count);
+});
+
+test('integration persists blocked preflight before conversation access, model work, package edit or reservation', async t => {
+  const runtimeDir = directory(t);
+  const pkg = { id: 'pkg_test', revision: 3, scenes: [{ id: 's1', background: { asset: 'a_native' } }] };
+  const before = structuredClone(pkg);
+  let gates = 0, inspections = 0, effects = 0;
+  const forbidden = () => { effects++; throw new Error('No model, edit or render may start'); };
+  const integration = createSelfRepairIntegration({ runtimeDir, providerSettings,
+    store: { dir: runtimeDir, read: () => structuredClone(pkg), write: forbidden },
+    reviewer: { inspect: () => { inspections++; return repairReport(pkg); } },
+    findBoundProduction: () => null, projectChat: { get: forbidden, send: forbidden },
+    renderRoutes: { handle: forbidden }, renderGate: (snapshot, body, pathname) => {
+      gates++;
+      assert.deepEqual(snapshot, before);
+      assert.deepEqual(body, { intent: 'final' });
+      assert.equal(pathname, '/api/self-repairs');
+      return { status: 409, body: { code: 'RENDER_GATE_BLOCKED', error: '2 of 4 clips still need approval',
+        blocking: [{ clipId: 's1:background', state: 'stale' }] } };
+    },
+  });
+  t.after(() => integration.close());
+  const input = inputFor(pkg);
+  await integration.start(input);
+  let result;
+  for (let i = 0; i < 100; i++) {
+    result = integration.get(input.repairId);
+    if (result.status !== 'running') break;
+    await new Promise(resolve => setImmediate(resolve));
+  }
+  assert.equal(result.reason, 'render_not_ready');
+  assert.equal(result.error.code, 'RENDER_GATE_BLOCKED');
+  assert.equal(result.attempts, 0);
+  assert.equal(result.packageRoundsReserved, 0);
+  assert.equal(result.renders, 0);
+  assert.equal(result.effectUncertain, false);
+  assert.equal(gates, 1);
+  assert.equal(inspections, 1);
+  assert.equal(effects, 0);
+  assert.deepEqual(pkg, before);
+  assert.equal(existsSync(join(runtimeDir, 'self-repairs/packages/pkg_test.json')), false);
+  assert.deepEqual(JSON.parse(readFileSync(join(runtimeDir, 'self-repairs', `${input.repairId}.json`))), result);
+  assert.deepEqual(await integration.start(input), result);
+  assert.equal(gates, 1);
+});
 
 test('HTTP routes enforce existing host/origin/token auth and exact explicit authorization before durable start', async t => {
   const runtimeDir = directory(t);
@@ -167,18 +257,24 @@ test('real render route admission preserves busy/readiness/revision guards and n
   const store = { read: () => pkg, path: () => '/unused/package.json' };
   const operations = createOperationCoordinator();
   let renders = 0;
+  let ready = true, gates = 0;
   const forbidden = () => { renders++; throw new Error('must not render'); };
+  const renderGate = (pkg, body) => {
+    gates++;
+    assert.equal(body.intent, 'final'); assert.equal(body.override, undefined);
+    return ready ? null : { status: 409, body: { error: 'approval required', code: 'RENDER_GATE_BLOCKED' } };
+  };
   const renderRoutes = createRenderRoutes({ store, operations, events: { publish() {} }, exporter: forbidden,
     render: forbidden, renderScene: forbidden, rendersDir: '/unused/renders',
-    renderGate: (pkg, body) => {
-      assert.equal(body.intent, 'final'); assert.equal(body.override, undefined);
-      return { status: 409, body: { error: 'approval required', code: 'RENDER_GATE_BLOCKED' } };
-    }, sendJson(response, status, body) { response.writeHead(status, {}); response.end(JSON.stringify(body)); },
+    renderGate, sendJson(response, status, body) { response.writeHead(status, {}); response.end(JSON.stringify(body)); },
     async readJson(request) { const chunks = []; for await (const chunk of request) chunks.push(chunk); return JSON.parse(Buffer.concat(chunks)); },
   });
-  const host = adapters({ store, renderRoutes });
+  const host = adapters({ store, renderRoutes, renderGate });
   const args = { packageId: pkg.id, expectedRevision: 3, repairId: 'repair_test', attempt: 1 };
+  assert.deepEqual(await host.checkRenderReadiness({ ...args, pkg }), { ok: true });
+  ready = false;
   await assert.rejects(host.renderCurrent(args), { code: 'RENDER_GATE_BLOCKED', status: 409 });
+  assert.equal(gates, 2); // a successful preflight never authorizes the later render
   const lease = operations.tryAcquire('pipeline', 'busy');
   await assert.rejects(host.renderCurrent(args), /render busy/);
   lease.release();
@@ -208,16 +304,9 @@ test('asynchronous controller start is durable and idempotent; a failed chat aft
   const runtimeDir = directory(t), inspected = deferred();
   let pkg = { id: 'pkg_test', revision: 3, scenes: [{ id: 's1', background: { asset: 'a_native' } }] };
   let sends = 0, renders = 0;
-  const report = { reviewId: `rr_${'a'.repeat(64)}`, packageId: pkg.id, packageRevision: 3,
-    packageHash: createHash('sha256').update(canonicalJson(pkg)).digest('hex'),
-    artifact: { renderId: 'r_123456abcdef', videoSha256: 'b'.repeat(64), timelineHash: 'c'.repeat(64) },
-    acceptance: 'not_assessed', checksStatus: 'needs_review',
-    capabilities: { finalRender: 'inspected', renderProbe: 'measured', contribution: 'receipt_verified', speechTiming: 'measured' },
-    findings: [{ check: 'duration', status: 'pass' }, { check: 'detected_speech_coverage', sceneId: 's1', status: 'needs_review' }],
-    speech: { status: 'measured', provider: 'synthetic', uncertaintySeconds: 0.1, segments: [{ start: 0, end: 1, text: 'synthetic' }] },
-    windows: [{ sceneId: 's1', startSeconds: 0, endSeconds: 2, segments: [{ start: 0, end: 1, text: 'synthetic' }] }] };
+  const report = repairReport(pkg);
   const integration = createSelfRepairIntegration({ runtimeDir, providerSettings, store: { dir: runtimeDir, read: () => structuredClone(pkg) },
-    reviewer: { async inspect() { await inspected.promise; return report; } }, findBoundProduction: () => null,
+    reviewer: { async inspect() { await inspected.promise; return report; } }, findBoundProduction: () => null, renderGate: () => null,
     renderRoutes: { handle() { renders++; } }, projectChat: {
       get: () => ({ conversation: { revision: 2, projectId: pkg.id } }),
       send: async () => { sends++; pkg = { ...pkg, revision: 4 }; throw new Error('failure after committed edit'); },

@@ -180,12 +180,32 @@ function comparison(before, after) {
 
 const evidenceHash = report => digest({ findings: report.findings, speech: report.speech, windows: report.windows });
 
+function renderReadiness(result) {
+  if (!result || typeof result.ok !== 'boolean' || (result.ok === false
+    && (typeof result.code !== 'string' || !result.code.trim() || typeof result.message !== 'string'))) {
+    throw issue('SELF_REPAIR_READINESS', 'Render readiness callback returned an invalid result.');
+  }
+  if (result.ok) return { ok: true };
+  const bounded = { ok: false, code: result.code.slice(0, 128), message: result.message.slice(0, 500) };
+  if (Array.isArray(result.blocking)) {
+    bounded.blocking = result.blocking.slice(0, 100).map(item => Object.fromEntries(
+      ['clipId', 'state', 'code', 'message'].filter(field => typeof item?.[field] === 'string')
+        .map(field => [field, item[field].slice(0, field === 'message' ? 500 : 128)])));
+  }
+  return bounded;
+}
+
 /**
  * All callbacks are trusted host adapters and must honor signal. chatTurn runs
  * the existing Pi conversation/CAS build with evidence-bound source-trim tools;
  * it may commit once and must reject tool failures. This controller never edits
  * packages or authorizes generation, takes, payment, or render-gate overrides.
  * readPackage(packageId) returns the saved package (sync or async).
+ * Optional checkRenderReadiness({pkg, packageId, expectedRevision, signal}) is
+ * read-only: return {ok:true} or {ok:false,code,message,blocking?}. It runs only
+ * for eligible repairs, before each reservation. Blocked codes/messages are
+ * bounded to 128/500 characters; at most 100 clipId/state/code/message blockers
+ * are retained. Passing is advisory: renderCurrent must recheck admission/CAS.
  * chatTurn also receives frozen priorAttempts, reconstructed from the package
  * reservation log and durable run histories/reports, including other repair IDs
  * and conversations. Entries contain repairId/attempt, exact sourceTrimChanges
@@ -197,9 +217,12 @@ const evidenceHash = report => digest({ findings: report.findings, speech: repor
  * The persistent two-reservation ceiling is per package, across all repair IDs
  * and conversations. It is deliberately stricter than a resettable lineage cap.
  */
-export function createSelfRepairController({ runtimeDir, readPackage, inspectRender, chatTurn, renderCurrent }) {
+export function createSelfRepairController({ runtimeDir, readPackage, inspectRender, chatTurn, renderCurrent, checkRenderReadiness }) {
   if (typeof runtimeDir !== 'string' || !runtimeDir || [readPackage, inspectRender, chatTurn, renderCurrent].some(fn => typeof fn !== 'function')) {
     throw new TypeError('Self repair requires runtimeDir and all four host callbacks.');
+  }
+  if (checkRenderReadiness !== undefined && typeof checkRenderReadiness !== 'function') {
+    throw new TypeError('checkRenderReadiness must be a trusted read-only callback.');
   }
   const root = resolve(runtimeDir, 'self-repairs');
   const packages = join(root, 'packages');
@@ -368,6 +391,18 @@ export function createSelfRepairController({ runtimeDir, readPackage, inspectRen
         if (budget.version !== 1 || budget.packageId !== input.packageId || !Array.isArray(budget.reservations)) throw issue('SELF_REPAIR_BUDGET', 'Invalid persistent repair budget.');
         record.packageRoundsReserved = budget.reservations.length;
         if (budget.reservations.length >= 2) return stop('package_budget_exhausted');
+        if (checkRenderReadiness) {
+          stage('check_render_readiness');
+          const readiness = await invoke(() => checkRenderReadiness({ pkg: freeze(clone(pkg)),
+            packageId: input.packageId, expectedRevision: pkg.revision, signal }));
+          await unchanged(pkg);
+          record.readiness = renderReadiness(readiness);
+          event(record, 'render_readiness_checked', { packageHash: digest(pkg), ...record.readiness });
+          if (!record.readiness.ok) {
+            record.error = { code: record.readiness.code, message: record.readiness.message };
+            return stop('render_not_ready');
+          }
+        }
         const previousAttempts = priorAttempts(budget.reservations);
         record.attempts++;
         stage('reserve_round', { sceneIds: assessment.sceneIds });
@@ -421,7 +456,8 @@ export function createSelfRepairController({ runtimeDir, readPackage, inspectRen
       }
       const reason = signal.aborted ? deadline.signal.aborted ? 'run_budget_exhausted' : 'cancelled'
         : /STALE/.test(error?.code ?? '') ? 'stale_package'
-          : record.stage === 'chat_turn' ? 'tool_failed' : record.stage === 'render' ? 'render_failed' : 'inspection_or_read_failed';
+          : record.stage === 'chat_turn' ? 'tool_failed' : record.stage === 'render' ? 'render_failed'
+            : record.stage === 'check_render_readiness' ? 'readiness_check_failed' : 'inspection_or_read_failed';
       return stop(reason, signal.aborted ? 'cancelled' : 'stopped');
     } finally {
       clearTimeout(timer);

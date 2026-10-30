@@ -3,6 +3,7 @@ import { Readable, Writable } from 'node:stream';
 import { isDeepStrictEqual } from 'node:util';
 import { createSelfRepairController } from './self-repair.mjs';
 import { createRenderReviewer } from './render-review.mjs';
+import { bindingRefusal } from './productions/contract.mjs';
 
 const issue = (code, message, status = 409) => Object.assign(new Error(message), { code, status });
 const fields = ['repairId', 'packageId', 'expectedRevision', 'renderId', 'conversationId', 'maxRepairs', 'authorizeExistingMediaRepair'];
@@ -84,7 +85,8 @@ async function admittedRender(renderRoutes, body, signal) {
   }
 }
 
-export function createSelfRepairAdapters({ store, projectChat, renderRoutes, findBoundProduction, providerSettings }) {
+export function createSelfRepairAdapters({ store, projectChat, renderRoutes, findBoundProduction, providerSettings, renderGate }) {
+  if (renderGate !== undefined && typeof renderGate !== 'function') throw new TypeError('renderGate must be a read-only host callback.');
   function current(packageId, expectedRevision) {
     const pkg = store.read(packageId);
     if (!pkg || pkg.id !== packageId || pkg.revision !== expectedRevision) {
@@ -93,6 +95,25 @@ export function createSelfRepairAdapters({ store, projectChat, renderRoutes, fin
     return pkg;
   }
   return {
+    ...(renderGate ? { async checkRenderReadiness({ pkg, packageId, expectedRevision, signal }) {
+      signal?.throwIfAborted();
+      if (!isDeepStrictEqual(current(packageId, expectedRevision), pkg)) throw issue('SELF_REPAIR_STALE', 'Saved package changed before readiness check.');
+      const blocked = await renderGate(pkg, { intent: 'final' }, '/api/self-repairs');
+      signal?.throwIfAborted();
+      if (blocked) return { ok: false, code: blocked.body?.code, message: blocked.body?.error, blocking: blocked.body?.blocking };
+      // Resolve current production authority without executing render.request or
+      // changing approvals. Actual rendering resolves and checks it again.
+      const production = await findBoundProduction(pkg);
+      signal?.throwIfAborted();
+      if (production) {
+        const refusal = bindingRefusal({ state: 'bound', productionId: production.id, intent: production.intent ?? null });
+        if (refusal) return { ok: false, code: refusal.code, message: refusal.error };
+        if (!Number.isSafeInteger(production.revision) || production.revision < 0) {
+          return { ok: false, code: 'SELF_REPAIR_RENDER', message: 'Production revision unavailable.' };
+        }
+      }
+      return { ok: true };
+    } } : {}),
     async chatTurn({ pkg, report, sceneIds, attempt, conversationId, priorAttempts = [], signal }) {
       signal?.throwIfAborted();
       const view = await projectChat.get(conversationId);
@@ -140,9 +161,9 @@ export function createSelfRepairAdapters({ store, projectChat, renderRoutes, fin
 }
 
 /** Mounted after app auth. All injected adapters are server-owned, never HTTP input. */
-export function createSelfRepairIntegration({ runtimeDir, store, projectChat, renderRoutes, findBoundProduction, providerSettings,
+export function createSelfRepairIntegration({ runtimeDir, store, projectChat, renderRoutes, findBoundProduction, providerSettings, renderGate,
   speechInspector = null, reviewer = createRenderReviewer({ runtimeDir, packageDir: store.dir, transcribe: speechInspector }) }) {
-  const adapters = createSelfRepairAdapters({ store, projectChat, renderRoutes, findBoundProduction, providerSettings });
+  const adapters = createSelfRepairAdapters({ store, projectChat, renderRoutes, findBoundProduction, providerSettings, renderGate });
   const controller = createSelfRepairController({ runtimeDir, readPackage: id => store.read(id),
     inspectRender: (pkg, input, options) => reviewer.inspect(pkg, input, options), ...adapters });
   const pending = new Map();

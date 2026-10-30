@@ -267,6 +267,11 @@ review. Source reports cannot substitute for final-output reports.
 1. Inspect the current-revision final artifact and preserve the baseline report.
 2. Identify eligible localized speech timing/text observations. Missing media,
    missing contributions, unknown required evidence and unsupported mappings stop.
+   Before reserving each round, the application checks the existing render gate
+   and production intent read-only. A known admission blocker stops as
+   `render_not_ready`, with no model turn, saved edit or consumed repair round.
+   Package identity is checked again after asynchronous readiness checks. The
+   actual export still repeats admission and revision checks after the edit.
 3. Reserve a repair round durably, then ask **ComfyRizz's embedded Pi** to inspect
    the source, choose a justified trim, stage it and call `project_build`.
 4. Wait for the journal/CAS commit. Check the saved diff independently: only

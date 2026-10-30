@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { canonicalJson } from '../../../packages/planner/dist/src/index.js';
 import { createSelfRepairController } from '../src/self-repair.mjs';
@@ -62,6 +62,128 @@ function harness(t, overrides = {}) {
   const dependencies = { runtimeDir, ...callbacks, ...overrides(state, callbacks) };
   return { state, runtimeDir, dependencies, controller: createSelfRepairController(dependencies) };
 }
+
+test('known render blocker is durable and spends no round, Pi turn, edit or render', async t => {
+  let checks = 0;
+  const blocked = { ok: false, code: 'RENDER_GATE_BLOCKED', message: '2 of 4 clips still need approval',
+    blocking: [{ clipId: 'scene_one:background', state: 'stale' }] };
+  const { controller, state, runtimeDir, dependencies } = harness(t, () => ({
+    checkRenderReadiness: ({ pkg, packageId, expectedRevision, signal }) => {
+      checks++;
+      assert.equal(Object.isFrozen(pkg.scenes[0]), true);
+      assert.equal(packageId, pkg.id);
+      assert.equal(expectedRevision, pkg.revision);
+      assert.equal(signal.aborted, false);
+      return blocked;
+    },
+  }));
+  const before = clone(state.pkg);
+  const result = await controller.run(input());
+  assert.equal(result.reason, 'render_not_ready');
+  assert.equal(result.stage, 'check_render_readiness');
+  assert.equal(result.error.code, blocked.code);
+  assert.deepEqual(result.readiness, blocked);
+  assert.equal(result.effectUncertain, false);
+  assert.equal(result.attempts, 0);
+  assert.equal(result.packageRoundsReserved, 0);
+  assert.equal(result.renders, 0);
+  assert.equal(state.turns.length, 0);
+  assert.equal(state.renders.length, 0);
+  assert.equal(state.inspections.length, 1);
+  assert.deepEqual(state.pkg, before);
+  assert.equal(existsSync(join(runtimeDir, 'self-repairs/packages/pkg_example.json')), false);
+  const event = result.history.find(item => item.type === 'render_readiness_checked');
+  assert.equal(event.packageHash, hash(before));
+  assert.equal(event.ok, false);
+  assert.equal(event.code, blocked.code);
+  assert.equal(result.history.some(item => item.stage === 'reserve_round'), false);
+  assert.deepEqual(createSelfRepairController(dependencies).get(input().repairId), result);
+  assert.deepEqual(await controller.run(input()), result);
+  assert.equal(checks, 1);
+  // A new explicit request after resolving the blocker still has both rounds.
+  const retry = createSelfRepairController({ ...dependencies, checkRenderReadiness: () => ({ ok: true }) });
+  assert.equal((await retry.run(input({ repairId: 'repair_ready' }))).reason, 'scoped_checks_satisfied');
+});
+
+test('readiness diagnostics are bounded and malformed responses fail closed before reservation', async t => {
+  const { controller } = harness(t, () => ({ checkRenderReadiness: () => ({ ok: false,
+    code: 'c'.repeat(1000), message: 'm'.repeat(1000), extra: 'discarded',
+    blocking: Array.from({ length: 200 }, () => ({ clipId: 'i'.repeat(1000), state: 's'.repeat(1000), extra: {} })) }) }));
+  const result = await controller.run(input());
+  assert.equal(result.readiness.code.length, 128);
+  assert.equal(result.readiness.message.length, 500);
+  assert.equal(result.readiness.blocking.length, 100);
+  assert.equal(result.readiness.blocking[0].clipId.length, 128);
+  assert.equal(result.readiness.blocking[0].state.length, 128);
+  assert.equal(result.readiness.extra, undefined);
+  assert.equal(result.readiness.blocking[0].extra, undefined);
+  for (const value of [null, {}, { ok: 'true' }, { ok: false }]) {
+    const bad = harness(t, () => ({ checkRenderReadiness: () => value }));
+    const refused = await bad.controller.run(input());
+    assert.equal(refused.reason, 'readiness_check_failed');
+    assert.equal(refused.error.code, 'SELF_REPAIR_READINESS');
+    assert.equal(refused.attempts, 0);
+    assert.equal(bad.state.turns.length, 0);
+  }
+});
+
+test('async readiness cannot reserve a round against a changed revision or package hash', async t => {
+  for (const revise of [false, true]) await t.test(String(revise), async t => {
+    let entered, finish;
+    const started = new Promise(resolve => { entered = resolve; });
+    const wait = new Promise(resolve => { finish = resolve; });
+    const { controller, state, runtimeDir } = harness(t, () => ({ checkRenderReadiness: async () => {
+      entered(); await wait; return { ok: true };
+    } }));
+    const work = controller.run(input());
+    await started;
+    assert.equal(controller.get(input().repairId).stage, 'check_render_readiness');
+    state.pkg.title = 'Concurrent editor change';
+    if (revise) state.pkg.revision++;
+    finish();
+    const result = await work;
+    assert.equal(result.reason, 'stale_package');
+    assert.equal(result.error.code, 'SELF_REPAIR_STALE');
+    assert.equal(result.attempts, 0);
+    assert.equal(state.turns.length, 0);
+    assert.equal(state.renders.length, 0);
+    assert.equal(existsSync(join(runtimeDir, 'self-repairs/packages/pkg_example.json')), false);
+  });
+});
+
+test('readiness is rechecked against the repaired revision before a second round', async t => {
+  for (const blocked of [false, true]) await t.test(String(blocked), async t => {
+    const revisions = [];
+    const { controller, state } = harness(t, () => ({
+      inspectRender: (pkg, request) => reportFixture(pkg, request.renderId,
+        { statuses: pkg.revision === 4 ? ['fail', 'fail'] : pkg.revision === 5 ? ['needs_review', 'fail'] : ['pass', 'pass'] }),
+      checkRenderReadiness: ({ expectedRevision }) => {
+        revisions.push(expectedRevision);
+        return blocked && expectedRevision === 5 ? { ok: false, code: 'RENDER_GATE_BLOCKED', message: 'Approval changed' } : { ok: true };
+      },
+    }));
+    const result = await controller.run(input());
+    assert.deepEqual(revisions, [4, 5]);
+    assert.equal(result.reason, blocked ? 'render_not_ready' : 'scoped_checks_satisfied');
+    assert.equal(result.attempts, blocked ? 1 : 2);
+    assert.equal(result.packageRoundsReserved, blocked ? 1 : 2);
+    assert.equal(state.turns.length, blocked ? 1 : 2);
+    assert.equal(state.renders.length, blocked ? 1 : 2);
+    assert.deepEqual(result.history.filter(item => item.type === 'render_readiness_checked').map(item => item.revision), [4, 5]);
+  });
+});
+
+test('satisfied scope does not need render readiness', async t => {
+  const { controller, state } = harness(t, () => ({
+    inspectRender: (pkg, request) => reportFixture(pkg, request.renderId, { statuses: ['pass', 'pass'] }),
+    checkRenderReadiness: () => assert.fail('No repair or render needs admission'),
+  }));
+  const result = await controller.run(input());
+  assert.equal(result.reason, 'scoped_checks_satisfied');
+  assert.equal(result.attempts, 0);
+  assert.equal(state.turns.length, 0);
+  assert.equal(result.history.some(item => item.type === 'render_readiness_checked'), false);
+});
 
 test('changed ASR provider, uncertainty or mode cannot establish repair improvement', async t => {
   for (const change of ['provider', 'uncertaintySeconds', 'analyzer', 'timingGranularity']) await t.test(change, async t => {
@@ -398,6 +520,7 @@ test('persistent package budget cannot be reset by repair ID, conversation or co
 test('tool/render failures retain committed changes, stage and consumed reservation', async t => {
   for (const where of ['tool', 'render']) await t.test(where, async t => {
     const { controller, state } = harness(t, (state, callbacks) => ({
+      checkRenderReadiness: () => ({ ok: true }),
       chatTurn: async args => { await callbacks.chatTurn(args); if (where === 'tool') throw new Error('tool failed after commit'); },
       renderCurrent: () => { throw new Error('CPU export failed'); },
     }));

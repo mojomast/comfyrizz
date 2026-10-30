@@ -1455,7 +1455,10 @@ export function createApp({
   });
 
   const selfRepairs = createSelfRepairIntegration({ runtimeDir, store, projectChat, renderRoutes,
-    findBoundProduction, speechInspector, providerSettings });
+    findBoundProduction, speechInspector, providerSettings,
+    // Fixed final intent, no caller body/override: this path only reads the
+    // existing gate and emits its refusal. Rendering still admits independently.
+    renderGate: pkg => finalDeliveryGate(pkg, { intent: 'final' }, '/api/self-repairs') });
 
   /**
    * Resolve a render target the same way for every render route: an in-memory draft is written to
