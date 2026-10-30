@@ -130,6 +130,12 @@ export function createEasyApi(fetchImpl: FetchImpl) {
   }
 
   return {
+    inviteSession() {
+      return request('GET', '/api/invites/session');
+    },
+    guestResult(id: string) {
+      return request('GET', `/api/invites/productions/${encodeURIComponent(id)}/result`);
+    },
     planBrief(prompt: any, decisions?: any) {
       return request('POST', '/api/brief', { prompt, mode: 'plan', decisions });
     },
@@ -198,6 +204,15 @@ export function createEasyApi(fetchImpl: FetchImpl) {
     getProduction,
     getNarrationFit(id: string) {
       return request('GET', `/api/productions/${encodeURIComponent(id)}/narration-fit`);
+    },
+    async getProductionWithEvents(id: string) {
+      const path = `/api/productions/${encodeURIComponent(id)}`;
+      const snapshot = await request('GET', path);
+      const journal = await request('GET', `${path}/events?after=0`);
+      if (journal?.reset || !Array.isArray(journal?.events) || snapshot?.lastSequence !== journal.lastSequence) {
+        throw new EasyApiError(409, 'STALE_VIEW', 'Production changed while loading its plan. Try again.');
+      }
+      return { ...snapshot, productionId: id, events: journal.events, gap: false, stale: false };
     },
     sendCommand(id: any, envelope: any) {
       return request('POST', `/api/productions/${encodeURIComponent(id)}/commands`, envelope);

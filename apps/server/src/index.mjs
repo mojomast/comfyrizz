@@ -147,7 +147,7 @@ export function seedProjects(options = {}) {
   return report;
 }
 
-function startServer() {
+async function startServer() {
   const port = Number(process.env.COMFYRIZZ_PORT ?? 4319);
   const host = process.env.COMFYRIZZ_HOST ?? '127.0.0.1';
   const runtimeDir = process.env.COMFYRIZZ_RUNTIME ?? join(repoRoot, 'apps', 'server', '.runtime');
@@ -167,6 +167,11 @@ function startServer() {
   chmodSync(tokenPath, 0o600);
 
   const providerSettings = createProviderSettings({ runtimeDir });
+  let inviteLedger = null;
+  if (process.env.COMFYRIZZ_INVITE_LEDGER_PATH) {
+    const { createDurableInviteLedger } = await import('../../../packages/backends/src/durable-invite-ledger.mjs');
+    inviteLedger = createDurableInviteLedger({ path: process.env.COMFYRIZZ_INVITE_LEDGER_PATH, publicBaseUrl: process.env.COMFYRIZZ_PUBLIC_BASE_URL });
+  }
   const moduleUrlFromEnv = value => {
     if (typeof value !== 'string' || value === '') return undefined;
     return value.startsWith('file:') ? value : pathToFileURL(value).href;
@@ -175,6 +180,7 @@ function startServer() {
     root: repoRoot,
     token,
     runtimeDir,
+    inviteLedger,
     providerSettings,
     renderModuleUrl: moduleUrlFromEnv(process.env.COMFYRIZZ_RENDER_MODULE),
     sceneModuleUrl: moduleUrlFromEnv(process.env.COMFYRIZZ_SCENE_MODULE),
@@ -186,11 +192,21 @@ function startServer() {
   seedProjects({ runtimeDir, examplesDir: join(repoRoot, 'examples'), env: process.env });
 
   const server = createServer(app.handler);
+  const privateAdminPort = Number(process.env.COMFYRIZZ_PRIVATE_ADMIN_PORT ?? 0);
+  const privateAdminServer = process.env.COMFYRIZZ_HOSTED_INVITES === '1' && privateAdminPort
+    ? createServer(app.privateAdminHandler) : null;
+  if (privateAdminServer) {
+    privateAdminServer.on('error', error => {
+      console.error(`comfyrizz private admin failed: ${error.message}`);
+      process.exit(1);
+    });
+    privateAdminServer.listen(privateAdminPort, '127.0.0.1');
+  }
   configureServerTimeouts(server, process.env);
   server.listen(port, host, () => {
-    const url = `http://${host}:${port}/#token=${token}`;
     console.log('Comfyrizz local server');
-    console.log(`  open   ${url}`);
+    if (process.env.COMFYRIZZ_HOSTED_INVITES === '1') console.log(`  listen http://${host}:${port}/`);
+    else console.log(`  open   http://${host}:${port}/#token=${token}`);
     console.log(`  token  ${tokenPath} (0600)`);
     console.log(`  web    ${app.webDist}`);
   });
@@ -211,11 +227,16 @@ function startServer() {
       // cannot outlive the server.
       await shutdownRenderWorkers({ killAfterMs: 2000 });
       server.closeAllConnections();
+      privateAdminServer?.closeAllConnections();
       await Promise.race([
-        new Promise(resolve => server.close(resolve)),
+        Promise.all([
+          new Promise(resolve => server.close(resolve)),
+          ...(privateAdminServer ? [new Promise(resolve => privateAdminServer.close(resolve))] : []),
+        ]),
         new Promise(resolve => setTimeout(resolve, 500)),
       ]);
       try { app.close(); } catch { /* listeners are already going away */ }
+      try { inviteLedger?.close(); } catch { /* process is shutting down */ }
     } finally {
       process.exit(0);
     }
@@ -233,4 +254,7 @@ const invokedDirectly = (() => {
   }
 })();
 
-if (invokedDirectly) startServer();
+if (invokedDirectly) startServer().catch(error => {
+  console.error(`comfyrizz server failed: ${error.message}`);
+  process.exitCode = 1;
+});

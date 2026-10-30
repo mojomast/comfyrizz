@@ -114,6 +114,8 @@ interface ApproveDeps extends ApproveAndGenerateOptions {
   snapshot?: unknown;
   context?: Record<string, unknown>;
   go?: Go;
+  /** Hosted invite actions are started by the server's guarded outbox. */
+  productionDispatchOnly?: boolean;
 }
 
 function productionId(state: EasyState): string {
@@ -245,11 +247,10 @@ async function approveBody(
   }
 
   if (colab && built.ok === true && options.dispatchActions !== false) {
-    const status = await deps.api.colabStatus();
-    const backendId = runBackendId(status);
+    const backendId = deps.productionDispatchOnly ? 'colab' : runBackendId(await deps.api.colabStatus());
     const actions = card.actions.filter((action) => typeof action?.id === 'string'
-      && action.id !== ''
-      && (options.runMode !== 'final' || isPaidAction(action)));
+      && action.id !== '' && (options.runMode !== 'final' || isPaidAction(action)));
+    if (deps.productionDispatchOnly && actions.length === 0) return 'This plan has no Google Colab work to run.';
     const dispatched: Array<{ actionId: string; assetIds: string[]; serverExecuted: boolean; response: unknown; revision: number }> = [];
     for (const action of actions) {
       const commandId = stableId('cmd_dispatch', [...identity, action.id, revision]);
@@ -274,9 +275,7 @@ async function approveBody(
         revision,
       });
     }
-    for (const item of dispatched) {
-      // Chat correction actions are consumed by the server's outbox and take
-      // runner. A second /api/run request races that durable dispatch.
+    for (const item of deps.productionDispatchOnly ? [] : dispatched) {
       if (item.serverExecuted) continue;
       try {
         // Later dispatches advance the production revision. An action's revision

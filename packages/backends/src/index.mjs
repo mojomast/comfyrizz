@@ -5,6 +5,7 @@ export { createByoBackend, collectModelFiles, findFreePort, PROXY_BIN } from "./
 export { ColabCli, ColabCliError } from "./cli.mjs";
 export { runPackage, withRunPackage, TEARDOWN_MODES } from "./run-package.mjs";
 export * from "./budget.mjs";
+export * from "./invite-ledger.mjs";
 export {
   COMFYRIZZ_RUNTIME,
   COMFYRIZZ_FALLBACK_GPUS,

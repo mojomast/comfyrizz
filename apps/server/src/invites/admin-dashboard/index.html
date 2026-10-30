@@ -1,0 +1,67 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Invite admin · Comfyrizz</title>
+  <link rel="stylesheet" href="/admin/dashboard.css">
+  <script src="/admin/dashboard.js" defer></script>
+</head>
+<body>
+  <header class="topbar">
+    <a class="brand" href="/admin/"><span class="brand-mark">✳</span> comfy<span>rizz</span><small> / INVITE ADMIN</small></a>
+    <div class="top-actions"><span class="connection" id="connection"><i></i> Private admin</span><button class="text-button" id="sign-out" hidden>Sign out</button></div>
+  </header>
+
+  <main>
+    <section id="login" class="login-panel panel">
+      <div class="eyebrow">PRIVATE WORKSPACE</div>
+      <h1>Welcome back.</h1>
+      <p>Enter your owner token to manage demo invites and see activity.</p>
+      <form id="login-form">
+        <label for="token">Owner token</label>
+        <input id="token" type="password" autocomplete="off" required placeholder="Paste your owner token">
+        <button class="button primary" type="submit">Open dashboard <span>→</span></button>
+      </form>
+      <p class="hint">The token stays in this page’s memory and is cleared when you sign out or close the page.</p>
+    </section>
+
+    <div id="dashboard" hidden>
+      <div class="heading">
+        <div><div class="eyebrow">SECRET FRIENDS DEMO <span> / </span> OVERVIEW</div><h1>Invite control<span class="period">.</span></h1><p>Give your friends a little room to create.</p></div>
+        <button class="button secondary" id="refresh" type="button">↻ <span>Refresh</span></button>
+      </div>
+      <div id="notice" class="notice" role="status" aria-live="polite" hidden></div>
+      <div id="spend-status" class="notice" role="status" hidden></div>
+      <section class="stats" aria-label="Invite totals">
+        <div class="stat"><div class="stat-label">TOTAL INVITES <span>↗</span></div><strong id="total-invites">—</strong><small>Links created</small></div>
+        <div class="stat"><div class="stat-label">CU ALLOCATED <span>◈</span></div><strong id="total-budget">—</strong><small>Across all invites</small></div>
+        <div class="stat"><div class="stat-label">CU USED <span>◌</span></div><strong id="total-spent">—</strong><small>Estimated usage</small></div>
+        <div class="stat"><div class="stat-label">CU RESERVED <span>◷</span></div><strong id="total-reserved">—</strong><small>Committed to runs</small></div>
+      </section>
+      <div class="layout">
+        <section class="panel invites-panel">
+          <div class="section-heading"><div><div class="eyebrow">YOUR LINKS</div><h2>Invites <span id="invite-count" class="count">0</span></h2></div><span class="muted">Most recent first</span></div>
+          <div id="invites" class="invite-list"></div>
+          <div id="empty" class="empty" hidden><div class="empty-icon">✳</div><h3>No invites yet</h3><p>Create a link and send it to someone you like.</p></div>
+        </section>
+        <aside>
+          <section class="panel create-panel">
+            <div class="eyebrow">MAKE SOME MAGIC</div><h2>Create an invite</h2><p class="muted">Set the budget and how long the link stays open.</p>
+            <form id="mint-form">
+              <label for="label">Label <span>optional</span></label><input id="label" maxlength="200" placeholder="e.g. Alex’s demo">
+              <label for="cu">Compute budget <span>CU</span></label><input id="cu" type="number" min="0.001" step="0.001" required placeholder="e.g. 5">
+              <div class="split"><div><label for="ttl">Expires after</label><input id="ttl" type="number" min="0.001" step="any" value="7" required></div><div><label for="ttl-unit">Unit</label><select id="ttl-unit"><option value="days">Days</option><option value="hours">Hours</option></select></div></div>
+              <label for="films">Film limit <span>0 = unlimited</span></label><input id="films" type="number" min="0" step="1" value="3" required>
+              <button class="button primary wide" id="mint" type="submit">Create invite <span>↗</span></button>
+            </form>
+            <div id="minted" class="minted" hidden><div class="eyebrow">LINK CREATED</div><p>Copy it now — this link is only shown once.</p><input id="minted-url" readonly aria-label="New invite link"><button class="button secondary wide" id="copy" type="button">Copy invite link</button></div>
+          </section>
+          <div class="footnote"><span>✳</span><p>CU values are estimates. A reservation is held for work in progress; actual Colab account usage may differ.</p></div>
+        </aside>
+      </div>
+    </div>
+    <div id="login-error" class="login-error" role="alert" hidden></div>
+  </main>
+</body>
+</html>

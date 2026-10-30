@@ -312,7 +312,8 @@ function harness(options = {}) {
   const session = createSuperEasySession({
     run,
     watch,
-    api: {},
+    api: options.api ?? {},
+    watchFetch: options.watchFetch,
     host: {},
     store,
     go() {},
@@ -342,6 +343,34 @@ function harness(options = {}) {
     stopCalls: () => stopCalls,
   };
 }
+
+test('hosted watch uses authenticated fetch and finishes only with a guest media ticket', async () => {
+  const watchFetch = async () => { throw new Error('not called by the fake watcher'); };
+  const h = harness({
+    watchFetch,
+    runPatches: { productionId: PRODUCTION_ID },
+    api: { guestResult: async id => ({ status: 'completed', url: `/api/media/${'a'.repeat(32)}`, id }) },
+  });
+  await h.session.generate({ prompt: 'A hosted video', hostedInvite: true });
+  assert.equal(h.watchOptions().fetchImpl, watchFetch);
+  h.watchOptions().onState(partialSnapshot());
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(h.session.status(), 'done');
+  assert.equal(h.session.snapshot().final.url, `/api/media/${'a'.repeat(32)}`);
+  assert.equal(h.stopCalls(), 1);
+});
+
+test('hosted result completing after stop cannot revive the session', async () => {
+  let resolveResult;
+  const h = harness({ runPatches: { productionId: PRODUCTION_ID }, api: { guestResult: () => new Promise(resolve => { resolveResult = resolve; }) } });
+  await h.session.generate({ prompt: 'A hosted video', hostedInvite: true });
+  h.watchOptions().onState(partialSnapshot());
+  h.session.stop();
+  resolveResult({ status: 'completed', url: `/api/media/${'b'.repeat(32)}` });
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(h.session.status(), 'stopped');
+  assert.equal(h.dones.length, 0);
+});
 
 test('uncertain paid approval and run failures cannot replay a paid job', async () => {
   for (const stage of ['approval', 'run']) {

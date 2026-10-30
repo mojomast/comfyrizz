@@ -147,6 +147,7 @@ export function planFromPackage(input = {}) {
       id: `act_${scene.id}`,
       kind: 'shot.generate',
       targetId: scene.id,
+      backendId: 'colab',
       takes,
       upperBound,
       assetIds: assets.map(asset => asset.assetId),

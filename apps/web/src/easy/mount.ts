@@ -464,9 +464,11 @@ export function mountEasyStudio(root: HTMLElement, baseHost: EasyHost, deps: Eas
       procedure.mark('prompt', fill(PROCEDURE_COPY.prompt, { prompt: input.prompt }));
       procedure.mark('compute', input.compute === 'colab' ? PROCEDURE_COPY.computeColab : PROCEDURE_COPY.computeCpu);
     }
+    const hostedInvite = new URLSearchParams(search()).get('demo') === '1';
     void session.generate({
       prompt: input.prompt,
-      compute: input.compute,
+      compute: hostedInvite ? 'colab' : input.compute,
+      ...(hostedInvite ? { hostedInvite: true } : {}),
       ...(input.lengthS === undefined ? {} : { lengthS: input.lengthS }),
       motionModel: input.motionModel,
       ...(input.deepSeekNoThinking ? { deepSeekNoThinking: true } : {}),

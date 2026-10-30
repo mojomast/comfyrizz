@@ -17,6 +17,8 @@ import test from 'node:test';
 
 import { createOutboxExecutor } from '../../src/productions/outbox-execution.mjs';
 import { createProductionStore } from '../../src/productions/store.mjs';
+import { createInviteProductionSpendGuard } from '../../src/invites/production-spend-guard.mjs';
+import { createDurableInviteLedger } from '../../../../packages/backends/src/durable-invite-ledger.mjs';
 
 const AT = '2026-10-26T12:00:00.000Z';
 const PRODUCTION_ID = 'prod_ux21f3';
@@ -196,6 +198,33 @@ function drain(executor, options = {}) {
 function entriesByAction(result) {
   return new Map(result.entries.map((entry) => [entry.actionId ?? entry.entryId, entry]));
 }
+
+test('real outbox drain reserves per action before fake execution and refuses overspend', async (t) => {
+  const { store } = seed(t, {
+    plans: [planEvent([slot(ACTION_A, 0.7, { backendId: 'colab' }), slot(ACTION_B, 0.4, { backendId: 'colab' })])],
+    outbox: [dispatchEntry(ACTION_A, { upperBound: 0.7 }), dispatchEntry(ACTION_B, { upperBound: 0.4 })],
+  });
+  const ledger = createDurableInviteLedger({ path: join(tempRuntime(t), 'invite.sqlite') });
+  t.after(() => ledger.close());
+  const invite = ledger.mint({ cu: 1, ttlDays: 1 }).invite;
+  ledger.bindResource(invite.id, 'production', PRODUCTION_ID);
+  const fake = recordingAdapter();
+  let enabled = false;
+  const executor = executorFor(store, createInviteProductionSpendGuard({ adapter: fake, ledger, spendEnabled: () => enabled }));
+  const resolveDispatchInput = entry => ({ backendId: 'colab', budgetUnits: entry.payload.actionId === ACTION_A ? 0.7 : 0.4 });
+  const disabled = await drain(executor, { resolveDispatchInput });
+  assert.equal(disabled.started, 0);
+  assert.equal(fake.starts.length, 0);
+  assert.equal(ledger.get(invite.id).committedEstimateCu, 0);
+  enabled = true;
+  const result = await drain(executor, { resolveDispatchInput });
+  assert.equal(result.started, 1);
+  assert.equal(fake.starts.length, 1);
+  assert.equal(fake.starts[0].actionId, ACTION_A);
+  assert.equal(entriesByAction(result).get(ACTION_B).reason, 'INVITE_BUDGET_REFUSED');
+  assert.equal(ledger.get(invite.id).committedEstimateCu, 0.7);
+  assert.equal(store.pending(PRODUCTION_ID).length, 1);
+});
 
 test('a per-entry resolver gives each pending dispatch the input for its own action', async (t) => {
   const { store } = seed(t, {

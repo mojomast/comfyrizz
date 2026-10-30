@@ -91,10 +91,10 @@ function planEvent(sequence, id, options = {}) {
       productionId: PRODUCTION_ID,
       revision: sequence,
       planHash: PLAN_HASH,
-      reservationCeiling: options.ceiling ?? 0,
+      reservationCeiling: options.ceiling ?? (options.hosted ? 0.5 : 0),
       collectAndStopReserve: options.reserve ?? 0,
       requiredDecisions: options.requiredDecisions ?? [],
-      actions: options.actions ?? [],
+      actions: options.actions ?? (options.hosted ? [{ id: 'act_1', kind: 'shot.generate', targetId: 'shot_1', upperBound: 0.5, backendId: 'colab' }] : []),
     },
   };
 }
@@ -214,6 +214,10 @@ function harness(options = {}) {
       calls.push({ kind: 'colab-status' });
       return null;
     },
+    async inviteSession() {
+      calls.push({ kind: 'invite-session' });
+      return options.session ?? { role: 'guest', backendId: 'colab', budgetUnits: 1.2 };
+    },
   };
 
   const compiled = options.compiled !== false;
@@ -252,6 +256,24 @@ function harness(options = {}) {
 
   return { api, host, calls, store: makeStore(options.patch) };
 }
+
+test('hosted Super Easy uses the invite budget and dispatches only through the production outbox', async () => {
+  const { api, host, calls, store } = harness({ hosted: true });
+  const result = await runSuperEasy({ prompt: PROMPT, hostedInvite: true }, { api, host, store, go: () => {} });
+  assert.equal(result.ok, true, JSON.stringify(result));
+  assert.equal(store.get().compute, 'colab');
+  assert.equal(store.get().spendCap, 1.2);
+  assert.equal(calls.filter(call => call.kind === 'dispatch').length, 1);
+  assert.equal(calls.some(call => call.kind === 'run' || call.kind === 'colab-status'), false);
+});
+
+test('hosted Super Easy refuses before planning when the invite session is unavailable', async () => {
+  const { api, host, calls, store } = harness({ session: { role: 'guest', backendId: 'colab', budgetUnits: 0 } });
+  const result = await runSuperEasy({ prompt: PROMPT, hostedInvite: true }, { api, host, store, go: () => {} });
+  assert.equal(result.ok, false);
+  assert.equal(result.code, 'INVITE_UNAVAILABLE');
+  assert.deepEqual(kinds(calls), ['invite-session']);
+});
 
 function kinds(calls) {
   return calls.map((call) => call.kind);

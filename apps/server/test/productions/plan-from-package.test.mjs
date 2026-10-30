@@ -12,6 +12,8 @@ import { createCommandHandler } from '../../src/productions/commands.mjs';
 import { planFromPackage } from '../../src/productions/plan-from-package.mjs';
 import { createProductionStore } from '../../src/productions/store.mjs';
 import { createProductionRoutes } from '../../src/routes/productions.mjs';
+import { BOOTSTRAP_OVERHEAD_MINUTES, MEASURED_JOB_MINUTES } from '../../../../packages/backends/src/colab-backend.mjs';
+import { nextJobUpperEstimate, rateForGpu, reserveUnitsFor } from '../../../../packages/backends/src/budget.mjs';
 
 const AT = '2026-10-23T12:00:00.000Z';
 const USER = Object.freeze({ actor: 'user', userEventId: 'ue_easy_plan' });
@@ -52,6 +54,9 @@ test('balanced gives one action per GPU scene, each with 2 takes', () => {
 test('draft gives takes 1', () => {
   const plan = planFromPackage({ pkg: packageFixture(), level: 'draft', compute: 'colab' });
   assert.deepEqual(plan.actions.map((action) => action.takes), [1, 1]);
+  const rate = rateForGpu('G4', { env: {} }).ratePerHour;
+  const required = nextJobUpperEstimate({ gpuMinutes: MEASURED_JOB_MINUTES.still, overheadMinutes: BOOTSTRAP_OVERHEAD_MINUTES, ratePerHour: rate }) + reserveUnitsFor(rate);
+  assert.ok(plan.actions[0].upperBound >= required - 1e-9);
 });
 
 test('action bounds include startup and collect/stop overhead used by run admission', () => {

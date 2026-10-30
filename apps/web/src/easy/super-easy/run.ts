@@ -49,6 +49,7 @@ export interface SuperEasyApi {
   proposeEasyPlan(id: string, body: { level: EasyState['level']; compute: EasyState['compute']; expectedPackageRevision?: number }): Promise<unknown>;
   proposeActionPlan(id: string, body: unknown): Promise<unknown>;
   getProduction(id: string): Promise<unknown>;
+  getProductionWithEvents?(id: string): Promise<unknown>;
   sendCommand(id: string, command: unknown): Promise<unknown>;
   setSpendCap(id: string, body: { ceiling: number; expected: { productionRevision: number } }): Promise<unknown>;
   dispatchAction(id: string, body: unknown): Promise<unknown>;
@@ -60,6 +61,8 @@ export interface SuperEasyApi {
   getRunVideo(id: string): Promise<Blob>;
   generateLocalNarration?(body: { packageId: string; productionId: string; baseRevision: number; recoveryInputs?: unknown }): Promise<any>;
   colabStatus(): Promise<{ backendId?: string } | null>;
+  inviteSession?(): Promise<{ role?: string; backendId?: string; budgetUnits?: number }>;
+  guestResult?(id: string): Promise<{ status: string; url?: string }>;
 }
 
 export interface SuperEasyHost {
@@ -105,6 +108,7 @@ export interface RunSuperEasyInput {
   /** One-time guided setup confirmation; a per-click spend override is not accepted. */
   setupConfirmed?: boolean;
   cpu?: Pick<RunCpuGenerateOptions, 'timeoutMs' | 'pollMs' | 'setTimer' | 'clearTimer'>;
+  hostedInvite?: boolean;
   run?: SuperEasyRunPollingOptions;
   /** Return after a free creative plan, before production or paid work exists. */
   proposalOnly?: boolean;
@@ -135,6 +139,8 @@ export type SuperEasyRunFailureCode =
   | 'EMPTY_PROMPT'
   | 'INVALID_LYRICS'
   | 'GOOGLE_COLAB_CONFIRM_REQUIRED'
+  | 'INVITE_UNAVAILABLE'
+  | 'HOSTED_RUN_FAILED'
   | 'GENERATED_MEDIA_REQUIRES_COLAB'
   | 'PLAN_FAILED'
   | 'ITERATION_SET_FAILED'
@@ -503,9 +509,26 @@ export async function runSuperEasy(input: RunSuperEasyInput, deps: RunSuperEasyD
   }
   const prompt = creativeRevisionPrompt(basePrompt, revisionNotes);
 
-  const compute = input.compute ?? 'cpu';
+  const hosted = input.hostedInvite === true;
+  const getProduction = (id: string): Promise<unknown> => hosted && deps.api.getProductionWithEvents
+    ? deps.api.getProductionWithEvents(id) : deps.api.getProduction(id);
+  const compute = hosted ? 'colab' : (input.compute ?? 'cpu');
+  let budgetUnits: number | undefined;
+  if (hosted) {
+    try {
+      const session = await deps.api.inviteSession?.();
+      if (session?.role !== 'guest' || session.backendId !== 'colab'
+          || typeof session.budgetUnits !== 'number' || !Number.isFinite(session.budgetUnits) || session.budgetUnits <= 0) {
+        return failure('INVITE_UNAVAILABLE', 'compute', 'This invite is unavailable or has no compute remaining.');
+      }
+      budgetUnits = session.budgetUnits;
+    } catch {
+      return failure('INVITE_UNAVAILABLE', 'compute', 'This invite is unavailable or has no compute remaining.');
+    }
+  }
+
   const setupConfirmed = input.setupConfirmed === true || deps.setupConfirmed === true;
-  if (compute !== 'cpu' && !(compute === 'colab' && setupConfirmed)) {
+  if (!hosted && compute !== 'cpu' && !(compute === 'colab' && setupConfirmed)) {
     return failure('GOOGLE_COLAB_CONFIRM_REQUIRED', 'compute', GOOGLE_COLAB_CONFIRM_REQUIRED);
   }
 
@@ -513,6 +536,7 @@ export async function runSuperEasy(input: RunSuperEasyInput, deps: RunSuperEasyD
   deps.store.patch({
     idea: { ...current.idea, text: prompt, ...(input.lengthS === undefined ? {} : { lengthS: input.lengthS }) },
     compute,
+    ...(budgetUnits === undefined ? {} : { spendCap: budgetUnits }),
     motionModel: input.motionModel ?? 'auto',
     ...(input.videoType !== undefined ? { videoType: input.videoType } : {}),
     ...(input.songTrim !== undefined ? { songTrim: input.songTrim } : {}),
@@ -588,7 +612,7 @@ export async function runSuperEasy(input: RunSuperEasyInput, deps: RunSuperEasyD
   deps.onPhase?.('iteration');
   let before: unknown;
   try {
-    before = await deps.api.getProduction(productionId);
+    before = await getProduction(productionId);
   } catch (error) {
     return failure('ITERATION_SET_FAILED', 'iteration', messageOf(error, ITERATION_SET_FAILED));
   }
@@ -614,7 +638,7 @@ export async function runSuperEasy(input: RunSuperEasyInput, deps: RunSuperEasyD
 
   let snapshot: unknown;
   try {
-    snapshot = await deps.api.getProduction(productionId);
+    snapshot = await getProduction(productionId);
   } catch {
     return failure('ITERATION_LEVEL_REQUIRED', 'iteration', ITERATION_LEVEL_REQUIRED);
   }
@@ -641,7 +665,7 @@ export async function runSuperEasy(input: RunSuperEasyInput, deps: RunSuperEasyD
 
   deps.onPhase?.('approval');
   try {
-    snapshot = await deps.api.getProduction(productionId);
+    snapshot = await getProduction(productionId);
   } catch (error) {
     return failure('APPROVAL_FAILED', 'approval', messageOf(error, APPROVAL_FAILED));
   }
@@ -697,6 +721,7 @@ export async function runSuperEasy(input: RunSuperEasyInput, deps: RunSuperEasyD
       store: deps.store,
       snapshot,
       go: deps.go,
+      productionDispatchOnly: hosted,
     }, {
       runMode: compute === 'colab' ? 'final' : 'take',
       ...(input.reviewedPackageRevision !== undefined ? { expectedPackageRevision: input.reviewedPackageRevision } : {}),
@@ -718,6 +743,7 @@ export async function runSuperEasy(input: RunSuperEasyInput, deps: RunSuperEasyD
   }
 
   deps.onPhase?.('run');
+  if (hosted) return { ok: true, productionId, draftCommand: built.command, snapshot };
   if (compute === 'cpu' || !hasPaidWork) {
     const pkg = deps.host.getPackage?.();
     if (narrationPending(pkg)) {

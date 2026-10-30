@@ -130,6 +130,7 @@ function webPublic(): Plugin {
 }
 
 export default defineConfig({
+  base: process.env.COMFYRIZZ_WEB_BASE || '/',
   publicDir: join(repoRoot, 'apps', 'renderer', 'public'),
   plugins: [apiProxy(), react(), renderApi(), webPublic()],
   resolve: {

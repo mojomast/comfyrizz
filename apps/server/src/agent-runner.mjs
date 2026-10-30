@@ -1483,6 +1483,12 @@ export function createCpuAgentRunner({ runtimeDir, now = () => new Date().toISOS
       timeline: slice.package.duration?.exact ? compilePlanningTimeline(slice.package) : null,
       generatedAssets,
       routes: slice.routes,
+      pendingGpu: slice.pendingGpu.map(pending => {
+        const call = slice.result.toolCalls.find(item => item.name === 'assets.generate_image'
+          && item.ok && item.result?.asset?.id === pending.assetId);
+        return typeof call?.result?.scene_id === 'string'
+          ? { ...pending, sceneId: call.result.scene_id } : pending;
+      }),
       pendingGpu: slice.pendingGpu,
       modelContribution: { state: 'planned', uses: modelContribution, requiresApproval: true },
       svgAssets: slice.svgAssets,

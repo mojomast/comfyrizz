@@ -36,6 +36,7 @@ export interface SuperEasySessionOptions extends RunSuperEasyDeps {
   run?: typeof runSuperEasy;
   /** The production watch under test can be replaced; production defaults to `watchProduction`. */
   watch?: SuperEasyWatch;
+  watchFetch?: WatchProductionOptions['fetchImpl'];
   reducedMotion?: boolean;
   onProgress?(html: string, snapshot: unknown): void;
   onDone?(snapshot: unknown): void;
@@ -87,6 +88,8 @@ export function createSuperEasySession(options: SuperEasySessionOptions): SuperE
   let failure: SuperEasyRunFailure | null = null;
   let lastInput: RunSuperEasyInput | null = null;
   let phase: SuperEasyPhase = 'idle';
+  let resultRequest = false;
+  let generation = 0;
   let objectUrl: string | null = null;
   let proposal: SuperEasyProposal | null = null;
   let reviewedPackage: any = null;
@@ -258,6 +261,31 @@ export function createSuperEasySession(options: SuperEasySessionOptions): SuperE
       return;
     }
     publish();
+    if (lastInput?.hostedInvite && typeof options.api.guestResult === 'function' && !resultRequest) {
+      const productionId = options.store.get().productionId;
+      if (productionId) {
+        const currentGeneration = generation;
+        resultRequest = true;
+        void options.api.guestResult(productionId).then(result => {
+          if (stopped || currentGeneration !== generation || status !== 'running') return;
+          if (result.status === 'failed') {
+            failure = { ok: false, code: 'HOSTED_RUN_FAILED', stage: 'run', message: 'The video could not be completed. Try again.' };
+            patchStatus('error');
+            cancelWatch();
+            publish();
+            options.onError?.(failure);
+          } else if (result.status === 'completed' && typeof result.url === 'string'
+              && /^\/api\/media\/[a-f0-9]{32}$/.test(result.url)) {
+            snapshot = { ...(snapshot && typeof snapshot === 'object' ? snapshot : {}), final: { status: 'ready', url: result.url } };
+            patchStatus('done');
+            cancelWatch();
+            publish();
+            options.onDone?.(snapshot);
+          }
+        }).catch(() => { /* The next production poll retries the result lookup. */ })
+          .finally(() => { if (currentGeneration === generation) resultRequest = false; });
+      }
+    }
   }
 
   async function generate(input: RunSuperEasyInput): Promise<SuperEasyRunResult> {
@@ -280,6 +308,7 @@ export function createSuperEasySession(options: SuperEasySessionOptions): SuperE
       ...(input.attachmentRevision === undefined ? {} : { attachmentRevision: input.attachmentRevision }),
       ...(input.setupConfirmed === undefined ? {} : { setupConfirmed: input.setupConfirmed }),
       ...(input.cpu === undefined ? {} : { cpu: input.cpu }),
+      ...(input.hostedInvite === true ? { hostedInvite: true } : {}),
       ...(input.run === undefined ? {} : { run: input.run }),
       ...(input.proposalOnly === undefined ? {} : { proposalOnly: input.proposalOnly }),
       ...(input.basePrompt === undefined ? {} : { basePrompt: input.basePrompt }),
@@ -289,6 +318,8 @@ export function createSuperEasySession(options: SuperEasySessionOptions): SuperE
       ...(input.recoveryProductionId === undefined ? {} : { recoveryProductionId: input.recoveryProductionId }),
     };
     lastInput = nextInput;
+    generation += 1;
+    resultRequest = false;
     const ticket = ++epoch;
     recoveryOffer = null;
     recoveryContext = null;
@@ -394,7 +425,7 @@ export function createSuperEasySession(options: SuperEasySessionOptions): SuperE
 
     watchStop = watch({
       productionId: result.productionId,
-      ...(options.fetchImpl ? { fetchImpl: options.fetchImpl } : {}),
+      ...((options.fetchImpl ?? options.watchFetch) ? { fetchImpl: options.fetchImpl ?? options.watchFetch } : {}),
       onState,
     });
     if (stopped || status === 'done') cancelWatch();
@@ -528,6 +559,7 @@ export function createSuperEasySession(options: SuperEasySessionOptions): SuperE
     }
     if (stopped) return;
     stopped = true;
+    generation += 1;
     epoch += 1;
     recoveryOffer = null;
     const runId = activeRunId;

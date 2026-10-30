@@ -11,7 +11,8 @@
     "./colab": "./src/colab-backend.mjs",
     "./byo": "./src/byo-backend.mjs",
     "./plan": "./src/colab-plan.mjs",
-    "./budget": "./src/budget.mjs"
+    "./budget": "./src/budget.mjs",
+    "./invite": "./src/invite-ledger.mjs"
   },
   "scripts": {
     "test": "node --test test/*.test.mjs"
