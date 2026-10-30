@@ -6,7 +6,7 @@ const copyKeys = ['headline', 'sub', 'body', 'footnote', 'kicker'];
 const textFields = keys => Object.fromEntries(keys.map(key => [key, { type: ['string', 'null'] }]));
 export const PACKAGE_EDIT_TOOL = {
   name: 'project_edit_package',
-  description: 'Stage focused edits to the authoritative saved package, even when there is no chat draft. Each call replaces the pending batch: include every intended pending edit in one call. Returns an exact before/after diff for review. Preserve all omitted fields, timing, assets and generation inputs. Null removes a named text field; removing the final required headline on a video-only shot also sets media_only=true, preserving its lower third. Remove foreground placements by exact existing asset IDs (never delete assets). Call project_build to save after review or when the user explicitly asks to apply/save these edits. Does not generate media.',
+  description: 'Stage focused edits to the authoritative saved package, even when there is no chat draft. Each call replaces the pending batch: include every intended pending edit in one call. Returns an exact before/after diff for review. Preserve all omitted fields, timing, assets and generation inputs. backgroundSourceIn requires project_inspect_source evidence and uses SOURCE frames, preserving scene duration, speed and source end. Null removes a named text field; removing the final required headline on a video-only shot also sets media_only=true, preserving its lower third. Remove foreground placements by exact existing asset IDs (never delete assets). Call project_build to save after review or when the user explicitly asks to apply/save these edits. Does not generate media.',
   parameters: {
     type: 'object', additionalProperties: false, required: ['packageId', 'expectedRevision', 'edits'],
     properties: {
@@ -15,6 +15,9 @@ export const PACKAGE_EDIT_TOOL = {
       edits: { type: 'array', maxItems: 100, items: {
         type: 'object', additionalProperties: false, required: ['sceneId'], properties: {
           sceneId: { type: 'string' }, backgroundMuted: { type: 'boolean' },
+          backgroundSourceIn: { type: 'object', additionalProperties: false, required: ['inspectionId', 'inFrame'], properties: {
+            inspectionId: { type: 'string', pattern: '^sr_[a-f0-9]{64}$' }, inFrame: { type: 'integer', minimum: 0 },
+          } },
           removeNarration: { type: 'boolean', enum: [true] },
           removeForegroundAssets: { type: 'array', items: { type: 'string' }, minItems: 1, uniqueItems: true },
           copy: { type: 'object', additionalProperties: false, properties: textFields(copyKeys) },
@@ -31,7 +34,7 @@ function object(value, keys) {
 }
 
 /** No model-authored package or JSON pointer is accepted. Work from the saved bytes. */
-export function applyChatPackageEdit(pkg, input) {
+export function applyChatPackageEdit(pkg, input, { sourceTrims = new Map() } = {}) {
   object(input, ['packageId', 'expectedRevision', 'disableVoice', 'edits']);
   if (input.packageId !== pkg.id || input.expectedRevision !== pkg.revision) {
     throw Object.assign(new Error('The saved package changed; reload and review the current package before editing.'), { status: 409, code: 'EDIT_PACKAGE_STALE' });
@@ -48,12 +51,17 @@ export function applyChatPackageEdit(pkg, input) {
   };
   const seen = new Set();
   for (const edit of input.edits) {
-    object(edit, ['sceneId', 'backgroundMuted', 'removeNarration', 'removeForegroundAssets', 'copy', 'lowerThird']);
+    object(edit, ['sceneId', 'backgroundMuted', 'backgroundSourceIn', 'removeNarration', 'removeForegroundAssets', 'copy', 'lowerThird']);
     const scene = next.scenes.find(scene => scene.id === edit.sceneId);
     if (!scene || seen.has(edit.sceneId)) throw invalid('Each edit must name a unique existing scene.');
     seen.add(edit.sceneId);
     if (scene.locked) throw invalid(`Scene ${scene.id} is locked.`);
     const path = `scenes.${scene.id}`;
+    if (edit.backgroundSourceIn !== undefined) {
+      object(edit.backgroundSourceIn, ['inspectionId', 'inFrame']);
+      if (!sourceTrims.has(scene.id)) throw invalid('Source-in edits require server-validated inspection evidence.');
+      change(scene.background, 'trim', sourceTrims.get(scene.id), `${path}.background.trim`);
+    }
     if (edit.backgroundMuted !== undefined) {
       if (typeof edit.backgroundMuted !== 'boolean' || !scene.background?.asset || next.assets[scene.background.asset]?.kind !== 'video') throw invalid(`Scene ${scene.id} has no video background to mute/unmute.`);
       change(scene.background, 'muted', edit.backgroundMuted, `${path}.background.muted`);

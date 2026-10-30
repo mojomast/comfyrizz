@@ -32,6 +32,7 @@ import { preflightBrief } from './brief-preflight.mjs';
 import { prepareBrand } from './brand.mjs';
 import { handleProviderSettings } from './provider-settings.mjs';
 import { createProjectChat } from './agent-chat.mjs';
+import { createLocalSpeechInspector } from './local-speech-inspector.mjs';
 import { createAgentProgress } from './agent-progress.mjs';
 import { createReferenceRoutes } from './references/routes.mjs';
 import { createContextAttachmentRoutes } from './context-attachments.mjs';
@@ -276,6 +277,7 @@ export function createApp({
   // uses succeeds; a failed probe keeps the route at 503.
   auditionSynth = null,
   localNarrationPrepare,
+  speechInspector = createLocalSpeechInspector(),
 } = {}) {
   if (!token || token.length < 16) throw new Error('createApp requires a token of at least 16 characters');
   // Local Remotion renders run on a worker. Callers that pass their own render
@@ -674,6 +676,7 @@ export function createApp({
   // so a confirmed clip correction reaches the same coordinator as the routes.
   const projectChat = createProjectChat({
     runtimeDir,
+    speechInspector,
     store,
     providerSettings,
     prepareBrand,
