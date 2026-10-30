@@ -205,6 +205,37 @@ export function providerAvailability(env = process.env) {
 
 // Loaded lazily so tests can inject a fake and so the backends module is not parsed
 // for every server test that never touches a GPU path.
+// RW08 injection point. Reference watch stays off unless the run passes refWatch.
+// The estimate wired in is the real regen estimate; tests can still replace it.
+async function buildRefWatch(ctx, opts) {
+  const spec = opts.refWatch === true ? {} : opts.refWatch;
+  const [{ createRefWatchController }, { estimateRegen }, { runT0Checks }, { decide }, steer] = await Promise.all([
+    import('./ref-watch/controller.mjs'),
+    import('./ref-watch/estimate.mjs'),
+    import('./ref-watch/t0-checks.mjs'),
+    import('./ref-watch/decide.mjs'),
+    import('./ref-watch/steer.mjs'),
+  ]);
+  return createRefWatchController({
+    jobsDoc: ctx.jobsDoc,
+    onEvent: ctx.onEvent,
+    submitJobs: ctx.submitJobs,
+    receiptsDir: ctx.receiptsDir,
+    reviewer: spec.reviewer,
+    t0: spec.t0 ?? runT0Checks,
+    decide: spec.decide ?? decide,
+    steer: spec.steer ?? steer,
+    estimate: spec.estimate ?? estimateRegen,
+    budgetLedger: spec.budgetLedger ?? null,
+    policy: spec.policy,
+    iteration: spec.iteration,
+    now: spec.now,
+    reviewTimeoutMs: spec.reviewTimeoutMs,
+    measure: spec.measure,
+    currentKeyframeSha: spec.currentKeyframeSha,
+  });
+}
+
 async function defaultBackendFactory(backendId, opts = {}) {
   const mod = await import('../../../packages/backends/src/index.mjs');
   if (backendId === 'colab') {
@@ -215,6 +246,7 @@ async function defaultBackendFactory(backendId, opts = {}) {
       budgetUnits: opts.budgetUnits ?? 0,
       // PO-3: the rate lives in the backend budget module, not in a literal here.
       ratePerHour: mod.resolveRatePerHour({ gpu: opts.gpu, explicit: opts.ratePerHour }),
+      refWatch: opts.refWatch ? (ctx) => buildRefWatch(ctx, opts) : null,
     });
   }
   if (backendId === 'byo-comfyui') {

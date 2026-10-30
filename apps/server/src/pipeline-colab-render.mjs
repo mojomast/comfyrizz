@@ -224,9 +224,18 @@ with zipfile.ZipFile(archive) as bundle:
  * @param {number} [stallMinutes] how long the render may stay silent before it counts as stalled
  * @param {object} [clock] {now, setTimeout, clearTimeout}: the clock the render watches itself with
  */
-export async function runColabRender({ backend, workDir, runDir, voiced = false, presenters = false, signal, onEvent = () => {}, stallMinutes = null, clock = realClock, deadlines = {} } = {}) {
+export async function runColabRender({ backend, workDir, runDir, voiced = false, presenters = false, signal, onEvent = () => {}, stallMinutes = null, clock = realClock, deadlines = {}, refWatch = null } = {}) {
   if (!backend || typeof backend.uploadFile !== 'function' || typeof backend.execStep !== 'function' || typeof backend.downloadFile !== 'function') {
     throw new Error('This Google Colab backend cannot run a remote render');
+  }
+  if (typeof refWatch?.beforeRender === 'function') {
+    const gate = await refWatch.beforeRender({ workDir, runDir });
+    if (gate?.ok === false) {
+      const error = new Error(gate.message || 'Reference watch is holding the Google Colab video render until keyframes finish review.');
+      error.code = 'REF_GATE_HELD';
+      error.held = gate.held ?? [];
+      throw error;
+    }
   }
   const limits = { ...RENDER_STEP_DEADLINES, ...deadlines };
   const stallMs = renderStallMs({ minutes: stallMinutes });
