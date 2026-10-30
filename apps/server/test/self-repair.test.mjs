@@ -81,6 +81,18 @@ test('changed ASR provider, uncertainty or mode cannot establish repair improvem
   });
 });
 
+test('a verified historical run can be inspected, while new exports still require ordinary render IDs', async t => {
+  const { controller } = harness(t, () => ({}));
+  const result = await controller.run(input({ renderId: 'run_123456abcdef' }));
+  assert.equal(result.reason, 'scoped_checks_satisfied');
+  assert.equal(result.reports[0].renderId, 'run_123456abcdef');
+  assert.match(result.reports[1].renderId, /^r_/);
+  const bad = harness(t, () => ({ renderCurrent: async () => ({ renderId: 'run_123456abcdef' }) }));
+  const refused = await bad.controller.run(input());
+  assert.equal(refused.reason, 'render_failed');
+  assert.equal(refused.error.code, 'SELF_REPAIR_RENDER');
+});
+
 test('Pi callback commits a source-in edit; fresh output is inspected without claiming acceptance', async t => {
   const { controller, state } = harness(t, () => ({}));
   const result = await controller.run(input());

@@ -242,10 +242,14 @@ saved artifact through `readRenderArtifact`. It validates current package and
 historical timeline hashes, trusted render receipts and actual MP4 bytes before
 and after analysis. A newer package cannot use an old render as current evidence.
 Immutable `rr_<sha256>` reports live under `<runtimeDir>/render-reviews`.
-The current resolver accepts ordinary saved `r_...` editor/final-render artifacts.
-Pipeline-only `run_...` outputs need an equivalent immutable historical artifact
-record before this API can inspect them; today's package must not be substituted
-for their original render inputs.
+The resolver accepts ordinary saved `r_...` editor/final-render artifacts and
+completed legacy `run_...` deliveries with intact historical `render-input.json`,
+run state and an existing trusted render receipt. The read-only legacy resolver
+checks actual completion/settlement, canonical package/timeline/source hashes,
+render identity and MP4 bytes. It binds both original JSON records into the review
+hash. It never creates a replacement receipt, registers an alias as a fresh
+render, invents historical preflight or substitutes today's package for original
+render inputs. New repair exports must still return ordinary `r_...` artifacts.
 
 The inspector decodes/counts video frames with ffprobe and checks duration, frame
 rate, resolution, required audio streams and **each required native H3 scene's**

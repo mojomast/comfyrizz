@@ -11,6 +11,7 @@ const clone = value => structuredClone(value);
 const safe = value => typeof value === 'string' && /^[A-Za-z0-9_-]{1,128}$/.test(value);
 const repairIdOK = value => typeof value === 'string' && /^repair_[A-Za-z0-9_-]{1,96}$/.test(value);
 const renderIdOK = value => typeof value === 'string' && /^r_[a-f0-9]{12}$/.test(value);
+const inspectionIdOK = value => typeof value === 'string' && /^(?:r|run)_[a-f0-9]{12}$/.test(value);
 const hashOK = value => typeof value === 'string' && /^[a-f0-9]{64}$/.test(value);
 const timingChecks = new Set(['detected_speech_coverage', 'speech_transition_overlap']);
 const textCheck = finding => finding.check === 'asr_text_comparison';
@@ -26,7 +27,7 @@ function validateInput(input) {
     || Object.keys(input).length !== fields.length || fields.some(field => !Object.hasOwn(input, field))
     || !repairIdOK(input.repairId) || !safe(input.packageId) || !safe(input.conversationId)
     || !Number.isSafeInteger(input.expectedRevision) || input.expectedRevision < 0
-    || !renderIdOK(input.renderId) || ![1, 2].includes(input.maxRepairs)) {
+    || !inspectionIdOK(input.renderId) || ![1, 2].includes(input.maxRepairs)) {
     throw issue('SELF_REPAIR_INVALID', 'Supply exactly repairId, packageId, expectedRevision, renderId, conversationId and maxRepairs (1 or 2).', 422);
   }
   return clone(input);
