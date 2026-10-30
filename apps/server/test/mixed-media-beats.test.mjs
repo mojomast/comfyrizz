@@ -47,8 +47,20 @@ async function spoon() {
     pkg.scenes[i].transitionOut = scene.transitionOut ?? { type: 'cut', frames: 0 };
   });
   pkg.duration = { mode: 'target', targetFrames: 900, exact: true };
+  pkg.scenes[3].lower_third = { text: 'CASE CLOSED.', start_frame: 75, position: 'bottom' };
   return pkg;
 }
+
+test('after-admission overlay must follow measured speech and leave a readable hold', async () => {
+  const pkg = await spoon();
+  const contract = orderedBeatContract(SPOON_BRIEF);
+  assert.deepEqual(mixedMediaBeatProblems(pkg, contract), []);
+  for (const patch of [{ start_frame: 8 }, { start_frame: 150 }, { position: 'top' }, { text: 'EXTRA' }]) {
+    const bad = structuredClone(pkg);
+    Object.assign(bad.scenes[3].lower_third, patch);
+    assert.ok(mixedMediaBeatProblems(bad, contract).some(message => /after the spoken admission/.test(message)));
+  }
+});
 
 test('frozen Spoon brief is byte-identical and binds only ordinal beat 3 to the exact native panel labels', () => {
   assert.equal(createHash('sha256').update(SPOON_BRIEF).digest('hex'), 'e68c759dc728dbff64ff4e7adc60941136a88fbfc87d1fc123e41f47fc10b573');

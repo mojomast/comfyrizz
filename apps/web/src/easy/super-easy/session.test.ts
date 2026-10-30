@@ -15,6 +15,51 @@ import { createEasyStore, planInputsHash } from '../store.ts';
 
 const PRODUCTION_ID = 'prod_0123456789abcdef01234567';
 
+test('cold proposal reload restores reviewed revision and original revision notes without running or approving', async () => {
+  const first = returnedProposalHarness();
+  await first.session.generate(first.input);
+  first.store.patch({ builtPackageInputsHash: planInputsHash(first.store.get()) });
+  const stored = JSON.stringify(first.store.get());
+  const store = createEasyStore({ key: 'test', storage: { getItem: () => stored, setItem() {}, removeItem() {} } });
+  let pkg = first.pkg, runs = 0;
+  const session = createSuperEasySession({ store, go() {},
+    api: { getPackage: async () => ({ package: pkg }) },
+    host: { getPackage: () => pkg, adoptBuiltPackage: body => { pkg = body.package; }, editorStore: {} },
+    run: async input => { runs++; assert.equal(input.reviewedPackageRevision, 6); assert.deepEqual(input.revisionNotes, first.input.revisionNotes); return { ok: false, stage: 'compute', code: 'GOOGLE_COLAB_CONFIRM_REQUIRED', message: 'test boundary' }; },
+  });
+  await session.restoreProposal();
+  assert.equal(runs, 0);
+  assert.equal(session.phase(), 'proposal');
+  assert.equal(session.proposal().reviewedPackageRevision, 6);
+  assert.equal(session.proposal().basePrompt, first.input.basePrompt);
+  assert.deepEqual(session.proposal().revisionNotes, first.input.revisionNotes);
+  await session.approveProposal();
+  assert.equal(runs, 1, 'only the explicit Make this film gesture runs');
+  assert.equal(store.get().proposalCheckpoint, null);
+});
+
+test('cold proposal checkpoints reject newer edits, changed inputs and existing production authority', async () => {
+  for (const change of ['revision', 'inputs', 'production', 'late']) {
+    const first = returnedProposalHarness();
+    await first.session.generate(first.input);
+    first.store.patch({ builtPackageInputsHash: planInputsHash(first.store.get()) });
+    const store = first.store;
+    if (change === 'inputs') store.patch({ idea: { ...store.get().idea, text: 'another idea' } });
+    if (change === 'production') store.patch({ productionId: PRODUCTION_ID });
+    let release;
+    const session = createSuperEasySession({ store, go() {}, host: {},
+      api: { getPackage: async () => {
+        if (change === 'late') await new Promise(resolve => { release = resolve; });
+        return { package: { ...first.pkg, revision: change === 'revision' ? 7 : 6 } };
+      } }, run: () => { throw Error('Must not run'); },
+    });
+    const restored = session.restoreProposal();
+    if (change === 'late') { session.stop(); release(); }
+    await restored;
+    assert.equal(session.proposal(), null, change);
+  }
+});
+
 function returnedProposalHarness() {
   const store = createEasyStore({ storage: { getItem: () => null, setItem() {}, removeItem() {} } });
   let pkg = { id: 'pkg_return', revision: 6, title: 'MORNING STILL', format: { fps: 30 },

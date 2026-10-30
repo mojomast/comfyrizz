@@ -1,7 +1,7 @@
 // GENERATED FILE - do not edit by hand.
 //
 // Source:        packages/schema/package-v1.schema.json
-// Schema sha256: e4a04c57efb92f82b4faad72958ba4f58bf9bfe4e6e74e1a26d5edd4752e0445
+// Schema sha256: 715eadc7ec2bffddf2c5e6f73ef965438a86057340a9661e105084f942694c3d
 // Generator:     packages/schema/scripts/gen-types.mjs (v1.0.0)
 //
 // Regenerate: pnpm --filter @comfyrizz/schema gen:types
@@ -833,6 +833,15 @@ export interface Scene {
    * copy: too long is a visible fail state, never silent clipping.
    */
   lower_third?: {
+    /**
+     * Scene-local frame at which the overlay entrance starts; omitted uses the legacy frame 8.
+     * [min 0, max 7200]
+     */
+    start_frame?: number;
+    /**
+     * Bottom keeps a performance's face clear; omitted preserves the legacy top placement.
+     */
+    position?: "top" | "bottom";
     kicker?: string;
     text: string;
     };

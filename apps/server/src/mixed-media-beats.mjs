@@ -71,7 +71,17 @@ export function mixedMediaBeatProblems(pkg, contract) {
       && video.gen.direction?.dialogue?.text === beat.dialogue
       && video.gen.direction.dialogue.conditioningText === beat.dialogue
       && pkg.assets?.[video.gen.inputs?.audio]?.gen?.inputs?.text === beat.dialogue);
-    return exact ? [] : [`${scene.id}: beat ${beat.index + 1} requires native H3 speech with exact dialogue and measured conditioning for ${JSON.stringify(beat.dialogue)}; a wordless performance, detached narration or LTX substitute does not satisfy this beat.`];
+    if (!exact) return [`${scene.id}: beat ${beat.index + 1} requires native H3 speech with exact dialogue and measured conditioning for ${JSON.stringify(beat.dialogue)}; a wordless performance, detached narration or LTX substitute does not satisfy this beat.`];
+    const afterSpeech = /\bOverlay\s+only\s+(.{1,120}?)\s+after\s+the\s+(?:admission|dialogue|line)\b/i.exec(beat.clause);
+    if (!afterSpeech) return [];
+    const speech = videos.find(video => video?.gen?.direction?.dialogue?.text === beat.dialogue);
+    const seconds = Number(pkg.assets?.[speech?.gen?.inputs?.audio]?.media?.durationSeconds);
+    const start = Math.ceil((seconds + 0.5) * Number(pkg.format?.fps));
+    const overlay = scene.lower_third;
+    if (Number.isFinite(start) && overlay?.text === afterSpeech[1].trim()
+      && overlay.start_frame >= start && overlay.start_frame + 40 < scene.preferredFrames
+      && overlay.position === 'bottom') return [];
+    return [`${scene.id}: the brief requires ${JSON.stringify(afterSpeech[1].trim())} only after the spoken admission. Use lower_third with that exact text, start_frame at least ${start} (measured speech plus a half-second pause at package fps), position:"bottom", and leave at least 40 readable frames before the shot ends. Remove duplicate layout copy; preserve native video and conditioning.`];
   });
 }
 

@@ -642,6 +642,7 @@ export function mountEasyStudio(root: HTMLElement, baseHost: EasyHost, deps: Eas
       },
     });
     if (store.get().productionId) refreshSuperEasySnapshot();
+    else if (store.get().proposalCheckpoint) void ensureSuperEasySession().restoreProposal?.();
   }
 
   /** More control lands on the existing studio; Review is the preview handoff. */

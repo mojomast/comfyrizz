@@ -28,3 +28,17 @@ test('finishing themes are deterministic, non-silent and genuinely distinct', ()
     assert.ok(wav.subarray(44).some(byte => byte !== 0));
   }
 });
+
+test('no-music finishing direction produces quiet foley and the requested final silence', () => {
+  const plan = 'Quiet office room tone, a faint metal teaspoon chime against the wooden table, a brief comic silence before the end; no music.';
+  const wav = Buffer.from(synthesizeFinishingWav(plan, 5, 0).wav);
+  const rms = (from: number, to: number) => {
+    let sum = 0;
+    for (let i = from * 24000; i < to * 24000; i++) sum += (wav.readInt16LE(44 + i * 2) / 32768) ** 2;
+    return Math.sqrt(sum / ((to - from) * 24000));
+  };
+  assert.ok(rms(1, 2) > 0, 'room tone is audible PCM');
+  assert.ok(rms(1, 2) < 0.02, 'no full-volume harmonic score');
+  assert.equal(rms(4.5, 5), 0, 'explicit comic silence is actually silent');
+  assert.notEqual(digest(wav), digest(synthesizeFinishingWav(plan.replace('no music', 'instrumental music'), 5, 0).wav));
+});

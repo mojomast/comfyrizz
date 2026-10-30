@@ -36,7 +36,7 @@ writeFileSync(join(out, 'narration.raw.wav'), wav);
   const imageResults = request => request.messages.filter(message => message.role === 'tool').map(message => JSON.parse(message.content))
     .map(body => body.result ?? body).filter(body => body.asset?.kind === 'image').map(body => body.asset.id);
   const provider = await replayProvider([
-    { name: 'storyboard.propose', args: { brief: SPOON_BRIEF, title: 'THE SPOON FILES', proposal: SPOON_PROPOSAL, scenes: spoonScenes() } },
+    { name: 'storyboard.propose', args: { brief: SPOON_BRIEF, title: 'THE SPOON FILES', proposal: SPOON_PROPOSAL, scenes: spoonScenes().map((scene, index) => index === 3 ? { ...scene, lower_third: { text: 'CASE CLOSED.', start_frame: 75, position: 'bottom' } } : scene) } },
     ...['Fictional office investigator with round glasses and navy cardigan at the break-room table.', 'Open cutlery drawer with one lonely fork and empty spoon-shaped gap.', 'Empty office dishwasher, door open and bare racks.', 'Completely ordinary potted fern in a terracotta pot.', 'Macro silver teaspoon on the break-room table.'].map((subject, i) => ({
       name: 'assets.generate_image', args: { scene_id: SPOON_IDS[[0, 1, 2, 2, 4][i]], intent: subject, placement: 'conditioning', ...(i === 2 || i === 3 ? { aspect: 'panel' } : {}) },
     })),

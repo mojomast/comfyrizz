@@ -59,6 +59,7 @@ export interface SuperEasySession {
   reviseNarration(): Promise<SuperEasyRunResult | null>;
   restoreNarrationFailure(input: RunSuperEasyInput, restoredFailure: SuperEasyRunFailure): void;
   restoreFinalVideo?(snapshot: unknown): Promise<void>;
+  restoreProposal?(): Promise<void>;
   stop(): void;
   status(): EasyState['generate']['status'];
   snapshot(): unknown;
@@ -291,6 +292,7 @@ export function createSuperEasySession(options: SuperEasySessionOptions): SuperE
       ...(input.recoveryProductionId === undefined ? {} : { recoveryProductionId: input.recoveryProductionId }),
     };
     lastInput = nextInput;
+    options.store.patch({ proposalCheckpoint: null });
     const ticket = ++epoch;
     recoveryOffer = null;
     recoveryContext = null;
@@ -369,6 +371,7 @@ export function createSuperEasySession(options: SuperEasySessionOptions): SuperE
       }
       snapshot = null;
       phase = 'proposal';
+      saveProposalCheckpoint();
       publish();
       options.onProposal?.(proposal);
       return result;
@@ -434,6 +437,7 @@ export function createSuperEasySession(options: SuperEasySessionOptions): SuperE
     }
     proposal = next;
     reviewedPackage = structuredClone(pkg);
+    saveProposalCheckpoint();
     publish();
     options.onProposal?.(proposal);
     return 'refreshed';
@@ -468,6 +472,7 @@ export function createSuperEasySession(options: SuperEasySessionOptions): SuperE
       basePrompt: proposal.basePrompt,
       revisionNotes: proposal.revisionNotes,
     };
+    options.store.patch({ proposalCheckpoint: null });
     proposal = null;
     status = 'idle';
     return generate(next);
@@ -520,6 +525,35 @@ export function createSuperEasySession(options: SuperEasySessionOptions): SuperE
     phase = 'run';
     patchStatus('error');
     publish();
+  }
+
+  function saveProposalCheckpoint(): void {
+    const state = options.store.get();
+    if (!proposal?.packageId || !Number.isSafeInteger(proposal.reviewedPackageRevision)) return;
+    options.store.patch({ proposalCheckpoint: { packageId: proposal.packageId, revision: proposal.reviewedPackageRevision!,
+      inputsHash: planInputsHash(state), basePrompt: proposal.basePrompt, revisionNotes: [...proposal.revisionNotes],
+      deepSeekNoThinking: lastInput?.deepSeekNoThinking === true } });
+  }
+
+  async function restoreProposal(): Promise<void> {
+    const state = options.store.get(), saved = state.proposalCheckpoint;
+    if (status !== 'idle' || phase !== 'idle' || stopped || !saved || !options.api.getPackage
+      || state.productionId || state.packageId !== saved.packageId
+      || state.builtPackageInputsHash !== saved.inputsHash || planInputsHash(state) !== saved.inputsHash) return;
+    const ticket = ++epoch;
+    const body = await options.api.getPackage(saved.packageId).catch(() => null);
+    const pkg = body?.package ?? body;
+    const current = options.store.get();
+    if (stopped || ticket !== epoch || current.productionId || current.packageId !== saved.packageId
+      || planInputsHash(current) !== saved.inputsHash || pkg?.id !== saved.packageId || pkg.revision !== saved.revision) return;
+    options.host.adoptBuiltPackage(body);
+    reviewedPackage = structuredClone(pkg);
+    proposal = { ...proposalForPackage(pkg, saved.basePrompt, saved.revisionNotes), motionModel: state.motionModel ?? 'auto' };
+    lastInput = withLiveInputs({ prompt: state.idea.text, basePrompt: saved.basePrompt, revisionNotes: saved.revisionNotes,
+      proposalOnly: true, setupConfirmed: true, deepSeekNoThinking: saved.deepSeekNoThinking });
+    phase = 'proposal';
+    publish();
+    options.onProposal?.(proposal);
   }
 
   async function restoreFinalVideo(serverSnapshot: unknown): Promise<void> {
@@ -599,6 +633,7 @@ export function createSuperEasySession(options: SuperEasySessionOptions): SuperE
     reviseNarration,
     restoreNarrationFailure,
     restoreFinalVideo,
+    restoreProposal,
     stop,
     status: () => status,
     snapshot: () => snapshot,
