@@ -188,6 +188,8 @@ export function applyPlanningTimingRepair(pkg, args, { brief, requestedSeconds }
     const max = Math.max(LAYOUT_LIMITS[scene.layout]?.max ?? 600, scene.narration_duration_frames ?? 0);
     if (entry.preferredFrames > max) throw new Error(`${scene.id}: scene window exceeds its compiler layout limit ${max}.`);
     const outgoing = entry.transitionOutFrames;
+    if (Number.isSafeInteger(scene.lower_third?.start_frame)
+      && entry.preferredFrames < scene.lower_third.start_frame + 40 + outgoing) throw new Error(`${scene.id}: preserve the delayed lower-third entrance and readable hold before the outgoing overlap.`);
     if (entry.preferredFrames < readingFloor(scene, pkg, policy.readingSeconds) + outgoing) throw new Error(`${scene.id}: preserve the brief's fully settled reading hold plus outgoing overlap.`);
     const narration = pkg.assets?.[scene.narration_asset];
     if (scene.narration && !(narration?.media?.durationSeconds > 0) && !scene.narration_duration_frames && entry.preferredFrames < original.preferredFrames) throw new Error(`${scene.id}: unmeasured narration cannot be shortened by timing repair.`);
@@ -214,6 +216,55 @@ export function applyPlanningTimingRepair(pkg, args, { brief, requestedSeconds }
   return { package: next, timeline };
 }
 
+/** Read-only arithmetic aid. A model must explicitly submit it through the same
+ * atomic validation tool; this never retimes a package or authorizes work. */
+export function suggestPlanningTiming(pkg, { brief, requestedSeconds } = {}) {
+  if (!pkg?.duration?.exact || briefTiming(brief, requestedSeconds).authored
+    || pkg.scenes.some(scene => scene.locked || scene.drawing || scene.composition || scene.audio_trim)) return null;
+  const policy = briefTiming(brief, requestedSeconds);
+  const ranges = pkg.scenes.map((scene, index) => {
+    const outgoing = index < pkg.scenes.length - 1 ? overlapFrames(scene) : 0;
+    let min = Math.max(LAYOUT_LIMITS[scene.layout]?.min ?? 45,
+      readingFloor(scene, pkg, policy.readingSeconds) + outgoing,
+      Number.isSafeInteger(scene.lower_third?.start_frame) ? scene.lower_third.start_frame + 40 + outgoing : 0,
+      scene.narration_duration_frames ?? 0);
+    let max = Math.max(LAYOUT_LIMITS[scene.layout]?.max ?? 600, scene.narration_duration_frames ?? 0);
+    const narration = pkg.assets?.[scene.narration_asset];
+    if (narration?.media?.durationSeconds > 0) min = Math.max(min, Math.ceil(narration.media.durationSeconds * pkg.format.fps) + outgoing);
+    else if (scene.narration) min = Math.max(min, scene.preferredFrames);
+    for (const plate of [...sceneShotPlates(scene), ...(scene.foreground ?? [])]) {
+      const coverage = videoCoverageFrames(pkg, plate);
+      if (coverage !== null) max = Math.min(max, coverage);
+      const video = pkg.assets?.[plate.asset];
+      if (video?.gen?.direction?.dialogue) {
+        const measured = Number(pkg.assets?.[video.gen.inputs?.audio]?.media?.durationSeconds);
+        if (!(measured > 0)) return null;
+        min = Math.max(min, Math.ceil((measured + 0.2) * pkg.format.fps) + outgoing);
+      }
+    }
+    return { min, max, outgoing };
+  });
+  if (ranges.some(range => !range || !Number.isFinite(range.min) || range.min > range.max)) return null;
+  const scenes = pkg.scenes.map((scene, i) => ({ scene_id: scene.id,
+    preferredFrames: Math.max(ranges[i].min, Math.min(ranges[i].max, scene.preferredFrames)), transitionOutFrames: ranges[i].outgoing }));
+  let delta = pkg.duration.targetFrames - scenes.reduce((sum, scene) => sum + scene.preferredFrames - scene.transitionOutFrames, 0);
+  if (!Number.isSafeInteger(delta) || Math.abs(delta) > 7200) return null;
+  while (delta !== 0) {
+    let changed = false;
+    for (const [i, scene] of scenes.entries()) {
+      const step = Math.sign(delta);
+      if (!step) break;
+      if (scene.preferredFrames + step < ranges[i].min || scene.preferredFrames + step > ranges[i].max) continue;
+      scene.preferredFrames += step;
+      delta -= step;
+      changed = true;
+    }
+    if (!changed) return null;
+  }
+  try { applyPlanningTimingRepair(pkg, { scenes }, { brief, requestedSeconds }); return { scenes }; }
+  catch { return null; }
+}
+
 /** One bounded provider-led atomic correction, before a proposal can be saved. */
 export async function repairPlanningTiming(pkg, { model, brief, requestedSeconds, signal, sessionId, onEvent }) {
   if (!model || !pkg?.duration?.exact || !planningTimingFacts(pkg).error) return { package: pkg };
@@ -229,7 +280,8 @@ export async function repairPlanningTiming(pkg, { model, brief, requestedSeconds
       },
     } };
   const system = `Repair only the supplied exact timeline. ${EXACT_PLANNING_GUIDANCE} Use ${TIMING_REPAIR_TOOL} once with all scene windows and outgoing overlap frames, then stop. The tool commits atomically only after coverage, measured speech, schema and exact compiler checks pass. Preserve all user-required timings; if incompatible explain the conflict instead of rewriting them. Do not invent sources or claim footage was generated.`;
-  const instruction = `${brief}\n\n${planningTimingGuide(pkg).join('\n')}\nExisting authored scenes (data): ${JSON.stringify(pkg.scenes)}`;
+  const suggestion = suggestPlanningTiming(pkg, { brief, requestedSeconds });
+  const instruction = `${brief}\n\n${planningTimingGuide(pkg).join('\n')}\nExisting authored scenes (data): ${JSON.stringify(pkg.scenes)}${suggestion ? `\nRead-only, source-checked arithmetic suggestion: ${JSON.stringify(suggestion)}. It already passes the exact duration, coverage, speech, schema and compiler checks. Review against the brief and explicitly submit these arguments through ${TIMING_REPAIR_TOOL} if appropriate; nothing has been changed yet.` : ''}`;
   let turns = 0;
   const run = confirmation => {
     const offset = turns;

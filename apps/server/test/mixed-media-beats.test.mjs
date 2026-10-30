@@ -7,7 +7,7 @@ import { validatePackage } from '../../../packages/schema/src/index.mjs';
 import { planJobs } from '../../../packages/jobs/src/index.mjs';
 import { generatedFilmCompletionProblems, repairPackageFacts } from '../src/agent-runner.mjs';
 import { orderedBeatContract, mixedMediaBeatProblems } from '../src/mixed-media-beats.mjs';
-import { applyPlanningTimingRepair, planningTimingFacts, repairPlanningTiming, TIMING_REPAIR_TOOL } from '../src/planning-timing-repair.mjs';
+import { applyPlanningTimingRepair, planningTimingFacts, repairPlanningTiming, suggestPlanningTiming, TIMING_REPAIR_TOOL } from '../src/planning-timing-repair.mjs';
 import { SPOON_BRIEF, SPOON_IDS, SPOON_LABELS, SPOON_LINES, SPOON_PROPOSAL, spoonScenes, SPOON_TIMING } from './fixtures/spoon-files.mjs';
 
 // This fixture isolates server completion/timing from the separately owned audio
@@ -60,6 +60,29 @@ test('after-admission overlay must follow measured speech and leave a readable h
     Object.assign(bad.scenes[3].lower_third, patch);
     assert.ok(mixedMediaBeatProblems(bad, contract).some(message => /after the spoken admission/.test(message)));
   }
+});
+
+test('arithmetic suggestion is read-only, exact, source-bounded and preserves delayed copy', async () => {
+  const pkg = await spoon();
+  [220, 190, 200, 208, 158].forEach((frames, i) => {
+    pkg.scenes[i].preferredFrames = frames;
+    pkg.scenes[i].transitionOut = { type: i === 4 ? 'cut' : 'fade', frames: [10, 8, 10, 10, 0][i] };
+  });
+  const before = structuredClone(pkg);
+  const options = { brief: SPOON_BRIEF, requestedSeconds: 30 };
+  const suggestion = suggestPlanningTiming(pkg, options);
+  assert.ok(suggestion);
+  assert.deepEqual(pkg, before, 'a suggestion cannot author or approve anything');
+  const result = applyPlanningTimingRepair(pkg, suggestion, options);
+  assert.equal(result.timeline.durationInFrames, 900);
+  assert.deepEqual(result.package.assets, before.assets);
+  assert.deepEqual(mixedMediaBeatProblems(result.package, orderedBeatContract(SPOON_BRIEF)), []);
+  assert.equal(suggestPlanningTiming(pkg, { ...options, brief: SPOON_BRIEF + ' Beat 1 lasts exactly 6 seconds.' }), null);
+  pkg.scenes[0].locked = true;
+  assert.equal(suggestPlanningTiming(pkg, options), null);
+  delete pkg.scenes[0].locked;
+  pkg.scenes[3].lower_third.start_frame = 500;
+  assert.equal(suggestPlanningTiming(pkg, options), null, 'cannot hide delayed text beyond source coverage');
 });
 
 test('frozen Spoon brief is byte-identical and binds only ordinal beat 3 to the exact native panel labels', () => {
