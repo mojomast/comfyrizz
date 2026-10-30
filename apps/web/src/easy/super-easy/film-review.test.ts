@@ -150,3 +150,123 @@ test('closing while status is in flight aborts local polling and cannot publish 
   assert.equal(changes, before);
   assert.equal(syncs, 0);
 });
+
+function followupHarness(patch = {}) {
+  const saved = { repairId: 'repair_first', target, maxRepairs: 1 };
+  const values = new Map([[`comfyrizz.film-repair.v1:${target.packageId}`, JSON.stringify(saved)]]);
+  const storage = { getItem: k => values.get(k) ?? null, setItem: (k, v) => values.set(k, v) };
+  const current = { ...target, expectedRevision: 5, renderId: 'r_111111111111' };
+  const fresh = { ...report, reviewId: `rr_${'c'.repeat(64)}`, packageRevision: 5,
+    artifact: { renderId: current.renderId, videoSha256: 'd'.repeat(64) } };
+  let old = { repairId: saved.repairId, input: { ...target, maxRepairs: 1, conversationId: 'chat_film' },
+    status: 'stopped', stage: 'inspect_render', currentRevision: 5, attempts: 1, renders: 1,
+    reports: [report], packageRoundsReserved: 1, effectUncertain: false, ...patch };
+  let next = null, live = true, conversationHook = () => {};
+  const calls = [];
+  const options = { packageId: target.packageId, storage, owner: true, target: () => current,
+    current: () => live, chatId: () => null, sync: async () => {}, changed() {},
+    fetch: async (path, init) => {
+      const body = init?.body ? JSON.parse(init.body) : null;
+      calls.push({ path, body });
+      if (path === '/api/render-reviews') return Response.json(fresh);
+      if (path === '/api/conversations') { await conversationHook(); return Response.json({ chatId: 'chat_film' }); }
+      if (path === '/api/self-repairs/repair_first') return old ? Response.json(old) : Response.json({ error: 'Missing operation' }, { status: 404 });
+      if (path === '/api/self-repairs') {
+        next = { ...old, repairId: body.repairId, input: body, packageRoundsReserved: 2, reports: [fresh] };
+        return Response.json(next);
+      }
+      return Response.json(next);
+    },
+  };
+  const controller = createFilmReview(options);
+  return { controller, options, current, fresh, saved, storage, calls,
+    changeRecord: value => { old = value; }, record: () => old,
+    onConversation: hook => { conversationHook = hook; }, leave: () => { live = false; } };
+}
+
+test('terminal first-round repair permits a fresh current-film review, retaining its saved attempt report', async () => {
+  const h = followupHarness(); await h.controller.refresh(); await h.controller.review();
+  assert.equal(h.controller.state().record.repairId, 'repair_first');
+  assert.equal(h.controller.state().report.artifact.renderId, h.current.renderId);
+  const html = filmReviewMarkup(h.controller.state());
+  assert.match(html, /Latest read-only review/);
+  assert.match(html, /Saved repair observations/);
+  assert.ok(html.includes(report.reviewId) && html.includes(h.fresh.reviewId));
+  assert.match(html, /1 package repair round remains/);
+  assert.doesNotMatch(html, /<option value="2">/);
+  assert.equal(h.calls.filter(c => c.path === '/api/self-repairs').length, 0);
+  h.controller.close();
+});
+
+test('a fresh explicitly authorized second round starts once and reload reads both saved operations without POST', async () => {
+  const h = followupHarness(); await h.controller.refresh(); await h.controller.review();
+  await h.controller.start(2, true);
+  assert.match(h.controller.state().error, /Only 1 repair round remains/);
+  await h.controller.start(1, false);
+  assert.equal(h.calls.filter(c => c.path === '/api/self-repairs').length, 0);
+  await Promise.all([h.controller.start(1, true), h.controller.start(1, true)]);
+  const posts = h.calls.filter(c => c.path === '/api/self-repairs');
+  assert.equal(posts.length, 1);
+  assert.equal(posts[0].body.maxRepairs, 1);
+  assert.equal(posts[0].body.expectedRevision, 5);
+  assert.equal(posts[0].body.renderId, h.current.renderId);
+  assert.notEqual(posts[0].body.repairId, h.saved.repairId);
+  const persisted = readFilmRepair(h.storage, target.packageId);
+  assert.equal(persisted.repairId, posts[0].body.repairId);
+  assert.deepEqual(persisted.previous, [h.saved]);
+  assert.match(filmReviewMarkup(h.controller.state()), /Earlier repair: <code>repair_first/);
+  h.controller.close();
+  const reopened = createFilmReview(h.options); await reopened.refresh();
+  assert.equal(reopened.state().previousRecords[0].repairId, 'repair_first');
+  await reopened.start(1, true);
+  assert.equal(h.calls.filter(c => c.path === '/api/self-repairs').length, 1);
+  reopened.close();
+});
+
+test('spent or unknown budget, running/interrupted/abandoned/uncertain work and newer revisions cannot mint another ID', async () => {
+  for (const patch of [
+    { packageRoundsReserved: 2 }, { packageRoundsReserved: undefined }, { packageRoundsReserved: '1' },
+    { status: 'running' }, { status: 'interrupted' }, { status: 'abandoned' },
+    { effectUncertain: true }, { effectUncertain: undefined }, { currentRevision: 6 },
+  ]) {
+    const h = followupHarness(patch);
+    await h.controller.refresh(); await h.controller.review(); await h.controller.start(1, true);
+    assert.equal(h.calls.filter(c => c.path === '/api/self-repairs').length, 0, JSON.stringify(patch));
+    assert.equal(readFilmRepair(h.storage, target.packageId).repairId, 'repair_first');
+    assert.equal(h.controller.state().report.reviewId, h.fresh.reviewId, 'read-only review stays available');
+    h.controller.close();
+  }
+});
+
+test('a previously cached terminal record cannot authorize after a failed or changed authoritative status read', async () => {
+  for (const missing of [true, false]) {
+    const h = followupHarness(); await h.controller.refresh(); await h.controller.review();
+    h.changeRecord(missing ? null : { ...h.record(), status: 'running' });
+    await h.controller.start(1, true);
+    assert.equal(h.calls.filter(c => c.path === '/api/self-repairs').length, 0);
+    assert.equal(readFilmRepair(h.storage, target.packageId).repairId, 'repair_first');
+    h.controller.close();
+  }
+});
+
+test('another tab replacing the stored ID cannot be overwritten by a pending new-start gesture', async () => {
+  const h = followupHarness(); await h.controller.refresh(); await h.controller.review();
+  const newer = { ...h.saved, repairId: 'repair_other_tab' };
+  h.onConversation(() => h.storage.setItem(`comfyrizz.film-repair.v1:${target.packageId}`, JSON.stringify(newer)));
+  await h.controller.start(1, true);
+  assert.match(h.controller.state().error, /changed in another tab/);
+  assert.deepEqual(readFilmRepair(h.storage, target.packageId), newer);
+  assert.equal(h.calls.filter(c => c.path === '/api/self-repairs').length, 0);
+  h.controller.close();
+});
+
+test('closing or changing current film during explicit follow-up preparation cannot reserve or start a new repair', async () => {
+  for (const close of [true, false]) {
+    const h = followupHarness(); await h.controller.refresh(); await h.controller.review();
+    h.onConversation(() => { if (close) h.controller.close(); else h.current.expectedRevision = 6; });
+    await h.controller.start(1, true);
+    assert.equal(h.calls.filter(c => c.path === '/api/self-repairs').length, 0);
+    assert.equal(readFilmRepair(h.storage, target.packageId).repairId, 'repair_first');
+    h.controller.close();
+  }
+});
