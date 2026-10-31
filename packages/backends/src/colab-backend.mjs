@@ -350,6 +350,9 @@ export const NEW_WALL_MS = 300000;
  * be the VM an interrupted `colab new` created before it was named, and output with no rows and no
  * "No active sessions" line proves nothing, so both count as *not* gone.
  */
+/** A collected still is handed to the reference watch once per job *and* output digest (a regen keeps the job id). */
+export const previewKey = (entry) => `${entry?.job}:${entry?.outputs?.[0]?.sha256 ?? ""}`;
+
 export function sessionsCheck(found, session) {
   const rows = Array.isArray(found?.sessions) ? found.sessions : [];
   const ours = rows.some((entry) => entry.name === session);
@@ -1290,6 +1293,9 @@ export function createColabBackend({
       const refWatchQueue = [];
       let reviewChain = Promise.resolve();
       const previewedJobs = new Set();
+      // Keyed by job and output digest: a regen keeps the job id, and its new still must reach
+      // the watch again (Google Colab e2e 2026-10-30: two regenerated stills were never re-reviewed).
+
       // True while the zip on the VM is the plan that was uploaded for this run. A regen or a
       // partial video release replaces it; the next planned batch puts the plan back first.
       let jobsZipIsPlan = true;
@@ -1373,7 +1379,7 @@ export function createColabBackend({
             if (result.code !== 0) throw new Error('Live preview download unavailable; will retry');
           },
           onReady: (payload) => {
-            for (const entry of payload?.manifest?.jobs ?? []) if (entry?.job) previewedJobs.add(entry.job);
+            for (const entry of payload?.manifest?.jobs ?? []) if (entry?.job) previewedJobs.add(previewKey(entry));
             const event = { type: 'preview_ready', ...payload };
             emit(onEvent, event);
             queueReviewEvent(event);
@@ -1425,11 +1431,11 @@ export function createColabBackend({
         // reference watch from the verified collection, so the gate never waits on a lost preview.
         if (refWatchGate && collect.manifest && collect.local) {
           for (const entry of collect.manifest.jobs ?? []) {
-            if (!entry?.job || previewedJobs.has(entry.job)) continue;
+            if (!entry?.job || previewedJobs.has(previewKey(entry))) continue;
             if (entry.status !== "succeeded" && entry.status !== "cached") continue;
             const planned = doc.jobs.find((job) => job.id === entry.job);
             if (!planned || isVideoJob(planned)) continue;
-            previewedJobs.add(entry.job);
+            previewedJobs.add(previewKey(entry));
             const event = { type: "preview_ready", source: "collected", manifest: { ...collect.manifest, complete: false, jobs: [entry] }, outputDir: collect.local };
             emit(onEvent, event);
             queueReviewEvent(event);
