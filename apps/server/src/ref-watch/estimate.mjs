@@ -5,6 +5,11 @@ import {
 import { estimateIteration } from '../productions/iteration-estimate.mjs';
 import { ITERATION_PRESETS } from '../productions/iteration.mjs';
 
+// One still regen (Klein reprompt or a Qwen edit) on a VM that is already up: no allocation,
+// bootstrap or collect-and-stop reserve, which is what estimateIteration prices for a new session.
+export const LIVE_REGEN_MINUTES = Object.freeze({ low: 0.5, expected: 1, high: 2 });
+const LIVE_RATE_PER_HOUR = 10.05;
+
 const ESTIMATE_ACTIONS = new Set(['reprompt', 'replace_ref']);
 
 function capReason({ perStillOpen, productionOpen }) {
@@ -20,6 +25,8 @@ export function estimateRegen({
   stillCount,
   policy,
   iteration,
+  liveSession = false,
+  ratePerHour = LIVE_RATE_PER_HOUR,
 } = {}) {
   if (!decision || !ESTIMATE_ACTIONS.has(decision.action)) return null;
 
@@ -30,6 +37,16 @@ export function estimateRegen({
   const productionOpen = Number.isSafeInteger(regenJobsUsed)
     && regenJobsUsed + 1 <= productionCap;
   const blocked = !perStillOpen || !productionOpen;
+
+  if (liveSession) {
+    const units = Object.fromEntries(Object.entries(LIVE_REGEN_MINUTES).map(([key, minutes]) => [key, Math.round(minutes * ratePerHour / 60 * 1000) / 1000]));
+    return {
+      label: 'one still regen on the live Google Colab session',
+      units,
+      blocked,
+      reason: blocked ? capReason({ perStillOpen, productionOpen }) : 'within regen caps',
+    };
+  }
 
   const estimate = estimateIteration({
     ...(iteration ?? {}),

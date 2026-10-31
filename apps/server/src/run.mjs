@@ -93,6 +93,8 @@ export function createRefWatchGate({ refWatch = false, env = process.env } = {})
       onEvent: context.onEvent,
       submitJobs: context.submitJobs,
       receiptsDir: context.receiptsDir,
+      liveSession: config.liveSession ?? context.liveSession === true,
+      regenBudgetUnits: config.regenBudgetUnits ?? context.regenBudgetUnits,
       reviewer,
     });
   };

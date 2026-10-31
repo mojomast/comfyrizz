@@ -1299,6 +1299,9 @@ export function createColabBackend({
           onEvent,
           receiptsDir: join(scratch, "receipts"),
           submitJobs: async (payload) => { refWatchQueue.push(payload); },
+          // Regens run on this VM while it is up; a fifth of the run budget is theirs to spend.
+          liveSession: true,
+          regenBudgetUnits: Number(budgetUnits) > 0 ? Number(budgetUnits) * 0.2 : undefined,
         };
         refWatchGate = typeof refWatch === "function" ? await refWatch(watchContext) : refWatch;
       }

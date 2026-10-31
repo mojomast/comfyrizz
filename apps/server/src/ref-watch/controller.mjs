@@ -128,6 +128,8 @@ export function createRefWatchController({
   extractLastFrame,
   reviewKeyframe,
   planChained = planChainedShot,
+  liveSession = false,
+  regenBudgetUnits,
 } = {}) {
   if (!isObject(jobsDoc)) throw new TypeError('createRefWatchController requires a jobsDoc object');
   if (typeof submitJobs !== 'function') throw new TypeError('createRefWatchController requires submitJobs');
@@ -137,6 +139,18 @@ export function createRefWatchController({
   const productionId = jobsDoc.productionId ?? jobsDoc.packageId ?? null;
   const runId = typeof jobsDoc.runId === 'string' && jobsDoc.runId ? jobsDoc.runId : 'run';
   const caps = { ...REF_POLICY_DEFAULTS, ...(policy ?? {}) };
+  // A package run on a live Google Colab session has no production budget ledger, so every regen
+  // used to escalate. A caller-given regen allowance stands in for it.
+  if (!budgetLedger && Number.isFinite(regenBudgetUnits) && regenBudgetUnits >= 0) {
+    let reserved = 0;
+    budgetLedger = {
+      status: () => ({ capped: true, available: Math.max(0, regenBudgetUnits - reserved) }),
+      reserve: ({ upperBound }) => {
+        if (upperBound > regenBudgetUnits - reserved + 1e-9) throw Object.assign(new Error('regen allowance exceeded'), { code: 'BUDGET_EXCEEDED' });
+        reserved += upperBound;
+      },
+    };
+  }
   const stillJobs = jobs.filter(isStill);
   const titleCards = Array.isArray(jobsDoc.titleCards) ? jobsDoc.titleCards.filter(isObject) : [];
   const stillIds = new Set(stillJobs.map((job) => job.id));
@@ -221,6 +235,7 @@ export function createRefWatchController({
   }
 
   function failClosed(seed, reason, verdicts = []) {
+    skipShotsFor(seed.jobId, seed.keyframeSha256, redact(reason));
     const record = ensure(seed.jobId);
     record.state = 'held';
     const decision = {
@@ -248,7 +263,21 @@ export function createRefWatchController({
     });
   }
 
+  // A held still skips the shots it feeds, so the rest of the sequence still renders (the next
+  // chained shot falls back to its own keyframe). Before this, one escalation parked every later
+  // same-scene plate until teardown (Google Colab e2e 2026-10-30).
+  function skipShotsFor(stillId, keyframeSha256, reason) {
+    for (const video of gatedVideos) {
+      if (submittedVideos.has(video.id) || refusedVideos.has(video.id)) continue;
+      if (!keyframeDeps(video).includes(stillId)) continue;
+      refusedVideos.add(video.id);
+      deferredVideos.delete(video.id);
+      emit({ type: 'ref_gate_held', jobId: video.id, keyframeSha256, state: 'skipped', skipped: { stillJobId: stillId, reason } });
+    }
+  }
+
   function holdDecision(seed, decision, verdicts) {
+    skipShotsFor(seed.jobId, seed.keyframeSha256, decision?.reason ?? 'still held');
     const record = ensure(seed.jobId);
     record.state = 'held';
     persist(seed.keyframeSha256, verdicts, decision);
@@ -362,6 +391,15 @@ export function createRefWatchController({
         next.chainFromPrevious = chained;
         if (chained) {
           const previousLive = isObject(previous) ? (live.get(previous.id) ?? previous) : null;
+          if (previousLive && refusedVideos.has(previous.id)) {
+            next.chainFallback = 'keyframe';
+            next.chainFallbackReason = 'the previous shot was skipped';
+            emitChainPlanned(video, true, 'keyframe', next.chainFallbackReason);
+            deferredVideos.delete(video.id);
+            ready.push(next);
+            submittedVideos.add(video.id);
+            continue;
+          }
           if (previousLive && previousLive.status !== 'accepted') {
             deferredVideos.add(video.id);
             continue;
@@ -624,6 +662,7 @@ export function createRefWatchController({
             stillCount,
             policy: caps,
             iteration,
+            liveSession,
           });
         } catch (error) {
           failClosed(seed, error?.message ?? 'regen estimate failed', verdicts);
@@ -841,7 +880,7 @@ export function createRefWatchController({
   }
 
   function handle(event) {
-    const run = chain.then(() => handleUnlocked(event));
+    const run = chain.then(() => handleUnlocked(event)).then(async (value) => { await maybeReleaseVideos(); return value; });
     chain = run.then(() => {}, () => {});
     return run;
   }
