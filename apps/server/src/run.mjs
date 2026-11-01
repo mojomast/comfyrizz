@@ -95,6 +95,11 @@ export function createRefWatchGate({ refWatch = false, env = process.env } = {})
       receiptsDir: context.receiptsDir,
       liveSession: config.liveSession ?? context.liveSession === true,
       regenBudgetUnits: config.regenBudgetUnits ?? context.regenBudgetUnits,
+      // Production judge loop defaults (JUDGE_RESEARCH.md): concurrent reviews, a second opinion
+      // on a lone text/framing hard fail, and targeted edits unless the caller turns them off.
+      reviewConcurrency: config.reviewConcurrency ?? 4,
+      secondOpinion: config.secondOpinion ?? true,
+      targetedEdits: config.targetedEdits ?? context.targetedEdits ?? true,
       reviewer,
     });
   };

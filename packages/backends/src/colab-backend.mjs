@@ -425,6 +425,9 @@ export function createColabBackend({
   collectionRetryMs = 1000,
   // RW08: optional. Leave this unset and the Google Colab run executes its planned batches unchanged.
   refWatch = null,
+  // Judge loop: false skips the Qwen Image Edit download (~40 GB) and turns targeted_edit into a
+  // reprompted regen. COMFYRIZZ_REFWATCH_EDITS=0 sets it from the environment.
+  refWatchEdits = process.env.COMFYRIZZ_REFWATCH_EDITS !== '0',
 } = {}) {
   // PO-3 review: priced from the per-accelerator table for *this* gpu, never one global figure.
   ratePerHour = ratePerHour ?? resolveRatePerHour({ gpu });
@@ -441,7 +444,7 @@ export function createColabBackend({
   const logs = logDir || join(scratch, "logs");
   mkdirSync(scratch, { recursive: true });
   if (modelsLock === join(REPO, 'colab', 'models.lock.json')) {
-    modelsLock = packageModelLock({ packageDir, scratchDir: scratch, repo: REPO, defaultLock: modelsLock, refWatch: Boolean(refWatch) });
+    modelsLock = packageModelLock({ packageDir, scratchDir: scratch, repo: REPO, defaultLock: modelsLock, refWatch: Boolean(refWatch) && refWatchEdits !== false });
   }
   const registryFile = join(scratch, "sessions.json");
   // G4-2: a `pip install --user` CLI lives at ~/.local/bin/colab, which is not on the PATH the child
@@ -1307,6 +1310,7 @@ export function createColabBackend({
           submitJobs: async (payload) => { refWatchQueue.push(payload); },
           // Regens run on this VM while it is up; a fifth of the run budget is theirs to spend.
           liveSession: true,
+          targetedEdits: refWatchEdits !== false,
           regenBudgetUnits: Number(budgetUnits) > 0 ? Number(budgetUnits) * 0.2 : undefined,
         };
         refWatchGate = typeof refWatch === "function" ? await refWatch(watchContext) : refWatch;

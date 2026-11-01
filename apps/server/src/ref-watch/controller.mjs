@@ -20,7 +20,7 @@ import {
 import { TITLE_CARD_BATCH, titleCardJobs } from '../compositing/title-card.mjs';
 import { refuseStaleVideo } from '../productions/keyframe-staleness.mjs';
 import { chainDefaultFor, planChainedShot } from './chain.mjs';
-import { decide as decideDefault } from './decide.mjs';
+import { REF_UNTRUSTED_DIMENSIONS, decide as decideDefault } from './decide.mjs';
 import { EDIT_PLACEHOLDER, buildEditInstruction, fillEditDecision } from './edit-plan.mjs';
 import { estimateRegen } from './estimate.mjs';
 import * as steerDefault from './steer.mjs';
@@ -130,6 +130,13 @@ export function createRefWatchController({
   planChained = planChainedShot,
   liveSession = false,
   regenBudgetUnits,
+  // Judge loop (Nov 1 research, JUDGE_RESEARCH.md): reviews for one batch run concurrently (the
+  // GPU idles while the judge thinks), a lone hard fail on a high-variance dimension gets one
+  // second opinion before it holds a still, and targeted edits can be turned off so a run that
+  // cannot afford them skips the Qwen edit download.
+  reviewConcurrency = 1,
+  secondOpinion = false,
+  targetedEdits = true,
 } = {}) {
   if (!isObject(jobsDoc)) throw new TypeError('createRefWatchController requires a jobsDoc object');
   if (typeof submitJobs !== 'function') throw new TypeError('createRefWatchController requires submitJobs');
@@ -569,13 +576,36 @@ export function createRefWatchController({
     return edit;
   }
 
-  async function reviewSeed(seed) {
-    const record = ensure(seed.jobId);
-    if (record.state === 'held' || record.state === 'accepted' || record.state === 'overridden') return;
-    const job = live.get(seed.jobId);
-    if (!job) return;
-    record.state = 'reviewing';
+  const SECOND_OPINION_DIMENSIONS = new Set(['text_artifact', 'framing']);
+  const reviewCache = new Map();
+  function cachedReview(request, image, pass = 1) {
+    const key = `${request.keyframeSha256}:${request.attempt}:${pass}`;
+    if (!reviewCache.has(key)) {
+      const promise = callReviewer(request, image);
+      promise.catch(() => {});
+      reviewCache.set(key, promise);
+    }
+    return reviewCache.get(key);
+  }
 
+  function trustedHardFails(verdict) {
+    return (Array.isArray(verdict?.checks) ? verdict.checks : [])
+      .filter((check) => check?.pass === false && check.severity === 'hard' && !REF_UNTRUSTED_DIMENSIONS.includes(check.dimension));
+  }
+
+  // Merge a second opinion: a dimension the second review passes is downgraded to soft in the
+  // first verdict (the evidence says why); a dimension both reviews fail stays hard.
+  function mergeSecondOpinion(first, second) {
+    const passedAgain = new Set((second.checks ?? []).filter((check) => check.pass !== false || check.severity !== 'hard').map((check) => check.dimension));
+    const checks = first.checks.map((check) => {
+      if (check.pass !== false || check.severity !== 'hard' || !SECOND_OPINION_DIMENSIONS.has(check.dimension) || !passedAgain.has(check.dimension)) return check;
+      return { ...check, severity: 'soft', evidence: `${check.evidence} (second review passed this dimension)`.slice(0, 400) };
+    });
+    const stillHard = checks.some((check) => check.pass === false && check.severity === 'hard');
+    return { ...first, checks, overall: stillHard ? 'fail' : 'pass' };
+  }
+
+  async function buildRequest(seed, job, record) {
     const measured = typeof measure === 'function'
       ? await measure({ job, imagePath: seed.imageFile ?? seed.imagePath, attempt: record.attempt })
       : null;
@@ -598,6 +628,17 @@ export function createRefWatchController({
       attempt: record.attempt,
       characters,
     };
+    return { measured, request, characters };
+  }
+
+  async function reviewSeed(seed) {
+    const record = ensure(seed.jobId);
+    if (record.state === 'held' || record.state === 'accepted' || record.state === 'overridden') return;
+    const job = live.get(seed.jobId);
+    if (!job) return;
+    record.state = 'reviewing';
+
+    const { measured, request, characters } = await buildRequest(seed, job, record);
     if (!validateRefReviewRequest(request).ok) {
       failClosed(seed, 'review request was not valid');
       return;
@@ -621,7 +662,18 @@ export function createRefWatchController({
     if (!t0HardFail(t0Verdict)) {
       let reviewed;
       try {
-        reviewed = await callReviewer(request, { path: seed.imageFile ?? seed.imagePath, sha256: seed.keyframeSha256 });
+        const image = { path: seed.imageFile ?? seed.imagePath, sha256: seed.keyframeSha256 };
+        reviewed = await cachedReview(request, image);
+        const lone = trustedHardFails(reviewed);
+        if (secondOpinion && validateRefVerdict(reviewed).ok && reviewed.overall === 'fail'
+          && lone.length > 0 && lone.every((check) => SECOND_OPINION_DIMENSIONS.has(check.dimension))) {
+          const second = await cachedReview(request, image, 2).catch(() => null);
+          if (second && validateRefVerdict(second).ok && second.overall !== 'error') {
+            verdicts.push(reviewed);
+            emit({ type: 'ref_review_started', jobId: seed.jobId, keyframeSha256: seed.keyframeSha256, state: 'reviewing', secondOpinion: true });
+            reviewed = mergeSecondOpinion(reviewed, second);
+          }
+        }
       } catch (error) {
         const reason = error?.code === 'REVIEW_TIMEOUT' ? 'reviewer timed out' : (error?.message ?? 'reviewer failed');
         failClosed(seed, reason, [...verdicts, errorVerdict(seed)]);
@@ -646,6 +698,11 @@ export function createRefWatchController({
       editsTried: record.editsTried,
       policy: caps,
     });
+    if (!targetedEdits && decision?.action === 'targeted_edit') {
+      decision = { ...decision, action: 'reprompt', reason: `${decision.reason} (targeted edits off)`, nextPrompt: STEER_PLACEHOLDER };
+      delete decision.editInstruction;
+      delete decision.editDimension;
+    }
     if (!validateRefDecision(decision).ok) {
       decision = {
         schema: REF_DECISION_SCHEMA,
@@ -887,6 +944,28 @@ export function createRefWatchController({
     }
   }
 
+  async function warmReviews(seeds) {
+    if (typeof reviewer !== 'function' || !(reviewConcurrency > 1) || seeds.length < 2) return;
+    const queue = seeds.slice();
+    let started = 0;
+    const kick = () => {
+      while (queue.length > 0 && started < reviewConcurrency) {
+        const seed = queue.shift();
+        const job = live.get(seed.jobId);
+        const record = ensure(seed.jobId);
+        if (!job || record.state === 'held' || record.state === 'accepted' || record.state === 'overridden') continue;
+        started += 1;
+        buildRequest(seed, job, record)
+          .then(({ request }) => (validateRefReviewRequest(request).ok
+            ? cachedReview(request, { path: seed.imageFile ?? seed.imagePath, sha256: seed.keyframeSha256 })
+            : null))
+          .catch(() => null)
+          .finally(() => { started -= 1; kick(); });
+      }
+    };
+    kick();
+  }
+
   const watcher = createRefWatcher({
     jobsDoc,
     enqueue: async (seed) => { pending.push(seed); },
@@ -908,6 +987,8 @@ export function createRefWatchController({
     }
     await watcher.handle(event);
     const seeds = pending.splice(0);
+    // Warm the judge for every seed of this batch (bounded), then decide in order.
+    await warmReviews(seeds);
     for (const seed of seeds) {
       try {
         await reviewSeed(seed);
