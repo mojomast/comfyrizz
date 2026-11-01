@@ -22,7 +22,11 @@ import { createKeyframeReviewer, createLastFrameExtractor } from './ref-watch/la
 
 const REF_WATCH_MODEL = 'deepseek-v4.1-flash';
 
-function runFfmpegArgs(args) {
+export function runFfmpegArgs(args) {
+  // Google Colab run8: the chain-frames dir did not exist, ffmpeg exited 251 and every chained
+  // shot fell back to its keyframe. The output path is the last argument; make its directory.
+  const output = args.at(-1);
+  if (typeof output === 'string' && output.includes('/')) mkdirSync(dirname(output), { recursive: true });
   return new Promise((resolve, reject) => {
     const child = spawn('ffmpeg', args, { stdio: 'ignore' });
     child.once('error', reject);
