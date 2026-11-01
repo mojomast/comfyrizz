@@ -1,7 +1,18 @@
 // SPW02: bridge the chained-shot plan to ffmpeg and the Pi reviewer. The module
 // is pure apart from the injected ffmpeg runner; it never imports child_process,
 // reads the clock, or touches the network.
+import { createHash } from 'node:crypto';
+import { readFile } from 'node:fs/promises';
 import { basename, join } from 'node:path';
+
+import { REF_REVIEW_REQUEST_SCHEMA } from '../../../../packages/schema/src/ref-review.mjs';
+
+const KEYFRAME_PROMPT = 'Continuation keyframe: the last frame of the previous shot, reused as the first frame of the next shot. '
+  + 'Judge identity, anatomy and technical quality only; there is no shot prompt, so mark the prompt and framing checks pass.';
+
+async function fileSha256(path) {
+  try { return createHash('sha256').update(await readFile(path)).digest('hex'); } catch { return null; }
+}
 
 function clipJobId(previousClip, clipPath) {
   if (typeof previousClip?.id === 'string' && previousClip.id.trim() !== '') return previousClip.id;
@@ -51,13 +62,28 @@ export function createKeyframeReviewer({ reviewer } = {}) {
     if (typeof image?.path !== 'string' || image.path === '') {
       throw new Error('reviewKeyframe requires image.path');
     }
+    // Google Colab run9: a bare request had no keyframeSha256 or prompt, so the judge's verdict
+    // failed validation and every chained shot fell back. Send a full review request.
+    const sha = image.sha256 ?? await fileSha256(image.path);
     const request = {
+      schema: REF_REVIEW_REQUEST_SCHEMA,
+      productionId: 'chain',
+      runId: 'chain',
       jobId: `chain:${image.path}`,
+      shotId: basename(image.path),
+      prompt: KEYFRAME_PROMPT,
+      attempt: 0,
+      width: image.width ?? 1024,
+      height: image.height ?? 576,
+      plannedWidth: image.width ?? 1024,
+      plannedHeight: image.height ?? 576,
+      characters: [],
+      ...(sha ? { keyframeSha256: sha } : {}),
       imagePath: image.path,
       kind,
       ...(characters === undefined ? {} : { characters }),
       ...(dimensions === undefined ? {} : { dimensions }),
     };
-    return reviewer({ request });
+    return reviewer({ request, image: { path: image.path, ...(sha ? { sha256: sha } : {}) } });
   };
 }

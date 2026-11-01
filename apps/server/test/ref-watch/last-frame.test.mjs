@@ -144,13 +144,16 @@ test('SPW02: the keyframe reviewer forwards the image, characters, and identity 
 
   assert.equal(result, verdict);
   assert.equal(requests.length, 1);
-  assert.deepEqual(requests[0], {
+  const { jobId, imagePath, kind, characters: sent, dimensions, schema, prompt } = requests[0];
+  assert.deepEqual({ jobId, imagePath, kind, characters: sent, dimensions }, {
     jobId: 'chain:assets/video_a.last.png',
     imagePath: image.path,
     kind: 'keyframe',
     characters,
     dimensions: ['identity'],
   });
+  assert.equal(schema, 'comfyrizz.ref-review.request/v1');
+  assert.match(prompt, /Continuation keyframe/);
 });
 
 test('SPW02: the run gate wires the default extractor and reviewer into a chained shot', async () => {
