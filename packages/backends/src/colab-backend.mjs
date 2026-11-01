@@ -1478,6 +1478,25 @@ export function createColabBackend({
         const submitted = Array.isArray(payload?.jobs) ? payload.jobs : [];
         if (!submitted.length) return null;
         const groups = new Map();
+        // Google Colab run10: a chained shot carried loadImage (the previous clip's last frame,
+        // on this host) but nothing applied it, so LTX started from the shot's own still. Upload
+        // the frame next to the VM outputs and point the job's image input at it.
+        for (const job of submitted) {
+          const frame = job?.loadImage?.path;
+          if (!isVideoJob(job) || typeof frame !== "string" || !existsSync(frame)) continue;
+          const rel = `assets/${job.id}.chain.png`;
+          const sent = await step(argvUpload({ session, localPath: frame, remotePath: `${REMOTE_ROOT}/out/${rel}` }), { label: "chain-frame-upload", wallMs: 120000 });
+          if (sent.code !== 0) {
+            onEvent({ type: "chain_frame_upload_failed", jobId: job.id });
+            continue;
+          }
+          const inputs = Array.isArray(job.fileInputs) ? job.fileInputs : [];
+          const index = Math.max(0, inputs.findIndex((entry) => entry?.param === "image"));
+          const base = inputs[index] ?? { param: "image", from: "job", job: (job.deps ?? [])[0] };
+          job.fileInputs = inputs.length ? inputs.map((entry, i) => (i === index ? { ...base, path: rel } : entry)) : [{ ...base, path: rel }];
+          job.chainFrameApplied = rel;
+          onEvent({ type: "chain_frame_applied", jobId: job.id, path: rel });
+        }
         for (const job of submitted) {
           const fallback = payload?.batch === "regen" ? "stills" : legalBatch(payload?.batch, "stills");
           const name = legalBatch(job.batch, fallback);
@@ -1489,6 +1508,7 @@ export function createColabBackend({
           const plannedSubset = jobs.filter((job) => job.batch === name);
           // A regen keeps the job id and changes the seed, so it must not reuse the plan zip.
           const full = payload?.batch !== "regen"
+            && !group.some((job) => job.chainFrameApplied)
             && jobsZipIsPlan
             && plannedSubset.length === group.length
             && plannedSubset.every((job) => group.some((item) => item.id === job.id));

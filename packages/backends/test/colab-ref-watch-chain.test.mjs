@@ -203,3 +203,23 @@ test("a collected video releases the next chained shot in the same session", asy
   assert.deepEqual(submitted[1].ids, [VIDEOS[0].id], "the first released video runs alone");
   assert.deepEqual(submitted[2].ids, [VIDEOS[1].id], "the chained video runs after A was collected");
 });
+
+test("Google Colab run10: a chained shot's last frame is uploaded and becomes its image input", async (t) => {
+  const frameDir = mkdtempSync(join(tmpdir(), "comfyrizz-chainframe-"));
+  t.after(() => rmSync(frameDir, { recursive: true, force: true }));
+  const frame = join(frameDir, "v_intro.plate.last.png");
+  writeFileSync(frame, "PNG");
+  let context = null;
+  const chained = { ...VIDEOS[1], fileInputs: [{ param: "image", from: "job", job: "s_intro.still", path: "assets/s_intro.png" }], loadImage: { path: frame, mediaType: "image/png" } };
+  const refWatch = async (watchContext) => {
+    context = watchContext;
+    watchContext.submitJobs({ batch: VIDEOS[0].batch, jobs: [VIDEOS[0]] });
+    return { async handle(event) { if (event.type === "video_collected" && event.jobId === VIDEOS[0].id) context.submitJobs({ batch: "plates", jobs: [chained] }); } };
+  };
+  const ws = scenario(t, { refWatch });
+  await ws.run();
+  assert.ok(ws.events.some((event) => event.type === "chain_frame_applied" && event.jobId === VIDEOS[1].id));
+  const bundle = [...ws.records].reverse().find((record) => record.type === "bundle" && record.doc.jobs.some((job) => job.id === VIDEOS[1].id && job.batch === "plates" && job.fileInputs));
+  const sent = bundle.doc.jobs.find((job) => job.id === VIDEOS[1].id);
+  assert.equal(sent.fileInputs[0].path, `assets/${VIDEOS[1].id}.chain.png`);
+});
