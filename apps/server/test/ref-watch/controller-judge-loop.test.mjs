@@ -93,3 +93,16 @@ test('one preview batch of three stills is reviewed concurrently', async () => {
   await controller.handle({ type: 'preview_ready', manifest: { jobs } });
   assert.equal(peak, 3);
 });
+
+test('a reviewer timeout is retried once before it can hold the still', async () => {
+  let calls = 0;
+  const { controller, events } = setup(async ({ request }) => {
+    calls += 1;
+    if (calls === 1) throw Object.assign(new Error('reviewer timed out'), { code: 'REVIEW_TIMEOUT' });
+    return verdict(request);
+  }, { reviewerRetry: true });
+  await controller.start();
+  await controller.handle(preview('still_a'));
+  assert.equal(calls, 2);
+  assert.equal(events.filter((event) => event.type === 'ref_review_verdict').at(-1).decision.action, 'accept');
+});

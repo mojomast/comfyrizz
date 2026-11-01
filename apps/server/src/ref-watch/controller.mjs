@@ -136,6 +136,7 @@ export function createRefWatchController({
   // cannot afford them skips the Qwen edit download.
   reviewConcurrency = 1,
   secondOpinion = false,
+  reviewerRetry = false,
   targetedEdits = true,
 } = {}) {
   if (!isObject(jobsDoc)) throw new TypeError('createRefWatchController requires a jobsDoc object');
@@ -663,7 +664,15 @@ export function createRefWatchController({
       let reviewed;
       try {
         const image = { path: seed.imageFile ?? seed.imagePath, sha256: seed.keyframeSha256 };
-        reviewed = await cachedReview(request, image);
+        // Google Colab run11: one judge timeout held a good still. A reviewer error or timeout is
+        // retried once (API only, no GPU) before it can hold anything.
+        try {
+          reviewed = await cachedReview(request, image);
+          if (reviewerRetry && (!validateRefVerdict(reviewed).ok || reviewed.overall === 'error')) reviewed = await cachedReview(request, image, 3);
+        } catch (error) {
+          if (!reviewerRetry) throw error;
+          reviewed = await cachedReview(request, image, 3);
+        }
         const lone = trustedHardFails(reviewed);
         if (secondOpinion && validateRefVerdict(reviewed).ok && reviewed.overall === 'fail'
           && lone.length > 0 && lone.every((check) => SECOND_OPINION_DIMENSIONS.has(check.dimension))) {
