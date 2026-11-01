@@ -138,3 +138,55 @@ test('a flagged still regenerates inside a small live-session allowance instead 
   const regen = submitted.find((entry) => entry.batch === 'regen');
   assert.equal(regen.jobs[0].generator, 'qwen-edit-2511', 'the text artifact is fixed with a targeted edit');
 });
+
+test('a held title still hands its BiRefNet cutout to the highest-scoring accepted still', async () => {
+  const jobs = [still('still_a'), still('still_b'), still('still_title'),
+    video('video_a', ['still_a'], { sceneId: 'x', index: 0 }), video('video_b', ['still_b'], { sceneId: 'y', index: 1 }), video('video_t', ['still_title'], { sceneId: 'z', index: 2 })];
+  const submitted = [];
+  const events = [];
+  const softFail = (request) => ({
+    ...passVerdict(request),
+    checks: PASS_CHECKS.map((check) => (check.dimension === 'framing' ? { ...check, pass: false, severity: 'soft' } : check)),
+  });
+  const controller = createRefWatchController({
+    jobsDoc: { productionId: 'prod_title', runId: 'run_title', jobs, titleCards: [{ stillJobId: 'still_title', text: 'THE KEEPER' }] },
+    reviewer: async ({ request }) => {
+      if (request.jobId === 'still_title') return failVerdict(request);
+      return request.jobId === 'still_a' ? softFail(request) : passVerdict(request);
+    },
+    submitJobs: async (payload) => { submitted.push(payload); },
+    onEvent: (event) => { events.push(event); },
+    now: () => '2026-11-01T00:00:00.000Z',
+    liveSession: true,
+    regenBudgetUnits: 0,
+  });
+  await controller.start();
+  for (const id of ['still_a', 'still_b', 'still_title']) await controller.handle(preview(id, id));
+  const queued = events.filter((event) => event.type === 'ref_title_cutout_queued');
+  assert.equal(queued.length, 1);
+  assert.equal(queued[0].jobId, 'still_b', 'all six checks beat five');
+  assert.equal(queued[0].fallbackFrom, 'still_title');
+  const cutouts = submitted.filter((entry) => entry.batch === 'cutouts').flatMap((entry) => entry.jobs);
+  assert.equal(cutouts.length, 1);
+  assert.equal(cutouts[0].generator, 'birefnet');
+  assert.equal(cutouts[0].fileInputs[0].job, 'still_b');
+});
+
+test('no fallback while the title still is accepted or still in review', async () => {
+  const jobs = [still('still_a'), still('still_title'),
+    video('video_a', ['still_a'], { sceneId: 'x', index: 0 }), video('video_t', ['still_title'], { sceneId: 'z', index: 1 })];
+  const events = [];
+  const controller = createRefWatchController({
+    jobsDoc: { productionId: 'prod_title2', runId: 'run_title2', jobs, titleCards: [{ stillJobId: 'still_title', text: 'T' }] },
+    reviewer: async ({ request }) => passVerdict(request),
+    submitJobs: async () => {},
+    onEvent: (event) => { events.push(event); },
+    now: () => '2026-11-01T00:00:00.000Z',
+  });
+  await controller.start();
+  await controller.handle(preview('still_a', 'still_a'));
+  assert.equal(events.some((event) => event.type === 'ref_title_cutout_queued'), false);
+  await controller.handle(preview('still_title', 'still_title'));
+  const queued = events.filter((event) => event.type === 'ref_title_cutout_queued');
+  assert.deepEqual(queued.map((event) => [event.jobId, event.fallbackFrom ?? null]), [['still_title', null]]);
+});

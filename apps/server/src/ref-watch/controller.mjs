@@ -458,6 +458,44 @@ export function createRefWatchController({
     }
   }
 
+  // Title-card fallback (Kyle, Nov 1): when the title still is held (it failed judging and the
+  // regen cap is spent), the cutout runs on the highest-scoring accepted still instead, so the
+  // title card keeps its subject layer. Score = passing checks; ties go to the earlier acceptance.
+  const titleFallbacks = new Set();
+  function stillScore(record) {
+    const checks = Array.isArray(record?.verdict?.checks) ? record.verdict.checks : [];
+    return checks.filter((check) => check?.pass === true).length;
+  }
+  async function queueTitleFallbacks() {
+    for (const title of titleCards) {
+      const original = title.stillJobId;
+      if (!original || titleFallbacks.has(original) || queuedTitleCutouts.has(original)) continue;
+      if (states.get(original)?.state !== 'held') continue;
+      const best = acceptedStills
+        .filter((record) => record.jobId !== original && !queuedTitleCutouts.has(record.jobId))
+        .sort((a, b) => stillScore(b) - stillScore(a) || a.acceptedAt - b.acceptedAt)[0];
+      if (!best) continue;
+      const { jobs: cutouts } = titleCardJobs({
+        jobsDoc: { ...jobsDoc, jobs: [...live.values()] },
+        acceptedStills,
+        titles: [{ ...title, stillJobId: best.jobId }],
+      });
+      if (cutouts.length === 0) continue;
+      titleFallbacks.add(original);
+      queuedTitleCutouts.add(best.jobId);
+      await submitJobs({ batch: TITLE_CARD_BATCH, jobs: cutouts });
+      for (const cutout of cutouts) {
+        emit({
+          type: 'ref_title_cutout_queued',
+          jobId: best.jobId,
+          cutoutJobId: cutout.id,
+          fallbackFrom: original,
+          reason: 'title still held; highest-scoring accepted still',
+        });
+      }
+    }
+  }
+
   function rememberAccepted(job, seed, verdict) {
     const characters = charactersFor(job);
     acceptedStills.push({
@@ -880,7 +918,11 @@ export function createRefWatchController({
   }
 
   function handle(event) {
-    const run = chain.then(() => handleUnlocked(event)).then(async (value) => { await maybeReleaseVideos(); return value; });
+    const run = chain.then(() => handleUnlocked(event)).then(async (value) => {
+      await maybeReleaseVideos();
+      await queueTitleFallbacks();
+      return value;
+    });
     chain = run.then(() => {}, () => {});
     return run;
   }
