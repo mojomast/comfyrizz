@@ -698,11 +698,17 @@ export function createColabBackend({
    */
   async function execScript(script, { step: stepName, timeout = 900, wallMs = null, onEvent = null, silenceMs = null, onLog = null, signal = null } = {}) {
     let result;
+    // The connect retries share one wall budget: a caller's wallMs (e.g. the collection
+    // window) is a total, not a per-attempt allowance that three retries can triple.
+    const totalMs = wallMs ?? (timeout + 60) * 1000;
+    const endAt = Date.now() + totalMs;
     for (let attempt = 0; attempt < 3; attempt++) {
       signal?.throwIfAborted();
+      const leftMs = attempt === 0 ? totalMs : endAt - Date.now();
+      if (attempt > 0 && leftMs <= 1000) break;
       result = await step(argvExec({ session, file: script, timeout }), {
       label: stepName,
-      wallMs: wallMs ?? (timeout + 60) * 1000,
+      wallMs: leftMs,
       cwd: dirname(script),
       signal,
       ...(silenceMs ? { silenceMs } : {}),

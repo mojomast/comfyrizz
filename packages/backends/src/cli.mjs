@@ -71,6 +71,9 @@ function windowsEnvironment(bin) {
   return env;
 }
 
+/** Grace between SIGTERM and SIGKILL for a step past its silence/wall limit. */
+export const KILL_GRACE_MS = 5000;
+
 export class ColabCliError extends Error {
   constructor(message, detail = {}) {
     super(message);
@@ -162,20 +165,25 @@ export class ColabCli {
   #runInline(step, args, { silenceMs, wallMs, cwd = null, onLog = null, signal = null }) {
     return new Promise((resolve) => {
       const chunks = [];
-      const child = spawn(this.bin, args, { shell: false, windowsHide: true, env: this.environment(), cwd: cwd || undefined, stdio: ["pipe", "pipe", "pipe"] });
+      const child = spawn(this.bin, args, { shell: false, windowsHide: true, env: this.environment(), cwd: cwd || undefined, stdio: ["pipe", "pipe", "pipe"], detached: process.platform !== "win32" });
+      // Own process group, so a kill reaches the CLI's helpers too (they hold our pipes open).
+      const killTree = (sig) => { try { if (process.platform !== "win32") process.kill(-child.pid, sig); else child.kill(sig); } catch { try { child.kill(sig); } catch { /* gone */ } } };
       let lastOutput = Date.now();
       let timedOut = false;
+      let killTimer = null;
       const abort = () => child.kill('SIGTERM');
       signal?.addEventListener('abort', abort, { once: true });
       if (signal?.aborted) abort();
       const decoder = new StringDecoder('utf8');
       const watchdog = setInterval(() => {
         if (Date.now() - lastOutput > silenceMs || Date.now() - step.startedAt > wallMs) {
-          timedOut = true;
-          try {
-            child.kill("SIGTERM");
-          } catch {
-            /* already gone */
+          // judge-workflow v3 rerun: a `colab exec` stuck in its kernel connect ignored
+          // SIGTERM for ~5 minutes and ate the whole collection window. Escalate to
+          // SIGKILL if the CLI is still alive KILL_GRACE_MS after the first SIGTERM.
+          if (!timedOut) {
+            timedOut = true;
+            killTree("SIGTERM");
+            killTimer = setTimeout(() => killTree("SIGKILL"), KILL_GRACE_MS);
           }
         }
       }, Math.min(200, Math.max(25, Math.floor(silenceMs / 4))));
@@ -204,6 +212,7 @@ export class ColabCli {
       });
       child.on("close", (code, exitSignal) => {
         clearInterval(watchdog);
+        if (killTimer) clearTimeout(killTimer);
         signal?.removeEventListener('abort', abort);
         const output = chunks.join("");
         writeFileSync(step.log, output, { mode: 0o600 });
