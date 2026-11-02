@@ -200,3 +200,11 @@ test('an unknown or missing action returns null', () => {
   }
   assert.equal(estimateRegen(), null);
 });
+
+test('a package run with no iteration settings prices the regen at the balanced preset', () => {
+  // Google Colab e2e 2026-10-30: every targeted_edit failed closed with "policy must be an object".
+  const result = estimateRegen({ decision: { action: 'reprompt', attempt: 0 }, shot: SHOT, regenJobsUsed: 0, stillCount: 6 });
+  const expected = estimateIteration({ policy: ITERATION_PRESETS.balanced, shots: [SHOT] });
+  assert.deepEqual(result.units, expected.units);
+  assert.equal(result.blocked, false);
+});

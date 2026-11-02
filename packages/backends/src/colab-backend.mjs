@@ -16,7 +16,7 @@ import { appendFileSync, copyFileSync, createReadStream, existsSync, lstatSync, 
 import { withRunPackage, verifyAgainstManifest } from "./run-package.mjs";
 import { createLivePreviewCollector } from './live-previews.mjs';
 import { packageModelLock, fasth3JobMinutes } from './fasth3-profile.mjs';
-import { dirname, join, resolve } from "node:path";
+import { dirname, isAbsolute, join, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import { spawn, spawnSync } from "node:child_process";
 import {
@@ -350,6 +350,9 @@ export const NEW_WALL_MS = 300000;
  * be the VM an interrupted `colab new` created before it was named, and output with no rows and no
  * "No active sessions" line proves nothing, so both count as *not* gone.
  */
+/** A collected still is handed to the reference watch once per job *and* output digest (a regen keeps the job id). */
+export const previewKey = (entry) => `${entry?.job}:${entry?.outputs?.[0]?.sha256 ?? ""}`;
+
 export function sessionsCheck(found, session) {
   const rows = Array.isArray(found?.sessions) ? found.sessions : [];
   const ours = rows.some((entry) => entry.name === session);
@@ -422,6 +425,9 @@ export function createColabBackend({
   collectionRetryMs = 1000,
   // RW08: optional. Leave this unset and the Google Colab run executes its planned batches unchanged.
   refWatch = null,
+  // Judge loop: false skips the Qwen Image Edit download (~40 GB) and turns targeted_edit into a
+  // reprompted regen. COMFYRIZZ_REFWATCH_EDITS=0 sets it from the environment.
+  refWatchEdits = process.env.COMFYRIZZ_REFWATCH_EDITS !== '0',
 } = {}) {
   // PO-3 review: priced from the per-accelerator table for *this* gpu, never one global figure.
   ratePerHour = ratePerHour ?? resolveRatePerHour({ gpu });
@@ -438,7 +444,7 @@ export function createColabBackend({
   const logs = logDir || join(scratch, "logs");
   mkdirSync(scratch, { recursive: true });
   if (modelsLock === join(REPO, 'colab', 'models.lock.json')) {
-    modelsLock = packageModelLock({ packageDir, scratchDir: scratch, repo: REPO, defaultLock: modelsLock });
+    modelsLock = packageModelLock({ packageDir, scratchDir: scratch, repo: REPO, defaultLock: modelsLock, refWatch: Boolean(refWatch) && refWatchEdits !== false });
   }
   const registryFile = join(scratch, "sessions.json");
   // G4-2: a `pip install --user` CLI lives at ~/.local/bin/colab, which is not on the PATH the child
@@ -1264,9 +1270,35 @@ export function createColabBackend({
           || /\.(mp4|webm)$/i.test(output);
       };
 
+      // The local collect directory is where runBatch just verified this batch's outputs. Only a job
+      // whose main output actually landed may release the next chained shot.
+      function collectedOutputPath(job) {
+        if (!collect || !collect.local) return null;
+        const candidates = [];
+        if (typeof job.output === "string" && job.output) candidates.push(job.output);
+        const entry = (collect.manifest?.jobs || []).find((item) => item?.job === job.id);
+        for (const output of Array.isArray(entry?.outputs) ? entry.outputs : []) {
+          const relative = output?.relative || output?.file;
+          if (typeof relative === "string" && relative) candidates.push(relative);
+        }
+        const root = resolve(collect.local);
+        for (const candidate of candidates) {
+          if (!candidate || candidate.includes("\0") || isAbsolute(candidate)) continue;
+          const local = resolve(root, candidate);
+          if (local !== root && local.startsWith(`${root}${sep}`) && existsSync(local) && statSync(local).isFile()) {
+            return local;
+          }
+        }
+        return null;
+      }
+
       let refWatchGate = null;
       const refWatchQueue = [];
       let reviewChain = Promise.resolve();
+      const previewedJobs = new Set();
+      // Keyed by job and output digest: a regen keeps the job id, and its new still must reach
+      // the watch again (Google Colab e2e 2026-10-30: two regenerated stills were never re-reviewed).
+
       // True while the zip on the VM is the plan that was uploaded for this run. A regen or a
       // partial video release replaces it; the next planned batch puts the plan back first.
       let jobsZipIsPlan = true;
@@ -1276,8 +1308,20 @@ export function createColabBackend({
           onEvent,
           receiptsDir: join(scratch, "receipts"),
           submitJobs: async (payload) => { refWatchQueue.push(payload); },
+          // Regens run on this VM while it is up; a fifth of the run budget is theirs to spend.
+          liveSession: true,
+          targetedEdits: refWatchEdits !== false,
+          regenBudgetUnits: Number(budgetUnits) > 0 ? Number(budgetUnits) * 0.2 : undefined,
         };
         refWatchGate = typeof refWatch === "function" ? await refWatch(watchContext) : refWatch;
+      }
+
+      // The gate sees preview and collected-video events on one chain, so a queued chained shot is
+      // never admitted before the event that released it has been handled. A gate failure is the
+      // watch's problem, not the run's (same policy as preview_ready).
+      function queueReviewEvent(event) {
+        if (!refWatchGate || typeof refWatchGate.handle !== "function") return;
+        reviewChain = reviewChain.then(() => refWatchGate.handle(event)).then(() => {}, () => {});
       }
 
       async function uploadJobsZip(localJobsFile) {
@@ -1339,11 +1383,10 @@ export function createColabBackend({
             if (result.code !== 0) throw new Error('Live preview download unavailable; will retry');
           },
           onReady: (payload) => {
+            for (const entry of payload?.manifest?.jobs ?? []) if (entry?.job) previewedJobs.add(previewKey(entry));
             const event = { type: 'preview_ready', ...payload };
             emit(onEvent, event);
-            if (refWatchGate && typeof refWatchGate.handle === "function") {
-              reviewChain = reviewChain.then(() => refWatchGate.handle(event)).then(() => {}, () => {});
-            }
+            queueReviewEvent(event);
           },
           onError: error => emit(onEvent, { type: 'preview_wait', message: error.message }),
         });
@@ -1387,6 +1430,21 @@ export function createColabBackend({
         }
         manifest = collect.manifest;
         if (collect.manifest) batchManifests.push(collect.manifest);
+        // SPW e2e: the live preview tap is best effort (it can fail to download while the batch
+        // runs). Every still the batch collected that never produced a preview is handed to the
+        // reference watch from the verified collection, so the gate never waits on a lost preview.
+        if (refWatchGate && collect.manifest && collect.local) {
+          for (const entry of collect.manifest.jobs ?? []) {
+            if (!entry?.job || previewedJobs.has(previewKey(entry))) continue;
+            if (entry.status !== "succeeded" && entry.status !== "cached") continue;
+            const planned = doc.jobs.find((job) => job.id === entry.job);
+            if (!planned || isVideoJob(planned)) continue;
+            previewedJobs.add(previewKey(entry));
+            const event = { type: "preview_ready", source: "collected", manifest: { ...collect.manifest, complete: false, jobs: [entry] }, outputDir: collect.local };
+            emit(onEvent, event);
+            queueReviewEvent(event);
+          }
+        }
         return null;
       }
 
@@ -1420,6 +1478,25 @@ export function createColabBackend({
         const submitted = Array.isArray(payload?.jobs) ? payload.jobs : [];
         if (!submitted.length) return null;
         const groups = new Map();
+        // Google Colab run10: a chained shot carried loadImage (the previous clip's last frame,
+        // on this host) but nothing applied it, so LTX started from the shot's own still. Upload
+        // the frame next to the VM outputs and point the job's image input at it.
+        for (const job of submitted) {
+          const frame = job?.loadImage?.path;
+          if (!isVideoJob(job) || typeof frame !== "string" || !existsSync(frame)) continue;
+          const rel = `assets/${job.id}.chain.png`;
+          const sent = await step(argvUpload({ session, localPath: frame, remotePath: `${REMOTE_ROOT}/out/${rel}` }), { label: "chain-frame-upload", wallMs: 120000 });
+          if (sent.code !== 0) {
+            onEvent({ type: "chain_frame_upload_failed", jobId: job.id });
+            continue;
+          }
+          const inputs = Array.isArray(job.fileInputs) ? job.fileInputs : [];
+          const index = Math.max(0, inputs.findIndex((entry) => entry?.param === "image"));
+          const base = inputs[index] ?? { param: "image", from: "job", job: (job.deps ?? [])[0] };
+          job.fileInputs = inputs.length ? inputs.map((entry, i) => (i === index ? { ...base, path: rel } : entry)) : [{ ...base, path: rel }];
+          job.chainFrameApplied = rel;
+          onEvent({ type: "chain_frame_applied", jobId: job.id, path: rel });
+        }
         for (const job of submitted) {
           const fallback = payload?.batch === "regen" ? "stills" : legalBatch(payload?.batch, "stills");
           const name = legalBatch(job.batch, fallback);
@@ -1431,12 +1508,18 @@ export function createColabBackend({
           const plannedSubset = jobs.filter((job) => job.batch === name);
           // A regen keeps the job id and changes the seed, so it must not reuse the plan zip.
           const full = payload?.batch !== "regen"
+            && !group.some((job) => job.chainFrameApplied)
             && jobsZipIsPlan
             && plannedSubset.length === group.length
             && plannedSubset.every((job) => group.some((item) => item.id === job.id));
           if (!full) await uploadOverlay(name, group);
           last = await runBatch(name, group);
           if (last?.stop) return last;
+          for (const job of group) {
+            if (!isVideoJob(job)) continue;
+            const path = collectedOutputPath(job);
+            if (path) queueReviewEvent({ type: "video_collected", jobId: job.id, path });
+          }
         }
         return last;
       }

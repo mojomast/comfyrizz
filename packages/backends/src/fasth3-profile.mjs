@@ -2,7 +2,44 @@
 import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 
-export function packageModelLock({ packageDir, scratchDir, repo, defaultLock }) {
+/**
+ * SKILLS-PORT add-ons (colab/skills-models.lock.json), merged only when the package needs them:
+ * Qwen Image Edit 2511 when reference watch is on (targeted_edit), BiRefNet when it has titleCards,
+ * and the Fill-ChatterBox node pack when its voice engine is chatterbox.
+ */
+export function skillsNeeds(pkg, { refWatch = false } = {}) {
+  const needs = new Set();
+  if (refWatch) needs.add('refWatch');
+  if (Array.isArray(pkg?.titleCards) && pkg.titleCards.length > 0) needs.add('titleCards');
+  if (pkg?.voice?.engine === 'chatterbox') needs.add('chatterbox');
+  return needs;
+}
+
+export function mergeSkillsLock(base, skills, needs) {
+  const hosts = Object.fromEntries(Object.entries(skills.hosts ?? {}).filter(([, host]) => needs.has(host.use)));
+  const customNodes = (skills.customNodes ?? []).filter((pack) => needs.has(pack.use));
+  return {
+    ...base,
+    hosts: { ...base.hosts, ...hosts },
+    files: [...base.files, ...(skills.files ?? []).filter((file) => hosts[file.host])],
+    customNodes: [...(base.customNodes ?? []), ...customNodes],
+  };
+}
+
+export function packageModelLock({ packageDir, scratchDir, repo, defaultLock, refWatch = false }) {
+  const path = fasth3ModelLock({ packageDir, scratchDir, repo, defaultLock });
+  const file = packageDir && join(packageDir, 'package.json');
+  const pkg = file && existsSync(file) ? JSON.parse(readFileSync(file, 'utf8')) : null;
+  const needs = skillsNeeds(pkg, { refWatch });
+  const skillsFile = join(repo, 'colab/skills-models.lock.json');
+  if (needs.size === 0 || !existsSync(skillsFile)) return path;
+  const merged = mergeSkillsLock(JSON.parse(readFileSync(path, 'utf8')), JSON.parse(readFileSync(skillsFile, 'utf8')), needs);
+  const out = join(scratchDir, 'package-skills-models.lock.json');
+  writeFileSync(out, JSON.stringify(merged, null, 2));
+  return out;
+}
+
+function fasth3ModelLock({ packageDir, scratchDir, repo, defaultLock }) {
   const file = packageDir && join(packageDir, 'package.json');
   if (!file || !existsSync(file)) return defaultLock;
   const pkg = JSON.parse(readFileSync(file, 'utf8'));

@@ -56,6 +56,9 @@ def _truthy(value: str | None) -> bool:
     return str(value).lower() in ("1", "true", "yes", "on")
 
 
+EXPIRED_CONFIRMATIONS = 3
+
+
 @dataclass
 class RunnerConfig:
     jobs_file: Path
@@ -565,10 +568,18 @@ class Runner:
             raise ValueError(f"cannot poll attempt {attempt.attempt_id}: it has no job id (state {attempt.state})")
         deadline = time.monotonic() + timeout
         snapshot = None
+        expired_seen = 0
         while True:
             snapshot = self.client.poll(attempt.job_id)
             if snapshot.progress is not None:
                 self.progress.emit("progress", job=job["id"], attempt=attempt.attempt_id, value=snapshot.progress)
+            if snapshot.status == "expired" and expired_seen < EXPIRED_CONFIRMATIONS:
+                # comfy-api-proxy 0.1.6 reads /history, then /queue: a job that finishes between the
+                # two reads is in neither and comes back "expired" (Google Colab e2e 2026-10-30: a
+                # 3 s Klein still "expired" 7 s after submit). Expired is only believed when it repeats.
+                expired_seen += 1
+                time.sleep(self.config.poll_interval)
+                continue
             if snapshot.status in ("succeeded", "failed", "canceled", "expired"):
                 break
             if time.monotonic() >= deadline:

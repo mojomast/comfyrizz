@@ -15,6 +15,7 @@
 
 import { createHash } from 'node:crypto';
 
+import { CHATTERBOX_ENGINE } from '../../../../packages/tts/voices.mjs';
 import { canonicalJson, requestHashFor } from './commands.mjs';
 import { CommandError } from './commands.mjs';
 import { ITERATION_LEVEL_REQUIRED, RECORDED_ACTORS, validateAction } from './contract.mjs';
@@ -263,8 +264,8 @@ function normalizeActions(actions, ceiling, collectAndStopReserve) {
       if (typeof slot.line !== 'string' || slot.line.trim() === '') {
         throw new ActionError('INVALID_PLAN', `actions[${index}].line is required for an audition`, 400);
       }
-      if (slot.engine !== 'kokoro' && slot.engine !== 'qwen3-tts') {
-        throw new ActionError('INVALID_PLAN', `actions[${index}].engine must be kokoro or qwen3-tts`, 400);
+      if (slot.engine !== 'kokoro' && slot.engine !== 'qwen3-tts' && slot.engine !== CHATTERBOX_ENGINE) {
+        throw new ActionError('INVALID_PLAN', `actions[${index}].engine must be kokoro, qwen3-tts or chatterbox`, 400);
       }
     }
     sum = normalizeNumber(sum + slot.upperBound);

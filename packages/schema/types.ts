@@ -1,7 +1,7 @@
 // GENERATED FILE - do not edit by hand.
 //
 // Source:        packages/schema/package-v1.schema.json
-// Schema sha256: 715eadc7ec2bffddf2c5e6f73ef965438a86057340a9661e105084f942694c3d
+// Schema sha256: 178e28dac126ee86d86386a49ed3feec7d1103cd3847c4a7f4790f30e13c8048
 // Generator:     packages/schema/scripts/gen-types.mjs (v1.0.0)
 //
 // Regenerate: pnpm --filter @comfyrizz/schema gen:types
@@ -89,10 +89,11 @@ export interface PackageV1 {
     enabled: boolean;
     /**
      * kokoro (default) is the CPU narrator. qwen3-tts is the optional Qwen3-TTS 1.7B backend; when its
-     * runtime is missing the pipeline falls back to kokoro unless voice.strict is true. none disables
-     * narration.
+     * runtime is missing the pipeline falls back to kokoro unless voice.strict is true. chatterbox is
+     * the opt-in Chatterbox Multilingual engine (one line per graph call, speech-recognition take
+     * selection, Google Colab only, never falls back to kokoro). none disables narration.
      */
-    engine?: "kokoro" | "qwen3-tts" | "none";
+    engine?: "kokoro" | "qwen3-tts" | "chatterbox" | "none";
     voice?: string;
     speed?: number;
     language?: string;
@@ -174,6 +175,17 @@ export interface PackageV1 {
   presenter?: Presenter;
   captions?: PackageCaptions;
   audio?: PackageAudio;
+  /**
+   * SKILLS-PORT: title cards whose text sits behind the subject. Each names a generated still; once
+   * reference watch accepts it, a BiRefNet cutout job is queued and the card is composed as plate,
+   * text, cutout.
+   * [maxItems 4]
+   */
+  titleCards?: Array<{
+    asset: AssetId;
+    text: string;
+    background?: string;
+    }>;
   /**
    * CAST1: recurring characters. Optional. A package without this array validates, plans and renders
    * exactly as before. A member is fictional by default; a real_authorized member is allowed only
@@ -913,6 +925,14 @@ export interface Scene {
    * scene; otherwise the package voice is used.
    */
   speaker?: CastId;
+  /**
+   * SKILLS-PORT: the story scene this package scene (one shot) belongs to. Consecutive package
+   * scenes with the same sequence are shots of one story scene, so reference watch chains each LTX
+   * plate from the previous shot's last frame by default. Omitted: the package scene is its own
+   * story scene.
+   * [pattern ^[a-z0-9][a-z0-9_-]{0,63}$]
+   */
+  sequence?: string;
   }
 
 export interface AssetVariants {
@@ -1057,6 +1077,14 @@ export interface Gen {
   params_hash?: Sha256Hex;
   seed?: number;
   created_at?: string;
+  /**
+   * SKILLS-PORT: a hard cut before this plate; it is never chained from the previous shot.
+   */
+  cut?: boolean;
+  /**
+   * SKILLS-PORT: per-shot override of last-frame chaining (true forces it on, false forces it off).
+   */
+  chainFromPrevious?: boolean;
   }
 
 export interface Asset {

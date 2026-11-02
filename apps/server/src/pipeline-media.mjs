@@ -9,6 +9,7 @@ import { pipelineCommand } from './pipeline-process.mjs';
 import { selectedPresenterScenes, presenterPortrait } from './pipeline-contract.mjs';
 import { collectCompositionExtras } from '../../../packages/compositions/src/index.mjs';
 import { collectCompositionCacheExtras } from '../../renderer/scripts/composition-worker.mjs';
+import { withWebSafe } from './web-safe-encode.mjs';
 
 export const json = path => JSON.parse(readFileSync(path));
 export const writeJson = (path, value) => {
@@ -94,19 +95,19 @@ export function correctionFor(report, fps, maxCorrectionMs = 400) {
   return Math.round(-report.offsetMs * fps / 1000);
 }
 
-export async function correctPresenters(workDir, runDir, { signal, onEvent = () => {}, env = process.env } = {}) {
+export async function correctPresenters(workDir, runDir, { signal, onEvent = () => {}, env = process.env, command = pipelineCommand } = {}) {
   const packagePath = join(workDir, 'package.json'), pkg = json(packagePath), results = [];
   for (const scene of presenterScenes(pkg)) {
     const asset = pkg.assets[scene.presenter_asset], originalFile = asset.file;
     const audio = join(workDir, `audio/presenter-${scene.id}.wav`);
     const output = join(runDir, 'sync', scene.id); mkdirSync(output, { recursive: true });
     const evaluate = async (video, out) => {
-      await pipelineCommand(env.COMFYRIZZ_SYNCNET_PYTHON, [join(repoRoot, 'scripts/tts/check_lipsync.py'), '--video', video, '--audio', audio, '--out', out, '--syncnet-dir', env.COMFYRIZZ_SYNCNET_DIR], { signal, allowedCodes: [0, 2] });
+      await command(env.COMFYRIZZ_SYNCNET_PYTHON, [join(repoRoot, 'scripts/tts/check_lipsync.py'), '--video', video, '--audio', audio, '--out', out, '--syncnet-dir', env.COMFYRIZZ_SYNCNET_DIR], { signal, allowedCodes: [0, 2] });
       return json(join(out, 'report.json'));
     };
     onEvent({ sceneId: scene.id, phase: 'measuring' });
     const before = await evaluate(join(workDir, originalFile), join(output, 'before'));
-    const probe = JSON.parse((await pipelineCommand('ffprobe', ['-v', 'error', '-select_streams', 'v:0', '-show_entries', 'stream=r_frame_rate,nb_frames', '-of', 'json', join(workDir, originalFile)], { signal })).stdout).streams[0];
+    const probe = JSON.parse((await command('ffprobe', ['-v', 'error', '-select_streams', 'v:0', '-show_entries', 'stream=r_frame_rate,nb_frames', '-of', 'json', join(workDir, originalFile)], { signal })).stdout).streams[0];
     const [num, den] = probe.r_frame_rate.split('/').map(Number), fps = num / den;
     const frames = Number(probe.nb_frames);
     if (!Number.isFinite(fps) || fps <= 0 || !Number.isInteger(frames) || frames <= 0) throw new Error('Cannot determine presenter source frame grid');
@@ -116,7 +117,7 @@ export async function correctPresenters(workDir, runDir, { signal, onEvent = () 
       onEvent({ sceneId: scene.id, phase: 'correcting', shiftFrames: shift, fps });
       const file = `assets/${scene.presenter_asset}-synced.mp4`;
       const filter = shift > 0 ? `tpad=start_mode=clone:start_duration=${shift / fps}` : `trim=start_frame=${-shift},setpts=PTS-STARTPTS,tpad=stop_mode=clone:stop_duration=${-shift / fps}`;
-      await pipelineCommand('ffmpeg', ['-y', '-v', 'error', '-i', join(workDir, originalFile), '-vf', filter, '-frames:v', String(frames), '-an', '-c:v', 'libx264', '-crf', '17', '-pix_fmt', 'yuv420p', join(workDir, file)], { signal });
+      await command('ffmpeg', withWebSafe(['-y', '-v', 'error', '-i', join(workDir, originalFile), '-vf', filter, '-frames:v', String(frames), '-an', '-c:v', 'libx264', '-crf', '17', '-pix_fmt', 'yuv420p', join(workDir, file)]), { signal });
       after = await evaluate(join(workDir, file), join(output, 'after'));
       if (!after.passed) throw new Error(`${scene.id}: presenter still fails sync after correction`);
       asset.file = file; Object.assign(asset, assetMetadata(join(workDir, file)));

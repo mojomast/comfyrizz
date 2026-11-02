@@ -1,0 +1,13 @@
+{
+  "v": 1,
+  "generator": "chatterbox",
+  "kind": "audio",
+  "map": {
+    "text": ["1", "text"],
+    "language": ["1", "language"],
+    "seed": ["1", "seed"],
+    "exaggeration": ["1", "exaggeration"],
+    "cfg_weight": ["1", "cfg_weight"]
+  },
+  "note": "Chatterbox Multilingual voiceover graph ported from mojomast/open-higgsfield-skills 5a1a2d4 skills/voiceover/workflows/voice_chatterbox_multilingual.api.json. Uses FL_ChatterboxMultilingualTTS from filliptm/ComfyUI_Fill-ChatterBox f7d7a16187430abcaf91a3039b9c83aa9960816a. The source's LoadAudio 'Voice to clone' node and its audio_prompt link are removed so the default uses the model's built-in voice (no cloning). SaveAudioMP3 is replaced by core SaveAudio (lossless FLAC) so the ASR take check reads lossless audio; the 40-second TrimAudioDuration node is kept from the source. Natural defaults kept: exaggeration 0.5, cfg_weight 0.5, temperature 0.8, repetition_penalty 2, min_p 0.05, top_p 1. LICENCE GATE: the pinned node-pack tree has no LICENSE file (its README says MIT and pyproject declares license = \"LICENSE\"), so the node-pack licence is unverified at f7d7a161 and this graph must not be committed or shipped until a verifiable MIT/Apache/BSD LICENSE exists at that commit."
+}

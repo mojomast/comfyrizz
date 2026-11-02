@@ -1,0 +1,11 @@
+{
+ "v": 1,
+ "generator": "birefnet",
+ "kind": "still",
+ "note": "BiRefNet cutout from open-higgsfield-skills @5a1a2d4 (MIT, rossaai/rosesfield); the BiRefNet weights are reported MIT but unverified. ComfyUI core LoadBackgroundRemovalModel/RemoveBackground produce the foreground mask; InvertMask turns it into the alpha channel and JoinImageWithAlpha saves a transparent RGBA PNG. The image parameter is the uploaded still.",
+ "files": ["image"],
+ "inputs": ["image"],
+ "map": {
+  "image": ["1", "image"]
+ }
+}

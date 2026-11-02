@@ -2,7 +2,8 @@
 // until every keyframe it uses is accepted or overridden. Regen jobs reserve
 // the same production budget ledger self-repair spends from, and only after
 // the regen estimate. Nothing here calls Google Colab, Comfy, or the network.
-import { mkdirSync, renameSync, writeFileSync } from 'node:fs';
+import { createHash } from 'node:crypto';
+import { mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { cacheKeyFor } from '../../../../packages/jobs/src/plan.mjs';
 import {
@@ -16,8 +17,11 @@ import {
   validateRefReviewRequest,
   validateRefVerdict,
 } from '../../../../packages/schema/src/ref-review.mjs';
+import { TITLE_CARD_BATCH, titleCardJobs } from '../compositing/title-card.mjs';
 import { refuseStaleVideo } from '../productions/keyframe-staleness.mjs';
-import { decide as decideDefault } from './decide.mjs';
+import { chainDefaultFor, planChainedShot } from './chain.mjs';
+import { REF_UNTRUSTED_DIMENSIONS, decide as decideDefault } from './decide.mjs';
+import { EDIT_PLACEHOLDER, buildEditInstruction, fillEditDecision } from './edit-plan.mjs';
 import { estimateRegen } from './estimate.mjs';
 import * as steerDefault from './steer.mjs';
 import { runT0Checks } from './t0-checks.mjs';
@@ -27,6 +31,19 @@ const VIDEO_KINDS = new Set(['plate', 'upscale', 'presenter']);
 const STEER_PLACEHOLDER = '<steer>';
 const REPLACE_PLACEHOLDER = '<replace-ref>';
 const SECRET = /(api[_-]?key|token|secret|authorization|bearer)\s*[:=]\s*\S+/gi;
+const QWEN_EDIT_WORKFLOW = 'workflows/qwen_edit_2511_instruct.api.json';
+const QWEN_EDIT_MODEL = 'qwen_image_edit_2511_fp8mixed';
+const QWEN_EDIT_STEPS = 40;
+const QWEN_EDIT_CFG = 4;
+let qwenEditWorkflowSha256 = null;
+
+function qwenEditWorkflowSha() {
+  if (qwenEditWorkflowSha256 === null) {
+    const file = new URL(`../../../../${QWEN_EDIT_WORKFLOW}`, import.meta.url);
+    qwenEditWorkflowSha256 = createHash('sha256').update(readFileSync(file)).digest('hex');
+  }
+  return qwenEditWorkflowSha256;
+}
 
 const isObject = (value) => value !== null && typeof value === 'object' && !Array.isArray(value);
 
@@ -108,6 +125,19 @@ export function createRefWatchController({
   reviewTimeoutMs = 60_000,
   measure,
   currentKeyframeSha,
+  extractLastFrame,
+  reviewKeyframe,
+  planChained = planChainedShot,
+  liveSession = false,
+  regenBudgetUnits,
+  // Judge loop (Nov 1 research, JUDGE_RESEARCH.md): reviews for one batch run concurrently (the
+  // GPU idles while the judge thinks), a lone hard fail on a high-variance dimension gets one
+  // second opinion before it holds a still, and targeted edits can be turned off so a run that
+  // cannot afford them skips the Qwen edit download.
+  reviewConcurrency = 1,
+  secondOpinion = false,
+  reviewerRetry = false,
+  targetedEdits = true,
 } = {}) {
   if (!isObject(jobsDoc)) throw new TypeError('createRefWatchController requires a jobsDoc object');
   if (typeof submitJobs !== 'function') throw new TypeError('createRefWatchController requires submitJobs');
@@ -117,7 +147,20 @@ export function createRefWatchController({
   const productionId = jobsDoc.productionId ?? jobsDoc.packageId ?? null;
   const runId = typeof jobsDoc.runId === 'string' && jobsDoc.runId ? jobsDoc.runId : 'run';
   const caps = { ...REF_POLICY_DEFAULTS, ...(policy ?? {}) };
+  // A package run on a live Google Colab session has no production budget ledger, so every regen
+  // used to escalate. A caller-given regen allowance stands in for it.
+  if (!budgetLedger && Number.isFinite(regenBudgetUnits) && regenBudgetUnits >= 0) {
+    let reserved = 0;
+    budgetLedger = {
+      status: () => ({ capped: true, available: Math.max(0, regenBudgetUnits - reserved) }),
+      reserve: ({ upperBound }) => {
+        if (upperBound > regenBudgetUnits - reserved + 1e-9) throw Object.assign(new Error('regen allowance exceeded'), { code: 'BUDGET_EXCEEDED' });
+        reserved += upperBound;
+      },
+    };
+  }
   const stillJobs = jobs.filter(isStill);
+  const titleCards = Array.isArray(jobsDoc.titleCards) ? jobsDoc.titleCards.filter(isObject) : [];
   const stillIds = new Set(stillJobs.map((job) => job.id));
   const stillCount = stillJobs.length;
   const steerPrompt = steer?.steerPrompt ?? steerDefault.steerPrompt;
@@ -128,13 +171,15 @@ export function createRefWatchController({
   const acceptedSha = new Map();
   const acceptedStills = [];
   const submittedVideos = new Set();
+  const queuedTitleCutouts = new Set();
   const refusedVideos = new Set();
+  const deferredVideos = new Set();
   let regenJobsUsed = 0;
   let started = false;
   let chain = Promise.resolve();
 
   for (const job of stillJobs) {
-    states.set(job.id, { state: 'pending', attempt: 0, identityFailures: 0 });
+    states.set(job.id, { state: 'pending', attempt: 0, identityFailures: 0, editsTried: 0 });
   }
 
   function emit(event) {
@@ -193,11 +238,12 @@ export function createRefWatchController({
   }
 
   function ensure(jobId) {
-    if (!states.has(jobId)) states.set(jobId, { state: 'pending', attempt: 0, identityFailures: 0 });
+    if (!states.has(jobId)) states.set(jobId, { state: 'pending', attempt: 0, identityFailures: 0, editsTried: 0 });
     return states.get(jobId);
   }
 
   function failClosed(seed, reason, verdicts = []) {
+    skipShotsFor(seed.jobId, seed.keyframeSha256, redact(reason));
     const record = ensure(seed.jobId);
     record.state = 'held';
     const decision = {
@@ -225,7 +271,21 @@ export function createRefWatchController({
     });
   }
 
+  // A held still skips the shots it feeds, so the rest of the sequence still renders (the next
+  // chained shot falls back to its own keyframe). Before this, one escalation parked every later
+  // same-scene plate until teardown (Google Colab e2e 2026-10-30).
+  function skipShotsFor(stillId, keyframeSha256, reason) {
+    for (const video of gatedVideos) {
+      if (submittedVideos.has(video.id) || refusedVideos.has(video.id)) continue;
+      if (!keyframeDeps(video).includes(stillId)) continue;
+      refusedVideos.add(video.id);
+      deferredVideos.delete(video.id);
+      emit({ type: 'ref_gate_held', jobId: video.id, keyframeSha256, state: 'skipped', skipped: { stillJobId: stillId, reason } });
+    }
+  }
+
   function holdDecision(seed, decision, verdicts) {
+    skipShotsFor(seed.jobId, seed.keyframeSha256, decision?.reason ?? 'still held');
     const record = ensure(seed.jobId);
     record.state = 'held';
     persist(seed.keyframeSha256, verdicts, decision);
@@ -245,6 +305,66 @@ export function createRefWatchController({
     });
   }
 
+  function isLtxI2v(job) {
+    if (!isVideo(job) || job.generator !== 'ltx25') return false;
+    if (typeof job.workflow === 'string' && job.workflow !== '' && !/ltx25_i2v/.test(job.workflow)) return false;
+    return keyframeDeps(job).length > 0;
+  }
+
+  function previousLtxVideo(video) {
+    const list = gatedVideos.filter(isLtxI2v);
+    const index = list.findIndex((job) => job.id === video.id);
+    return index > 0 ? list[index - 1] : null;
+  }
+
+  async function chainPlanFor(video, previousOverride) {
+    if (!isLtxI2v(video) || !isObject(video.shot)) return null;
+    const previous = previousOverride === undefined ? previousLtxVideo(video) : previousOverride;
+    const chainFromPrevious = chainDefaultFor({
+      shot: video.shot,
+      previousShot: isObject(previous?.shot) ? previous.shot : null,
+      override: video.chainFromPreviousOverride,
+    });
+    video.chainFromPrevious = chainFromPrevious;
+    if (!chainFromPrevious || !previous) return null;
+    if (typeof extractLastFrame !== 'function' || typeof reviewKeyframe !== 'function') {
+      video.chainFallback = 'keyframe';
+      video.chainFallbackReason = 'chained frame review is not wired';
+      return null;
+    }
+    try {
+      const plan = await planChained({
+        previousClip: previous,
+        chainFromPrevious: true,
+        characters: charactersFor(video),
+        extractLastFrame,
+        reviewKeyframe,
+      });
+      if (plan?.fallback === 'keyframe') {
+        video.chainFallback = 'keyframe';
+        video.chainFallbackReason = plan.reason ?? 'identity check failed';
+        return null;
+      }
+      return plan;
+    } catch (error) {
+      video.chainFallback = 'keyframe';
+      video.chainFallbackReason = redact(error?.message ?? 'chain plan failed');
+      return null;
+    }
+  }
+
+  function emitChainPlanned(video, chained, fallback, reason) {
+    emit({
+      type: 'ref_chain_planned',
+      jobId: video.id,
+      chained,
+      fallback: fallback ?? null,
+      reason: typeof reason === 'string' && reason
+        ? reason
+        : (chained ? 'chained from the previous clip' : 'chaining is off for this shot'),
+    });
+  }
+
   async function maybeReleaseVideos() {
     const ready = [];
     for (const video of gatedVideos) {
@@ -258,6 +378,7 @@ export function createRefWatchController({
       }
       if (refusal) {
         refusedVideos.add(video.id);
+        deferredVideos.delete(video.id);
         emit({
           type: 'ref_gate_held',
           jobId: video.id,
@@ -267,10 +388,120 @@ export function createRefWatchController({
         });
         continue;
       }
-      ready.push(structuredClone(live.get(video.id) ?? video));
+      const next = structuredClone(live.get(video.id) ?? video);
+      if (isLtxI2v(video)) {
+        const previous = previousLtxVideo(video);
+        const chained = chainDefaultFor({
+          shot: video.shot,
+          previousShot: isObject(previous?.shot) ? previous.shot : null,
+          override: video.chainFromPreviousOverride,
+        });
+        next.chainFromPrevious = chained;
+        if (chained) {
+          const previousLive = isObject(previous) ? (live.get(previous.id) ?? previous) : null;
+          if (previousLive && refusedVideos.has(previous.id)) {
+            next.chainFallback = 'keyframe';
+            next.chainFallbackReason = 'the previous shot was skipped';
+            emitChainPlanned(video, true, 'keyframe', next.chainFallbackReason);
+            deferredVideos.delete(video.id);
+            ready.push(next);
+            submittedVideos.add(video.id);
+            continue;
+          }
+          if (previousLive && previousLive.status !== 'accepted') {
+            deferredVideos.add(video.id);
+            continue;
+          }
+          if (!previousLive) {
+            next.chainFallback = 'keyframe';
+            next.chainFallbackReason = 'chained shot has no previous clip';
+            emitChainPlanned(video, true, 'keyframe', next.chainFallbackReason);
+          } else {
+            const chainPlan = await chainPlanFor(next, previousLive);
+            if (chainPlan?.loadImage) {
+              next.loadImage = chainPlan.loadImage;
+              next.imgToVideoInplace = chainPlan.imgToVideoInplace;
+            }
+            emitChainPlanned(
+              video,
+              true,
+              next.chainFallback ?? null,
+              next.chainFallbackReason ?? (chainPlan?.loadImage ? 'chained from the previous clip' : 'chained frame unavailable'),
+            );
+            deferredVideos.delete(video.id);
+            submittedVideos.add(video.id);
+            await submitJobs({ batch: 'video', jobs: [next] });
+            continue;
+          }
+        } else {
+          emitChainPlanned(video, false, null, 'chaining is off for this shot');
+        }
+      }
+      deferredVideos.delete(video.id);
+      ready.push(next);
       submittedVideos.add(video.id);
     }
     if (ready.length > 0) await submitJobs({ batch: 'video', jobs: ready });
+  }
+
+  async function queueTitleCutouts(jobId) {
+    if (queuedTitleCutouts.has(jobId)) return;
+    const titles = titleCards.filter((title) => title.stillJobId === jobId);
+    if (titles.length === 0) return;
+    if (!refGateOpen(states.get(jobId)?.state)) return;
+    const { jobs: cutouts } = titleCardJobs({
+      jobsDoc: { ...jobsDoc, jobs: [...live.values()] },
+      acceptedStills,
+      titles,
+    });
+    if (cutouts.length === 0) return;
+    queuedTitleCutouts.add(jobId);
+    await submitJobs({ batch: TITLE_CARD_BATCH, jobs: cutouts });
+    for (const cutout of cutouts) {
+      emit({
+        type: 'ref_title_cutout_queued',
+        jobId,
+        cutoutJobId: cutout.id,
+      });
+    }
+  }
+
+  // Title-card fallback (Kyle, Nov 1): when the title still is held (it failed judging and the
+  // regen cap is spent), the cutout runs on the highest-scoring accepted still instead, so the
+  // title card keeps its subject layer. Score = passing checks; ties go to the earlier acceptance.
+  const titleFallbacks = new Set();
+  function stillScore(record) {
+    const checks = Array.isArray(record?.verdict?.checks) ? record.verdict.checks : [];
+    return checks.filter((check) => check?.pass === true).length;
+  }
+  async function queueTitleFallbacks() {
+    for (const title of titleCards) {
+      const original = title.stillJobId;
+      if (!original || titleFallbacks.has(original) || queuedTitleCutouts.has(original)) continue;
+      if (states.get(original)?.state !== 'held') continue;
+      const best = acceptedStills
+        .filter((record) => record.jobId !== original && !queuedTitleCutouts.has(record.jobId))
+        .sort((a, b) => stillScore(b) - stillScore(a) || a.acceptedAt - b.acceptedAt)[0];
+      if (!best) continue;
+      const { jobs: cutouts } = titleCardJobs({
+        jobsDoc: { ...jobsDoc, jobs: [...live.values()] },
+        acceptedStills,
+        titles: [{ ...title, stillJobId: best.jobId }],
+      });
+      if (cutouts.length === 0) continue;
+      titleFallbacks.add(original);
+      queuedTitleCutouts.add(best.jobId);
+      await submitJobs({ batch: TITLE_CARD_BATCH, jobs: cutouts });
+      for (const cutout of cutouts) {
+        emit({
+          type: 'ref_title_cutout_queued',
+          jobId: best.jobId,
+          cutoutJobId: cutout.id,
+          fallbackFrom: original,
+          reason: 'title still held; highest-scoring accepted still',
+        });
+      }
+    }
   }
 
   function rememberAccepted(job, seed, verdict) {
@@ -305,15 +536,79 @@ export function createRefWatchController({
     return typeof status.available === 'number' && status.available >= hold;
   }
 
-  async function reviewSeed(seed) {
-    const record = ensure(seed.jobId);
-    if (record.state === 'held' || record.state === 'accepted' || record.state === 'overridden') return;
-    const job = live.get(seed.jobId);
-    if (!job) return;
-    record.state = 'reviewing';
+  function buildQwenEditJob(previous, seed, decision, attempt) {
+    const seedValue = freshSeed(previous.seed ?? previous.params?.seed, attempt);
+    const edit = structuredClone(previous);
+    edit.kind = 'still';
+    edit.batch = 'stills';
+    edit.outputKind = 'image';
+    edit.output = previous.output ?? seed.imagePath;
+    edit.generator = 'qwen-edit-2511';
+    edit.workflow = QWEN_EDIT_WORKFLOW;
+    edit.workflowSha256 = qwenEditWorkflowSha();
+    edit.model = QWEN_EDIT_MODEL;
+    edit.modelRevision = null;
+    edit.seed = seedValue;
+    edit.prompt = previous.prompt ?? previous.params?.prompt ?? '';
+    edit.params = {
+      image: seed.imagePath,
+      instruction: decision.editInstruction,
+      seed: seedValue,
+      steps: QWEN_EDIT_STEPS,
+      cfg: QWEN_EDIT_CFG,
+    };
+    edit.fileInputs = [{ param: 'image', from: 'package', path: seed.imagePath }];
+    edit.refEdit = {
+      attempt: attempt + 1,
+      dimension: decision.editDimension,
+      instruction: decision.editInstruction,
+    };
+    edit.cacheKey = cacheKeyFor({
+      workflowSha256: edit.workflowSha256,
+      generator: edit.generator,
+      model: edit.model,
+      modelRevision: edit.modelRevision,
+      params: edit.params,
+      seed: seedValue,
+      width: edit.dims?.width,
+      height: edit.dims?.height,
+      frames: edit.frames,
+    });
+    return edit;
+  }
 
+  const SECOND_OPINION_DIMENSIONS = new Set(['text_artifact', 'framing']);
+  const reviewCache = new Map();
+  function cachedReview(request, image, pass = 1) {
+    const key = `${request.keyframeSha256}:${request.attempt}:${pass}`;
+    if (!reviewCache.has(key)) {
+      const promise = callReviewer(request, image);
+      promise.catch(() => {});
+      reviewCache.set(key, promise);
+    }
+    return reviewCache.get(key);
+  }
+
+  function trustedHardFails(verdict) {
+    return (Array.isArray(verdict?.checks) ? verdict.checks : [])
+      .filter((check) => check?.pass === false && check.severity === 'hard' && !REF_UNTRUSTED_DIMENSIONS.includes(check.dimension));
+  }
+
+  // Merge a second opinion: a dimension the second review passes is downgraded to soft in the
+  // first verdict (the evidence says why); a dimension both reviews fail stays hard.
+  function mergeSecondOpinion(first, second) {
+    const passedAgain = new Set((second.checks ?? []).filter((check) => check.pass !== false || check.severity !== 'hard').map((check) => check.dimension));
+    const checks = first.checks.map((check) => {
+      if (check.pass !== false || check.severity !== 'hard' || !SECOND_OPINION_DIMENSIONS.has(check.dimension) || !passedAgain.has(check.dimension)) return check;
+      return { ...check, severity: 'soft', evidence: `${check.evidence} (second review passed this dimension)`.slice(0, 400) };
+    });
+    const stillHard = checks.some((check) => check.pass === false && check.severity === 'hard');
+    return { ...first, checks, overall: stillHard ? 'fail' : 'pass' };
+  }
+
+  async function buildRequest(seed, job, record) {
     const measured = typeof measure === 'function'
-      ? await measure({ job, imagePath: seed.imagePath, attempt: record.attempt })
+      ? await measure({ job, imagePath: seed.imageFile ?? seed.imagePath, attempt: record.attempt })
       : null;
     const plannedWidth = job.dims?.width ?? measured?.width ?? 1024;
     const plannedHeight = job.dims?.height ?? measured?.height ?? 576;
@@ -334,6 +629,17 @@ export function createRefWatchController({
       attempt: record.attempt,
       characters,
     };
+    return { measured, request, characters };
+  }
+
+  async function reviewSeed(seed) {
+    const record = ensure(seed.jobId);
+    if (record.state === 'held' || record.state === 'accepted' || record.state === 'overridden') return;
+    const job = live.get(seed.jobId);
+    if (!job) return;
+    record.state = 'reviewing';
+
+    const { measured, request, characters } = await buildRequest(seed, job, record);
     if (!validateRefReviewRequest(request).ok) {
       failClosed(seed, 'review request was not valid');
       return;
@@ -357,7 +663,26 @@ export function createRefWatchController({
     if (!t0HardFail(t0Verdict)) {
       let reviewed;
       try {
-        reviewed = await callReviewer(request, { path: seed.imagePath, sha256: seed.keyframeSha256 });
+        const image = { path: seed.imageFile ?? seed.imagePath, sha256: seed.keyframeSha256 };
+        // Google Colab run11: one judge timeout held a good still. A reviewer error or timeout is
+        // retried once (API only, no GPU) before it can hold anything.
+        try {
+          reviewed = await cachedReview(request, image);
+          if (reviewerRetry && (!validateRefVerdict(reviewed).ok || reviewed.overall === 'error')) reviewed = await cachedReview(request, image, 3);
+        } catch (error) {
+          if (!reviewerRetry) throw error;
+          reviewed = await cachedReview(request, image, 3);
+        }
+        const lone = trustedHardFails(reviewed);
+        if (secondOpinion && validateRefVerdict(reviewed).ok && reviewed.overall === 'fail'
+          && lone.length > 0 && lone.every((check) => SECOND_OPINION_DIMENSIONS.has(check.dimension))) {
+          const second = await cachedReview(request, image, 2).catch(() => null);
+          if (second && validateRefVerdict(second).ok && second.overall !== 'error') {
+            verdicts.push(reviewed);
+            emit({ type: 'ref_review_started', jobId: seed.jobId, keyframeSha256: seed.keyframeSha256, state: 'reviewing', secondOpinion: true });
+            reviewed = mergeSecondOpinion(reviewed, second);
+          }
+        }
       } catch (error) {
         const reason = error?.code === 'REVIEW_TIMEOUT' ? 'reviewer timed out' : (error?.message ?? 'reviewer failed');
         failClosed(seed, reason, [...verdicts, errorVerdict(seed)]);
@@ -379,8 +704,14 @@ export function createRefWatchController({
       regenJobsUsed,
       stillCount,
       identityFailures: record.identityFailures,
+      editsTried: record.editsTried,
       policy: caps,
     });
+    if (!targetedEdits && decision?.action === 'targeted_edit') {
+      decision = { ...decision, action: 'reprompt', reason: `${decision.reason} (targeted edits off)`, nextPrompt: STEER_PLACEHOLDER };
+      delete decision.editInstruction;
+      delete decision.editDimension;
+    }
     if (!validateRefDecision(decision).ok) {
       decision = {
         schema: REF_DECISION_SCHEMA,
@@ -392,31 +723,50 @@ export function createRefWatchController({
       };
     }
 
-    if (decision.action === 'reprompt' || decision.action === 'replace_ref') {
+    const regenAction = decision.action === 'reprompt'
+      || decision.action === 'replace_ref'
+      || decision.action === 'targeted_edit';
+    if (regenAction) {
       const previous = live.get(seed.jobId);
-      const nextPrompt = steerPrompt({
-        previousPrompt: previous.params?.prompt ?? previous.prompt ?? '',
-        verdict,
-        characters,
-      });
-      const replaceRef = chooseReplacementRef({
-        characterId: characters[0]?.characterId,
-        primaryImage: previous.primaryImage ?? previous.params?.reference,
-        acceptedStills,
-      });
-      decision = fillDecision(decision, { nextPrompt, replaceRef });
-      const unfilled = (decision.action === 'reprompt' && (!decision.nextPrompt || decision.nextPrompt === STEER_PLACEHOLDER))
-        || (decision.action === 'replace_ref' && (!decision.replaceRef || decision.replaceRef === REPLACE_PLACEHOLDER));
+      const targetedEdit = decision.action === 'targeted_edit';
+      let nextPrompt;
+      let replaceRef;
+      if (decision.action === 'reprompt') {
+        nextPrompt = steerPrompt({
+          previousPrompt: previous.params?.prompt ?? previous.prompt ?? '',
+          verdict,
+          characters,
+        });
+      }
+      if (decision.action === 'replace_ref') {
+        replaceRef = chooseReplacementRef({
+          characterId: characters[0]?.characterId,
+          primaryImage: previous.primaryImage ?? previous.params?.reference,
+          acceptedStills,
+        });
+      }
+      if (targetedEdit) {
+        decision = fillEditDecision(decision, {
+          editInstruction: buildEditInstruction({ verdict, characters }),
+        });
+      } else {
+        decision = fillDecision(decision, { nextPrompt, replaceRef });
+      }
+      const unfilled = targetedEdit
+        ? (!decision.editInstruction || decision.editInstruction === EDIT_PLACEHOLDER)
+        : (decision.action === 'reprompt' && (!decision.nextPrompt || decision.nextPrompt === STEER_PLACEHOLDER))
+          || (decision.action === 'replace_ref' && (!decision.replaceRef || decision.replaceRef === REPLACE_PLACEHOLDER));
       let estimateResult = null;
       if (!unfilled) {
         try {
           estimateResult = await estimate({
-            decision,
+            decision: targetedEdit ? { ...decision, action: 'reprompt' } : decision,
             shot: { id: request.shotId, kind: 'still' },
             regenJobsUsed,
             stillCount,
             policy: caps,
             iteration,
+            liveSession,
           });
         } catch (error) {
           failClosed(seed, error?.message ?? 'regen estimate failed', verdicts);
@@ -443,7 +793,9 @@ export function createRefWatchController({
         decision = {
           ...decision,
           action: 'escalate',
-          reason: estimateResult?.reason || (unfilled ? 'steering did not fill the regen' : 'regen estimate blocked'),
+          reason: estimateResult?.reason || (unfilled
+            ? (targetedEdit ? 'the targeted edit instruction was empty' : 'steering did not fill the regen')
+            : 'regen estimate blocked'),
         };
       } else {
         const hold = holdUnits(estimateResult);
@@ -461,7 +813,7 @@ export function createRefWatchController({
               collectAndStopReserve: 0,
               idempotencyKey: `ref-regen-hold:${productionId ?? 'production'}:${seed.jobId}:${record.attempt}`,
               evidence: {
-                reason: 'ref_regen',
+                reason: targetedEdit ? 'ref_targeted_edit' : 'ref_regen',
                 label: estimateResult.label,
                 jobId: seed.jobId,
                 keyframeSha256: seed.keyframeSha256,
@@ -526,6 +878,33 @@ export function createRefWatchController({
         });
         return;
       }
+
+      if (decision.action === 'targeted_edit') {
+        const edit = buildQwenEditJob(previous, seed, decision, record.attempt);
+        live.set(seed.jobId, edit);
+        record.attempt += 1;
+        record.editsTried = (Number.isSafeInteger(record.editsTried) ? record.editsTried : 0) + 1;
+        record.state = 'regenerating';
+        regenJobsUsed += 1;
+        persist(seed.keyframeSha256, verdicts, decision);
+        emit({
+          type: 'ref_review_verdict',
+          jobId: seed.jobId,
+          keyframeSha256: seed.keyframeSha256,
+          state: 'regenerating',
+          verdict,
+          decision,
+        });
+        emitEstimate();
+        await submitJobs({ batch: 'regen', jobs: [structuredClone(edit)] });
+        emit({
+          type: 'ref_regen_queued',
+          jobId: seed.jobId,
+          keyframeSha256: seed.keyframeSha256,
+          state: 'regenerating',
+        });
+        return;
+      }
       emitEstimate(true);
     }
 
@@ -548,6 +927,7 @@ export function createRefWatchController({
         keyframeSha256: seed.keyframeSha256,
         state: record.state,
       });
+      await queueTitleCutouts(seed.jobId);
       await maybeReleaseVideos();
       return;
     }
@@ -573,6 +953,28 @@ export function createRefWatchController({
     }
   }
 
+  async function warmReviews(seeds) {
+    if (typeof reviewer !== 'function' || !(reviewConcurrency > 1) || seeds.length < 2) return;
+    const queue = seeds.slice();
+    let started = 0;
+    const kick = () => {
+      while (queue.length > 0 && started < reviewConcurrency) {
+        const seed = queue.shift();
+        const job = live.get(seed.jobId);
+        const record = ensure(seed.jobId);
+        if (!job || record.state === 'held' || record.state === 'accepted' || record.state === 'overridden') continue;
+        started += 1;
+        buildRequest(seed, job, record)
+          .then(({ request }) => (validateRefReviewRequest(request).ok
+            ? cachedReview(request, { path: seed.imageFile ?? seed.imagePath, sha256: seed.keyframeSha256 })
+            : null))
+          .catch(() => null)
+          .finally(() => { started -= 1; kick(); });
+      }
+    };
+    kick();
+  }
+
   const watcher = createRefWatcher({
     jobsDoc,
     enqueue: async (seed) => { pending.push(seed); },
@@ -583,8 +985,19 @@ export function createRefWatchController({
 
   async function handleUnlocked(event) {
     pending.length = 0;
+    if (isObject(event) && event.type === 'video_collected') {
+      const collected = typeof event.jobId === 'string' ? live.get(event.jobId) : null;
+      if (collected) {
+        collected.status = 'accepted';
+        if (typeof event.path === 'string' && event.path) collected.localPath = event.path;
+        await maybeReleaseVideos();
+      }
+      return;
+    }
     await watcher.handle(event);
     const seeds = pending.splice(0);
+    // Warm the judge for every seed of this batch (bounded), then decide in order.
+    await warmReviews(seeds);
     for (const seed of seeds) {
       try {
         await reviewSeed(seed);
@@ -595,7 +1008,11 @@ export function createRefWatchController({
   }
 
   function handle(event) {
-    const run = chain.then(() => handleUnlocked(event));
+    const run = chain.then(() => handleUnlocked(event)).then(async (value) => {
+      await maybeReleaseVideos();
+      await queueTitleFallbacks();
+      return value;
+    });
     chain = run.then(() => {}, () => {});
     return run;
   }
@@ -615,6 +1032,7 @@ export function createRefWatchController({
     return list.filter((job) => !isGatedVideo(job) || (
       !submittedVideos.has(job.id)
       && !refusedVideos.has(job.id)
+      && !deferredVideos.has(job.id)
       && keyframeDeps(job).every((id) => refGateOpen(states.get(id)?.state))
       && keyframeDeps(job).every((id) => !stalenessRefusal(job, id))
     ));
@@ -624,6 +1042,9 @@ export function createRefWatchController({
     const held = [];
     for (const [jobId, record] of states) {
       if (record.state === 'pending' || record.state === 'reviewing' || record.state === 'regenerating') held.push(jobId);
+    }
+    for (const jobId of deferredVideos) {
+      if (!held.includes(jobId)) held.push(jobId);
     }
     if (held.length > 0) {
       return {

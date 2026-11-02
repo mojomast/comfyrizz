@@ -7,10 +7,12 @@ export const REF_VERDICT_SCHEMA = 'comfyrizz.ref-review.verdict/v1';
 export const REF_DECISION_SCHEMA = 'comfyrizz.ref-review.decision/v1';
 
 export const REF_DIMENSIONS = Object.freeze(['technical', 'identity', 'anatomy', 'framing', 'prompt', 'text_artifact']);
+/** Targeted-edit labels only. `wardrobe` never becomes a verdict dimension; wardrobe issues arrive as prompt/appearance deductions. */
+export const REF_EDIT_DIMENSIONS = Object.freeze(['text_artifact', 'anatomy', 'wardrobe']);
 export const REF_SEVERITIES = Object.freeze(['hard', 'soft']);
 export const REF_REVIEWERS = Object.freeze(['t0', 'pi', 'fake']);
 export const REF_OVERALL = Object.freeze(['pass', 'fail', 'error']);
-export const REF_ACTIONS = Object.freeze(['accept', 'reprompt', 'replace_ref', 'escalate', 'override']);
+export const REF_ACTIONS = Object.freeze(['accept', 'reprompt', 'replace_ref', 'escalate', 'override', 'targeted_edit']);
 export const REF_GATE_STATES = Object.freeze(['pending', 'reviewing', 'accepted', 'regenerating', 'held', 'overridden']);
 export const REF_EVENTS = Object.freeze([
   'ref_review_started', 'ref_review_verdict', 'ref_review_error',
@@ -24,6 +26,8 @@ const SHA = /^[a-f0-9]{64}$/;
 const isObj = v => v !== null && typeof v === 'object' && !Array.isArray(v);
 const isStr = v => typeof v === 'string' && v.length > 0;
 const isPosInt = v => Number.isSafeInteger(v) && v > 0;
+const NEGATIVE_INSTRUCTION = /^(?:no|not|never|don'?t|do not|avoid|without|remove|removing|delete|eliminate|stop|prevent)\b/i;
+const isPositiveInstruction = v => isStr(v) && v.trim().length > 0 && !NEGATIVE_INSTRUCTION.test(v.trim());
 const relPath = v => isStr(v) && !v.startsWith('/') && !/^[a-zA-Z]:/.test(v) && !v.split(/[\\/]/).some(p => p === '..' || p === '');
 
 function result(errors) { return { ok: errors.length === 0, errors }; }
@@ -81,6 +85,10 @@ export function validateRefDecision(d) {
   if (d.action === 'reprompt') need(e, isStr(d.nextPrompt), 'reprompt needs nextPrompt');
   if (d.action === 'replace_ref') need(e, isStr(d.replaceRef), 'replace_ref needs replaceRef');
   if (d.action === 'override') need(e, isStr(d.receiptId), 'override needs receiptId');
+  if (d.action === 'targeted_edit') {
+    need(e, isPositiveInstruction(d.editInstruction), 'targeted_edit needs editInstruction as a non-empty positive end-state string');
+    need(e, REF_EDIT_DIMENSIONS.includes(d.editDimension), `targeted_edit editDimension must be one of ${REF_EDIT_DIMENSIONS.join('|')}`);
+  }
   return result(e);
 }
 

@@ -2,15 +2,20 @@
 // sha256 of each committed workflow graph, keyed by the package-relative
 // `gen.workflow` path, so the agent can stamp `gen.workflow_sha256`.
 export const WORKFLOW_SHA256: Record<string, string> = {
+  'workflows/birefnet_image_solid.api.json': '90cef015641f972a175a0ff7608779f3bd54dc07d5c4a524bdc1faf9ca5fd541',
+  'workflows/birefnet_image_transparent.api.json': 'b3f81ecde4e8333bbad2480f886c0871464a9849789cc3c0191ff1158a6b7d01',
   'workflows/character_identity_pulid.api.json': '6aac8dea8a7cc77660ecf1820f985d77a2eb1c881173b423d77821216e74be73',
   'workflows/character_lora_klein.api.json': '2d109c703e3a53d2de64318fb8facba384d1a03d17098251f3247d93ec26096b',
+  'workflows/chatterbox_multilingual_tts.api.json': '8df069ca14d7717873143127125ba2ff6321de6622bfa05e2a35d3ece806124c',
   'workflows/fasth3_omni_ref2v_noclip.api.json': '48e3cb25af0626d47cd9e1ae67656ff3e4d5d0137414812ed2ed051aa0b1a02f',
   'workflows/fasth3_omni_ref2va.api.json': '8e6038252666a21233cb947bd43dc52b2a8eb1ceb18e995bd2ce1f79e6690b3f',
   'workflows/flux3_klein_img2img.api.json': '91d4b539ed813532895c278505bdb29efdc359fdd7a44b07191c79606be980aa',
   'workflows/flux3_klein_ref2_edit.api.json': '0f01b4525609f7f72fa71cc77b1324551f5c99d577059ba2378eeffe0e53cfb1',
   'workflows/flux3_klein_ref_edit.api.json': 'ecf1b281737c8f3bad5afe7be79e76d7aa3595146b97a8df3e8098c21c080e09',
   'workflows/flux3_klein_t2i.api.json': 'e83ba017e5be8e16c72474af4702b862a286e94bf7947edaa2beac7afe967689',
+  'workflows/flux3_klein_t2i_int8.api.json': '43eda95c0cf360fb6f19c5d3afc4c0ed0f717ff3a6e48e180a8fa97f1c926f0d',
   'workflows/ltx25_a2v_2stage.api.json': 'ad0df3525517b8c0429a8f5f4882715c5eb11704e0466d144f7fb661ae6e0723',
   'workflows/ltx25_i2v_2stage.api.json': '6089301e2b6c86de132890e2009e8accdfc84da4f26bbd95d377130333313d79',
   'workflows/ltx25_t2v_2stage.api.json': '1d5710bceb405fb5d29d6cb5de9e825495ba99b7b4a57e5c6b1fa43ab207710f',
+  'workflows/qwen_edit_2511_instruct.api.json': 'aa23f20186e4fb6bbcd656dbc55d76fbf3a2313992f614f8b6cc2882b72eeb7b',
 };

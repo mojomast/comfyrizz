@@ -206,9 +206,10 @@
           "enum": [
             "kokoro",
             "qwen3-tts",
+            "chatterbox",
             "none"
           ],
-          "description": "kokoro (default) is the CPU narrator. qwen3-tts is the optional Qwen3-TTS 1.7B backend; when its runtime is missing the pipeline falls back to kokoro unless voice.strict is true. none disables narration."
+          "description": "kokoro (default) is the CPU narrator. qwen3-tts is the optional Qwen3-TTS 1.7B backend; when its runtime is missing the pipeline falls back to kokoro unless voice.strict is true. chatterbox is the opt-in Chatterbox Multilingual engine (one line per graph call, speech-recognition take selection, Google Colab only, never falls back to kokoro). none disables narration."
         },
         "voice": {
           "type": "string",
@@ -377,6 +378,33 @@
     },
     "audio": {
       "$ref": "#/$defs/packageAudio"
+    },
+    "titleCards": {
+      "type": "array",
+      "maxItems": 4,
+      "description": "SKILLS-PORT: title cards whose text sits behind the subject. Each names a generated still; once reference watch accepts it, a BiRefNet cutout job is queued and the card is composed as plate, text, cutout.",
+      "items": {
+        "type": "object",
+        "required": [
+          "asset",
+          "text"
+        ],
+        "unevaluatedProperties": false,
+        "properties": {
+          "asset": {
+            "$ref": "#/$defs/assetId"
+          },
+          "text": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 80
+          },
+          "background": {
+            "type": "string",
+            "pattern": "^#[0-9a-fA-F]{6}$"
+          }
+        }
+      }
     },
     "cast": {
       "type": "array",
@@ -1929,6 +1957,11 @@
         "speaker": {
           "$ref": "#/$defs/castId",
           "description": "CCL4a: the cast member who speaks this scene's narration. Optional. When omitted, the package voice narrates. The speaker's cast[].voice, when present, overrides the package voice for this scene; otherwise the package voice is used."
+        },
+        "sequence": {
+          "type": "string",
+          "pattern": "^[a-z0-9][a-z0-9_-]{0,63}$",
+          "description": "SKILLS-PORT: the story scene this package scene (one shot) belongs to. Consecutive package scenes with the same sequence are shots of one story scene, so reference watch chains each LTX plate from the previous shot's last frame by default. Omitted: the package scene is its own story scene."
         }
       }
     },
@@ -2341,6 +2374,14 @@
         "created_at": {
           "type": "string",
           "format": "date-time"
+        },
+        "cut": {
+          "type": "boolean",
+          "description": "SKILLS-PORT: a hard cut before this plate; it is never chained from the previous shot."
+        },
+        "chainFromPrevious": {
+          "type": "boolean",
+          "description": "SKILLS-PORT: per-shot override of last-frame chaining (true forces it on, false forces it off)."
         }
       }
     },

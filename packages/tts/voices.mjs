@@ -7,6 +7,44 @@ export const KOKORO_VOICES = [
   { id: 'ff_siwis', label: 'Siwis · French female', language: 'fr-fr' },
 ];
 export const QWEN_SPEAKERS = ['Ryan', 'Aiden', 'Vivian', 'Serena', 'Uncle_Fu', 'Dylan', 'Eric', 'Ono_Anna', 'Sohee'];
+
+export const CHATTERBOX_ENGINE = 'chatterbox';
+export const CHATTERBOX_REFERENCE_FIELD = 'voice_reference';
+export const CHATTERBOX_DEFAULT_LANGUAGE = 'English (en)';
+export const CHATTERBOX_LANGUAGES = Object.freeze([
+  'Arabic (ar)',
+  'Danish (da)',
+  'German (de)',
+  'Greek (el)',
+  'English (en)',
+  'Spanish (es)',
+  'Finnish (fi)',
+  'French (fr)',
+  'Hebrew (he)',
+  'Hindi (hi)',
+  'Italian (it)',
+  'Japanese (ja)',
+  'Korean (ko)',
+  'Malay (ms)',
+  'Dutch (nl)',
+  'Norwegian (no)',
+  'Polish (pl)',
+  'Portuguese (pt)',
+  'Russian (ru)',
+  'Swedish (sv)',
+  'Swahili (sw)',
+  'Turkish (tr)',
+  'Chinese (zh)',
+]);
+export const CHATTERBOX_VOICES = Object.freeze(CHATTERBOX_LANGUAGES.map((language) => {
+  const [, label, code] = /^(.+) \(([a-z]{2})\)$/.exec(language);
+  return Object.freeze({
+    id: code,
+    label: `${label} · built-in multilingual`,
+    language,
+    cloning: false,
+  });
+}));
 const kokoro = { enabled: true, engine: 'kokoro', language: 'en-us', speed: 0.98 };
 const qwen = { enabled: true, engine: 'qwen3-tts', speed: 1, language: 'en-us', strict: true };
 export const VOICE_PRESETS = [

@@ -346,9 +346,9 @@ function checkDuration(doc, errors) {
 function checkVoice(doc, errors) {
   const v = doc.voice;
   if (!isObj(v) || v.enabled !== true) return;
-  const voiced = v.engine === "kokoro" || v.engine === "qwen3-tts";
+  const voiced = v.engine === "kokoro" || v.engine === "qwen3-tts" || v.engine === "chatterbox";
   if (!voiced || !isStr(v.voice) || v.voice.length === 0) {
-    errors.push(error("SEM_VOICE_INCOMPLETE", "/voice", "voice.enabled requires engine kokoro or qwen3-tts and a non-empty voice"));
+    errors.push(error("SEM_VOICE_INCOMPLETE", "/voice", "voice.enabled requires engine kokoro, qwen3-tts or chatterbox and a non-empty voice"));
   }
   if (v.engine === 'qwen3-tts') {
     if ((v.speed ?? 1) !== 1) errors.push(error('SEM_VOICE_INCOMPLETE', '/voice/speed', 'Qwen requires speed=1; use delivery direction for pacing'));

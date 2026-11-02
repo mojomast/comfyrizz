@@ -23,7 +23,8 @@ export function createPiRefReviewer({ reviewStill, model, loadImage } = {}) {
     const request = envelope ? envelope.request : input;
     const signal = options?.signal ?? envelope?.signal;
     try {
-      const image = await loadImage(request?.imagePath);
+      // the envelope image is the collected file on this host; request.imagePath stays package-relative
+      const image = await loadImage(envelope?.image?.path ?? request?.imagePath);
       return await reviewStill({ request, image, model, signal });
     } catch {
       return errorVerdict(request);

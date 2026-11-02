@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { CHAIN_STRENGTHS, planChainedShot } from '../../src/ref-watch/chain.mjs';
+import { CHAIN_STRENGTHS, chainDefaultFor, planChainedShot } from '../../src/ref-watch/chain.mjs';
 
 const acceptedClip = Object.freeze({ id: 'clip_s02', status: 'accepted', video: 'out/clip_s02.mp4' });
 const frame = 'out/clip_s02_last_frame.png';
@@ -15,9 +15,20 @@ function harness(overrides = {}) {
   const reviewKeyframe = async (input) => {
     calls.push(['reviewKeyframe', input]);
     if (overrides.reviewThrows) throw new Error('judge unavailable');
-    return { overall: overrides.overall ?? 'pass' };
+    return {
+      overall: overrides.overall ?? 'pass',
+      ...(overrides.checks === undefined ? {} : { checks: overrides.checks }),
+    };
   };
   return { calls, extractLastFrame, reviewKeyframe };
+}
+
+const characters = Object.freeze([
+  Object.freeze({ characterId: 'hero', identityLock: 'soft face, dark curls' }),
+]);
+
+function shot(overrides = {}) {
+  return { sceneId: 'scene_01', index: 1, ...overrides };
 }
 
 test('RW-W9C: chaining is off by default and calls neither dependency', () => {
@@ -124,4 +135,142 @@ test('RW-W9C: refuses when extraction throws and does not review', async () => {
     /ffmpeg failed/,
   );
   assert.deepEqual(calls.map(([name]) => name), ['extractLastFrame']);
+});
+
+// --- SP01: same-scene chain default ----------------------------------------
+
+test('SP01: chainDefaultFor turns a same-scene consecutive shot on', () => {
+  assert.equal(
+    chainDefaultFor({ shot: shot(), previousShot: shot({ index: 0 }) }),
+    true,
+  );
+});
+
+test('SP01: chainDefaultFor stays off across scenes, on the first shot, and on override false', () => {
+  assert.equal(
+    chainDefaultFor({ shot: shot({ sceneId: 'scene_02' }), previousShot: shot({ index: 0 }) }),
+    false,
+    'different scene',
+  );
+  assert.equal(chainDefaultFor({ shot: shot({ index: 0 }), previousShot: null }), false, 'first shot');
+  assert.equal(chainDefaultFor({ shot: shot(), previousShot: undefined }), false, 'missing previous shot');
+  assert.equal(
+    chainDefaultFor({ shot: shot(), previousShot: shot({ index: 0 }), override: false }),
+    false,
+    'explicit override false wins',
+  );
+});
+
+test('SP01: chainDefaultFor refuses a cut or hard transition on either shot', () => {
+  assert.equal(
+    chainDefaultFor({ shot: shot({ cut: true }), previousShot: shot({ index: 0 }) }),
+    false,
+    'current shot marked cut',
+  );
+  assert.equal(
+    chainDefaultFor({ shot: shot(), previousShot: shot({ index: 0, cut: true }) }),
+    false,
+    'previous shot marked cut',
+  );
+  assert.equal(
+    chainDefaultFor({ shot: shot({ transition: 'hard' }), previousShot: shot({ index: 0 }) }),
+    false,
+    'current shot has a hard transition',
+  );
+  assert.equal(
+    chainDefaultFor({ shot: shot(), previousShot: shot({ index: 0, transition: 'hard' }) }),
+    false,
+    'previous shot has a hard transition',
+  );
+});
+
+test('SP01: override true forces chaining on even across scenes or a cut', () => {
+  assert.equal(
+    chainDefaultFor({ shot: shot({ sceneId: 'scene_02', cut: true }), previousShot: null, override: true }),
+    true,
+  );
+});
+
+test('SP01: chainDefaultFor does not treat a skipped shot as directly preceding', () => {
+  assert.equal(
+    chainDefaultFor({ shot: shot({ index: 2 }), previousShot: shot({ index: 0 }) }),
+    false,
+  );
+});
+
+// --- SP01: identity gate on the chained frame ------------------------------
+
+test('SP01: chained review asks for the identity dimension with the characters', async () => {
+  const { calls, extractLastFrame, reviewKeyframe } = harness({
+    checks: [{ dimension: 'identity', pass: true, severity: 'hard', evidence: 'same face' }],
+  });
+  const result = await planChainedShot({
+    previousClip: acceptedClip,
+    chainFromPrevious: true,
+    characters,
+    extractLastFrame,
+    reviewKeyframe,
+  });
+
+  assert.deepEqual(calls.map(([name]) => name), ['extractLastFrame', 'reviewKeyframe']);
+  assert.deepEqual(calls[1][1], {
+    kind: 'keyframe',
+    image: frame,
+    characters,
+    dimensions: ['identity'],
+  });
+  assert.equal(result.loadImage, frame);
+  assert.deepEqual(result.imgToVideoInplace, { strength: 0.7, strength2: 0.7 });
+});
+
+test('SP01: identity failure on the chained frame falls back to the shot keyframe', async () => {
+  const { extractLastFrame, reviewKeyframe } = harness({
+    checks: [{ dimension: 'identity', pass: false, severity: 'hard', evidence: 'face drift' }],
+  });
+  const result = await planChainedShot({
+    previousClip: acceptedClip,
+    chainFromPrevious: true,
+    characters,
+    extractLastFrame,
+    reviewKeyframe,
+  });
+
+  assert.equal(result.fallback, 'keyframe');
+  assert.match(result.reason, /identity/i);
+  assert.equal(result.loadImage, undefined, 'never uses the unreviewed chained frame');
+  assert.equal(result.imgToVideoInplace, undefined);
+});
+
+test('SP01: a missing identity verdict falls back instead of using the chained frame', async () => {
+  const { extractLastFrame, reviewKeyframe } = harness({
+    checks: [{ dimension: 'technical', pass: true, severity: 'hard', evidence: 'ok' }],
+  });
+  const result = await planChainedShot({
+    previousClip: acceptedClip,
+    chainFromPrevious: true,
+    characters,
+    extractLastFrame,
+    reviewKeyframe,
+  });
+
+  assert.equal(result.fallback, 'keyframe');
+  assert.match(result.reason, /identity/i);
+  assert.equal(result.loadImage, undefined);
+});
+
+test('SP01: an overall failed review still refuses before the identity fallback', async () => {
+  const { extractLastFrame, reviewKeyframe } = harness({
+    overall: 'fail',
+    checks: [{ dimension: 'identity', pass: false, severity: 'hard', evidence: 'face drift' }],
+  });
+  await assert.rejects(
+    planChainedShot({
+      previousClip: acceptedClip,
+      chainFromPrevious: true,
+      characters,
+      extractLastFrame,
+      reviewKeyframe,
+    }),
+    /review/,
+  );
 });
