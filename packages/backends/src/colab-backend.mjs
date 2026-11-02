@@ -450,6 +450,12 @@ export function createColabBackend({
   // judge-workflow v3: async work for the VM while it waits on the off-machine judge (e.g. the
   // Chatterbox voiceover). Runs once, the first time the watch queue is empty with reviews pending.
   onJudgeIdle = null,
+  // judge-workflow v3 (Goat Getaway): work that must not be starved by the render budget (the
+  // Chatterbox voiceover). Runs once on the ready VM before the first batch; a failure is logged.
+  onBeforeBatches = null,
+  // One judge pass: hand the watch every still of a collected batch in ONE preview event (the
+  // controller warms those reviews concurrently) and skip per-still live-tap previews.
+  oneStillPass = false,
   // Judge loop: false skips the Qwen Image Edit download (~40 GB) and turns targeted_edit into a
   // reprompted regen. COMFYRIZZ_REFWATCH_EDITS=0 sets it from the environment.
   refWatchEdits = process.env.COMFYRIZZ_REFWATCH_EDITS !== '0',
@@ -1335,6 +1341,9 @@ export function createColabBackend({
       // review finishes or the watch submits work, so the VM never waits on the judge while
       // released jobs are queued (live2/live3 rendered one plate per batch, ~5 min apart).
       let reviewsPending = 0;
+      // Still reviews in flight. Video releases wait until every still has been judged, so the
+      // clips go up as one batch (one judge pass over the stills) instead of one exec per shot.
+      let stillReviewsPending = 0;
       let wakeDrain = null;
       const nudgeDrain = () => { const wake = wakeDrain; wakeDrain = null; wake?.(); };
       let judgeIdleRan = false;
@@ -1365,8 +1374,11 @@ export function createColabBackend({
       function queueReviewEvent(event) {
         if (!refWatchGate || typeof refWatchGate.handle !== "function") return;
         reviewsPending += 1;
+        const still = event?.type === "preview_ready";
+        if (still) stillReviewsPending += 1;
         reviewChain = reviewChain.then(() => refWatchGate.handle(event)).then(() => {}, () => {}).then(() => {
           reviewsPending -= 1;
+          if (still) stillReviewsPending -= 1;
           nudgeDrain();
         });
       }
@@ -1430,6 +1442,7 @@ export function createColabBackend({
             if (result.code !== 0) throw new Error('Live preview download unavailable; will retry');
           },
           onReady: (payload) => {
+            if (oneStillPass) return;
             for (const entry of payload?.manifest?.jobs ?? []) if (entry?.job) previewedJobs.add(previewKey(entry));
             const event = { type: 'preview_ready', ...payload };
             emit(onEvent, event);
@@ -1481,13 +1494,20 @@ export function createColabBackend({
         // runs). Every still the batch collected that never produced a preview is handed to the
         // reference watch from the verified collection, so the gate never waits on a lost preview.
         if (refWatchGate && collect.manifest && collect.local) {
+          const passEntries = [];
           for (const entry of collect.manifest.jobs ?? []) {
             if (!entry?.job || previewedJobs.has(previewKey(entry))) continue;
             if (entry.status !== "succeeded" && entry.status !== "cached") continue;
             const planned = doc.jobs.find((job) => job.id === entry.job);
             if (!planned || isVideoJob(planned)) continue;
             previewedJobs.add(previewKey(entry));
+            if (oneStillPass) { passEntries.push(entry); continue; }
             const event = { type: "preview_ready", source: "collected", manifest: { ...collect.manifest, complete: false, jobs: [entry] }, outputDir: collect.local };
+            emit(onEvent, event);
+            queueReviewEvent(event);
+          }
+          if (passEntries.length > 0) {
+            const event = { type: "preview_ready", source: "collected", onePass: true, manifest: { ...collect.manifest, complete: false, jobs: passEntries }, outputDir: collect.local };
             emit(onEvent, event);
             queueReviewEvent(event);
           }
@@ -1575,15 +1595,20 @@ export function createColabBackend({
         if (!refWatchGate) return null;
         let executed = 0;
         for (;;) {
-          if (refWatchQueue.length === 0) {
-            if (reviewsPending === 0) {
+          // One judge pass over the stills: while any still is under review, only non-video work
+          // (regens, title cutouts) may run; queued clips wait and then go up together.
+          const runnable = stillReviewsPending > 0
+            ? refWatchQueue.filter((payload) => payload?.batch !== "video")
+            : refWatchQueue.slice();
+          if (runnable.length === 0) {
+            if (reviewsPending === 0 && refWatchQueue.length === 0) {
               await reviewChain;
               if (refWatchQueue.length === 0 && reviewsPending === 0) return null;
               continue;
             }
             // Only once clips are in flight: the first idle (stills still under review) is short,
             // and the plates it would release are worth more GPU time than the voiceover.
-            if (!judgeIdleRan && executed > 0 && typeof onJudgeIdle === "function") {
+            if (!judgeIdleRan && executed > 0 && refWatchQueue.length === 0 && typeof onJudgeIdle === "function") {
               judgeIdleRan = true;
               emit(onEvent, { type: "judge_idle_work", phase: "start" });
               try { await onJudgeIdle({ session, signal }); emit(onEvent, { type: "judge_idle_work", phase: "done" }); }
@@ -1594,7 +1619,8 @@ export function createColabBackend({
             continue;
           }
           // Everything the watch released while the last batch ran goes up as one batch per kind.
-          for (const payload of coalesceSubmissions(refWatchQueue.splice(0))) {
+          for (const payload of runnable) refWatchQueue.splice(refWatchQueue.indexOf(payload), 1);
+          for (const payload of coalesceSubmissions(runnable)) {
             if (++executed > 64) throw new ColabCliError("reference watch queued more Google Colab batches than this run will execute");
             const outcome = await executeSubmission(payload);
             if (outcome?.stop) return outcome;
@@ -1602,6 +1628,11 @@ export function createColabBackend({
         }
       }
 
+      if (typeof onBeforeBatches === "function") {
+        emit(onEvent, { type: "before_batches_work", phase: "start" });
+        try { await onBeforeBatches({ session, signal }); emit(onEvent, { type: "before_batches_work", phase: "done" }); }
+        catch (error) { emit(onEvent, { type: "before_batches_work", phase: "failed", message: redactForLog(String(error?.message ?? error)) }); }
+      }
       for (const name of planned) {
         signal?.throwIfAborted();
         const subset = name ? jobs.filter((job) => job.batch === name) : jobs;
