@@ -47,6 +47,19 @@ function defaultRefWatchLoadImage(imagePath) {
   return { path: imagePath, mediaType: 'image/png' };
 }
 
+/** judge-loop v2: six frames sampled in order from a clip, tiled 3x2 into one 1536x576 image. */
+export function createClipSampler({ runFfmpeg, outDir }) {
+  return async function sampleClipFrames(clip) {
+    const path = join(outDir, `${clip.id}.frames.png`);
+    const frames = Number(clip.frames) > 0 ? Number(clip.frames) : 73;
+    const step = Math.max(1, Math.floor((frames - 1) / 5));
+    await runFfmpeg(['-y', '-v', 'error', '-i', clip.localPath, '-vf',
+      `select='not(mod(n\\,${step}))',scale=512:288,tile=3x2`, '-frames:v', '1', '-update', '1', path]);
+    const sha256 = createHash('sha256').update(readFileSync(path)).digest('hex');
+    return { path, sha256 };
+  };
+}
+
 export function createRefWatchGate({ refWatch = false, env = process.env } = {}) {
   if (!refWatchRequested(refWatch, env)) return null;
   const config = refWatch !== null && typeof refWatch === 'object' ? refWatch : {};
@@ -64,6 +77,7 @@ export function createRefWatchGate({ refWatch = false, env = process.env } = {})
         const chatModel = llm.createOpenAICompatibleModel(provider);
         return {
           reviewStill: agent.reviewStill,
+          reviewScene: agent.reviewScene,
           model: async (messages) => {
             let reply = '';
             const signal = new AbortController().signal;
@@ -82,6 +96,11 @@ export function createRefWatchGate({ refWatch = false, env = process.env } = {})
   const model = config.model ?? (async (messages) => (await productionDeps()).model(messages));
   const loadImage = config.loadImage ?? defaultRefWatchLoadImage;
   const reviewer = config.reviewer ?? createPiRefReviewer({ reviewStill, model, loadImage });
+  // judge-loop v2: scene continuity and clip review, on unless COMFYRIZZ_JUDGE_V2=0 or judgeV2:false.
+  const judgeV2 = config.judgeV2 ?? env.COMFYRIZZ_JUDGE_V2 !== '0';
+  const sceneReviewer = config.sceneReviewer ?? (judgeV2
+    ? async (input) => (await productionDeps()).reviewScene({ ...input, model })
+    : null);
   const gate = async (context = {}) => {
     const { createRefWatchController } = await import('./ref-watch/controller.mjs');
     const extractLastFrame = injectedExtractLastFrame ?? createLastFrameExtractor({
@@ -106,6 +125,9 @@ export function createRefWatchGate({ refWatch = false, env = process.env } = {})
       reviewerRetry: config.reviewerRetry ?? true,
       targetedEdits: config.targetedEdits ?? context.targetedEdits ?? true,
       reviewer,
+      sceneReviewer,
+      clipReviewer: config.clipReviewer ?? (judgeV2 ? reviewer : null),
+      sampleClipFrames: config.sampleClipFrames ?? (judgeV2 ? createClipSampler({ runFfmpeg, outDir: join(context.receiptsDir ?? '.', 'clip-frames') }) : null),
     });
   };
   return Object.assign(gate, config, { reviewer });

@@ -110,3 +110,20 @@ def test_all_rejected_returns_no_take_with_reasons_per_take():
 def test_words_per_second_estimate_is_the_voiceover_rule():
     assert WORDS_PER_SECOND == 2.5
     assert expected_seconds("one two three four five") == 2.0
+
+
+def test_a_take_with_a_faded_phrase_is_rejected():
+    import numpy as np
+    from take_select import faded, select_take
+
+    rate = 24000
+    t = np.arange(int(rate * 1.2)) / rate
+    loud = 0.3 * np.sin(2 * np.pi * 180 * t)
+    gap = np.zeros(int(rate * 0.5))
+    soft = 0.02 * np.sin(2 * np.pi * 180 * t[: int(rate * 0.8)])
+    take = np.concatenate([loud, gap, soft]).astype(np.float32)
+    assert faded(take, rate)
+    even = np.concatenate([loud, gap, loud[: int(rate * 0.8)]]).astype(np.float32)
+    assert not faded(even, rate)
+    result = select_take("one two three four", [{"path": "a.wav", "transcript": "one two three four", "seconds": 2.5, "_samples": take, "_rate": rate}])
+    assert result["take"] is None and "faded" in result["rejections"]["a.wav"]

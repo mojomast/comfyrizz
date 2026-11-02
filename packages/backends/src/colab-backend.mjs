@@ -1508,7 +1508,7 @@ export function createColabBackend({
           const plannedSubset = jobs.filter((job) => job.batch === name);
           // A regen keeps the job id and changes the seed, so it must not reuse the plan zip.
           const full = payload?.batch !== "regen"
-            && !group.some((job) => job.chainFrameApplied)
+            && !group.some((job) => job.chainFrameApplied || job.clipRetry)
             && jobsZipIsPlan
             && plannedSubset.length === group.length
             && plannedSubset.every((job) => group.some((item) => item.id === job.id));

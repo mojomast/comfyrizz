@@ -137,6 +137,14 @@ export function createRefWatchController({
   reviewConcurrency = 1,
   secondOpinion = false,
   reviewerRetry = false,
+  // judge-loop v2 (JUDGE_RESEARCH_V2.md). sceneReviewer({ candidate, anchors, characters }) checks a
+  // passing still against accepted stills (identity, wardrobe, style); clipReviewer({ request, image })
+  // judges a collected clip from sampled frames; sampleClipFrames(clip) returns { path } of a frame grid.
+  sceneReviewer = null,
+  maxSceneAnchors = 3,
+  clipReviewer = null,
+  sampleClipFrames = null,
+  clipRetries = 1,
   targetedEdits = true,
 } = {}) {
   if (!isObject(jobsDoc)) throw new TypeError('createRefWatchController requires a jobsDoc object');
@@ -175,6 +183,7 @@ export function createRefWatchController({
   const refusedVideos = new Set();
   const deferredVideos = new Set();
   let regenJobsUsed = 0;
+  let regenUnitsSpent = 0;
   let started = false;
   let chain = Promise.resolve();
 
@@ -510,6 +519,8 @@ export function createRefWatchController({
       jobId: job.id,
       characterId: characters[0]?.characterId,
       imagePath: seed.imagePath,
+      imageFile: seed.imageFile ?? seed.imagePath,
+      prompt: job.params?.prompt || job.prompt || '',
       state: 'accepted',
       identityPassed: !identityHardFail(verdict),
       acceptedAt: acceptedStills.length + 1,
@@ -628,8 +639,51 @@ export function createRefWatchController({
       prompt: job.params?.prompt || job.prompt || 'untitled still',
       attempt: record.attempt,
       characters,
+      ...(record.attempt > 0 && Array.isArray(record.lastHardFails) && record.lastHardFails.length
+        ? { priorFailures: record.lastHardFails }
+        : {}),
     };
     return { measured, request, characters };
+  }
+
+  // judge-loop v2: a still that passes on its own is compared with up to maxSceneAnchors accepted
+  // stills (same scene first). A hard inconsistency becomes an identity hard fail on the first
+  // attempt only, so it buys one regen and can never hold a still by itself.
+  async function sceneCheck(seed, job, verdict, characters) {
+    // a still belongs to the scene (sequence) of the shot it feeds
+    const sceneOf = (id) => {
+      const video = gatedVideos.find((entry) => keyframeDeps(entry).includes(id));
+      return video?.shot?.sceneId ?? live.get(id)?.scene ?? null;
+    };
+    const mine = sceneOf(seed.jobId);
+    const pool = acceptedStills.filter((entry) => entry.jobId !== seed.jobId && entry.imageFile && !isTitleOnly(entry.jobId));
+    const anchors = [...pool.filter((entry) => sceneOf(entry.jobId) === mine), ...pool.filter((entry) => sceneOf(entry.jobId) !== mine)]
+      .slice(0, maxSceneAnchors);
+    if (anchors.length === 0) return verdict;
+    let scene = null;
+    try {
+      scene = await sceneReviewer({
+        candidate: { jobId: seed.jobId, image: { path: seed.imageFile ?? seed.imagePath, mediaType: 'image/png' }, prompt: job.params?.prompt || job.prompt || '' },
+        anchors: anchors.map((entry) => ({ jobId: entry.jobId, image: { path: entry.imageFile, mediaType: 'image/png' } })),
+        characters,
+      });
+    } catch {
+      scene = null;
+    }
+    emit({ type: 'ref_scene_verdict', jobId: seed.jobId, keyframeSha256: seed.keyframeSha256, anchors: anchors.map((entry) => entry.jobId), scene });
+    if (!scene || scene.consistent !== false) return verdict;
+    const hard = scene.checks.filter((check) => check.pass === false && check.severity === 'hard');
+    if (hard.length === 0) return verdict;
+    const evidence = hard.map((check) => `scene ${check.dimension}: ${check.evidence}`).join('; ').slice(0, 400);
+    const checks = (verdict.checks ?? []).map((check) => (check.dimension === 'identity'
+      ? { ...check, pass: false, severity: 'hard', evidence }
+      : check));
+    if (!checks.some((check) => check.dimension === 'identity')) checks.push({ dimension: 'identity', pass: false, severity: 'hard', evidence });
+    return { ...verdict, overall: 'fail', checks, fixHints: [...(verdict.fixHints ?? []), ...(scene.fixHints ?? [])].slice(0, 6) };
+  }
+
+  function isTitleOnly(jobId) {
+    return /\.cutout$/.test(jobId);
   }
 
   async function reviewSeed(seed) {
@@ -697,6 +751,12 @@ export function createRefWatchController({
       verdicts.push(verdict);
     }
 
+    if (sceneReviewer && verdict.overall === 'pass' && record.attempt === 0) {
+      verdict = await sceneCheck(seed, job, verdict, characters);
+    }
+    record.lastHardFails = (verdict.checks ?? [])
+      .filter((check) => check.pass === false && check.severity === 'hard')
+      .map((check) => ({ dimension: check.dimension, evidence: String(check.evidence ?? '').slice(0, 300) }));
     if (identityHardFail(verdict)) record.identityFailures += 1;
     let decision = decide({
       verdict,
@@ -953,6 +1013,49 @@ export function createRefWatchController({
     }
   }
 
+  // judge-loop v2: judge a collected clip from frames sampled in order. A hard identity, anatomy or
+  // technical failure re-renders the clip once with a new seed when the regen budget allows;
+  // otherwise the clip is kept and the verdict is only reported.
+  const clipAttempts = new Map();
+  async function clipNeedsRetry(clip) {
+    if (typeof clipReviewer !== 'function' || typeof sampleClipFrames !== 'function' || !clip.localPath) return false;
+    let verdict = null;
+    try {
+      const grid = await sampleClipFrames(clip);
+      const request = {
+        schema: REF_REVIEW_REQUEST_SCHEMA, productionId: productionId ?? 'production', runId: runId ?? 'run', jobId: clip.id,
+        shotId: clip.shotId || clip.scene || clip.id, keyframeSha256: grid.sha256 ?? '0'.repeat(64), imagePath: grid.path,
+        width: 1536, height: 576, plannedWidth: 1536, plannedHeight: 576, attempt: 0, kind: 'clip',
+        prompt: clip.params?.prompt || clip.prompt || 'video clip', characters: charactersFor(clip),
+      };
+      verdict = await clipReviewer({ request, image: { path: grid.path, sha256: request.keyframeSha256 } });
+    } catch {
+      verdict = null;
+    }
+    const hard = (verdict?.checks ?? []).filter((check) => check.pass === false && check.severity === 'hard'
+      && ['identity', 'anatomy', 'technical'].includes(check.dimension));
+    const tries = clipAttempts.get(clip.id) ?? 0;
+    const cost = 0.17;
+    const affordable = !(Number(regenBudgetUnits) >= 0) || (regenUnitsSpent + cost <= Number(regenBudgetUnits));
+    const retry = hard.length > 0 && tries < clipRetries && affordable;
+    emit({ type: 'ref_clip_verdict', jobId: clip.id, overall: verdict?.overall ?? 'error', hard: hard.map((check) => check.dimension), retry });
+    if (!retry) return false;
+    clipAttempts.set(clip.id, tries + 1);
+    regenUnitsSpent += cost;
+    const seed = Number(clip.params?.seed ?? clip.seed ?? 0) + 7919 * (tries + 1);
+    const next = { ...clip, seed, params: { ...(clip.params ?? {}), seed } };
+    delete next.localPath;
+    delete next.status;
+    next.cacheKey = cacheKeyFor({
+      workflowSha256: next.workflowSha256, generator: next.generator, model: next.model, modelRevision: next.modelRevision,
+      params: next.params, seed, width: next.dims?.width, height: next.dims?.height, frames: next.frames,
+    });
+    next.clipRetry = tries + 1;
+    live.set(clip.id, next);
+    await submitJobs({ batch: 'video', jobs: [next] });
+    return true;
+  }
+
   async function warmReviews(seeds) {
     if (typeof reviewer !== 'function' || !(reviewConcurrency > 1) || seeds.length < 2) return;
     const queue = seeds.slice();
@@ -988,8 +1091,9 @@ export function createRefWatchController({
     if (isObject(event) && event.type === 'video_collected') {
       const collected = typeof event.jobId === 'string' ? live.get(event.jobId) : null;
       if (collected) {
-        collected.status = 'accepted';
         if (typeof event.path === 'string' && event.path) collected.localPath = event.path;
+        if (await clipNeedsRetry(collected)) return;
+        collected.status = 'accepted';
         await maybeReleaseVideos();
       }
       return;

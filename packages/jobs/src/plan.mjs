@@ -986,6 +986,20 @@ export function planJobs(pkg, opts = {}) {
       cacheKey: null,
     };
     if (textAllowed) job.allowText = true;
+    // judge-loop v2: the reference watch judges identity and scene continuity against the story
+    // bible. `gen.characters` names ids from the package-level `characters` list; like `shot`,
+    // none of this enters `params` or the cache key.
+    const bible = Array.isArray(pkg.characters) ? pkg.characters : [];
+    const named = Array.isArray(gen.characters) ? gen.characters : [];
+    const locks = named
+      .map((id) => bible.find((entry) => entry && entry.id === id))
+      .filter((entry) => entry && typeof entry.identityLock === "string" && entry.identityLock.trim())
+      .map((entry) => ({
+        characterId: entry.id,
+        identityLock: entry.identityLock.trim(),
+        ...(typeof entry.wardrobeState === "string" && entry.wardrobeState.trim() ? { wardrobeState: entry.wardrobeState.trim() } : {}),
+      }));
+    if (locks.length) job.characters = locks;
     // SPW01: ref-watch chaining needs the shot's place in its scene. A plate with no owning scene
     // gets no shot, so it is never chained. None of this enters `params` or the cache key.
     if (kind === "plate") {
