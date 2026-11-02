@@ -254,3 +254,20 @@ Set `"refWatch": { "framingGiveUp": true }` in a package to turn it on.
 - **What gets reported:** each time it fires, the controller emits `ref_framing_drift` and adds the shot to `snapshot().framingDrift`, which appears in the run report as `refWatch.framingDrift`. The snapshot's `framingGiveUp` flag shows whether the switch is on.
 - **Why it is off by default:** on the W4 and gold calibration sets, a bad still that still fails framing after its regen would be accepted. That is 6 false passes: b03, w4_03, w4_06, w4_13, w4_14 and w4_24. With the switch off, framing holds behave exactly as before `1f79b2f4`.
 - **When to turn it on:** for packages where finishing the film matters more than exact shot size.
+
+## Per-shot caps (judge-workflow v3)
+
+Each still has its own limits, so one stubborn shot can't use up the run:
+
+- **Share cap:** after its first regen, a shot may hold at most `perShotRegenShare` (default 0.4) of the regen allowance. The first regen is always allowed if the global ledger has room.
+- **Time cap:** a shot stops regenerating `perShotWallMinutes` (default 12) after its first review.
+- **When a cap is hit:** the controller emits `ref_shot_capped` and escalates, so the still is held as it would be when the regen caps run out. `snapshot().shotRegenUnits` reports what each shot spent.
+- **Override per package:** `"refWatch": { "perShotRegenShare": 0.6, "perShotWallMinutes": 20 }`. Set either value to 0 to turn that cap off.
+
+## Framing lead (judge-workflow v3)
+
+- **When it applies:** a still prompt that plans a wide or full-body shot ("wide/long/full-body shot", "full body", "head to toe", "extreme wide/establishing shot").
+- **What the planner does:** puts a positive physical framing sentence first: camera at a moderate distance, head to toe, space above the head and below the feet, feet on the ground. FLUX picks the camera from the start of the prompt.
+- **Re-prompts:** when a regen follows a framing failure, the steer prompt puts that lead (or the judge's framing fix hint) first as well.
+- **Opt out per asset:** `gen.framingLead: false` keeps the prompt verbatim.
+- **Cache keys:** only prompts that plan a wide shot change.

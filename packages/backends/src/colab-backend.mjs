@@ -221,6 +221,26 @@ with zipfile.ZipFile(archive) as z:
 (staging.parent / "hashes.json").write_text(json.dumps(hashes))
 `;
 
+/**
+ * judge-workflow v3: merge queued reference-watch submissions into one payload per batch kind
+ * (video, regen, title cutouts...), first-seen order, a later copy of a job id replacing an
+ * earlier one. One Google Colab exec per kind instead of one per released shot.
+ */
+export function coalesceSubmissions(payloads) {
+  const byBatch = new Map();
+  for (const payload of payloads) {
+    if (!payload || !Array.isArray(payload.jobs) || payload.jobs.length === 0) continue;
+    const key = String(payload.batch ?? "");
+    if (!byBatch.has(key)) byBatch.set(key, { ...payload, jobs: [] });
+    const merged = byBatch.get(key);
+    for (const job of payload.jobs) {
+      const at = merged.jobs.findIndex((item) => item?.id === job?.id);
+      if (at >= 0) merged.jobs[at] = job; else merged.jobs.push(job);
+    }
+  }
+  return [...byBatch.values()];
+}
+
 async function extractCollectionBundle(python, config, { wallMs, signal }) {
   signal?.throwIfAborted();
   await new Promise((resolve, reject) => {
@@ -427,6 +447,15 @@ export function createColabBackend({
   collectionRetryMs = 1000,
   // RW08: optional. Leave this unset and the Google Colab run executes its planned batches unchanged.
   refWatch = null,
+  // judge-workflow v3: async work for the VM while it waits on the off-machine judge (e.g. the
+  // Chatterbox voiceover). Runs once, the first time the watch queue is empty with reviews pending.
+  onJudgeIdle = null,
+  // judge-workflow v3 (Goat Getaway): work that must not be starved by the render budget (the
+  // Chatterbox voiceover). Runs once on the ready VM before the first batch; a failure is logged.
+  onBeforeBatches = null,
+  // One judge pass: hand the watch every still of a collected batch in ONE preview event (the
+  // controller warms those reviews concurrently) and skip per-still live-tap previews.
+  oneStillPass = false,
   // Judge loop: false skips the Qwen Image Edit download (~40 GB) and turns targeted_edit into a
   // reprompted regen. COMFYRIZZ_REFWATCH_EDITS=0 sets it from the environment.
   refWatchEdits = process.env.COMFYRIZZ_REFWATCH_EDITS !== '0',
@@ -698,11 +727,17 @@ export function createColabBackend({
    */
   async function execScript(script, { step: stepName, timeout = 900, wallMs = null, onEvent = null, silenceMs = null, onLog = null, signal = null } = {}) {
     let result;
+    // The connect retries share one wall budget: a caller's wallMs (e.g. the collection
+    // window) is a total, not a per-attempt allowance that three retries can triple.
+    const totalMs = wallMs ?? (timeout + 60) * 1000;
+    const endAt = Date.now() + totalMs;
     for (let attempt = 0; attempt < 3; attempt++) {
       signal?.throwIfAborted();
+      const leftMs = attempt === 0 ? totalMs : endAt - Date.now();
+      if (attempt > 0 && leftMs <= 1000) break;
       result = await step(argvExec({ session, file: script, timeout }), {
       label: stepName,
-      wallMs: wallMs ?? (timeout + 60) * 1000,
+      wallMs: leftMs,
       cwd: dirname(script),
       signal,
       ...(silenceMs ? { silenceMs } : {}),
@@ -825,9 +860,14 @@ export function createColabBackend({
   /** ADMIT-BEFORE-YOU-SPEND: the reserve formula, and the wall clock, checked before a job batch. */
   function admit(jobs, { onEvent = null } = {}) {
     const estimate = estimateJobs(jobs);
+    // judge-workflow v3 live run: the VM bills while the judge reviews clips between
+    // batches, and collection already charges that wall time. Admission ignored it, so a
+    // late re-render batch was admitted that left collection nothing (all clips lost).
+    // Charge admission the same way: max(job ledger, VM wall time at the billed rate).
+    const wallUnits = state.startedAtMs ? Math.max(0, now() - state.startedAtMs) / 3600000 * ratePerHour : 0;
     const decision = assessBudget({
       budgetUnits,
-      spentEstimate: state.spentEstimate,
+      spentEstimate: Math.max(state.spentEstimate, wallUnits - state.committedEstimate),
       committedEstimate: state.committedEstimate,
       nextJobUpperEstimate: nextUpper(jobs),
       ratePerHour,
@@ -1297,6 +1337,16 @@ export function createColabBackend({
       let refWatchGate = null;
       const refWatchQueue = [];
       let reviewChain = Promise.resolve();
+      // judge-workflow v3 scheduling: reviews in flight, and a wake-up for the drain loop when a
+      // review finishes or the watch submits work, so the VM never waits on the judge while
+      // released jobs are queued (live2/live3 rendered one plate per batch, ~5 min apart).
+      let reviewsPending = 0;
+      // Still reviews in flight. Video releases wait until every still has been judged, so the
+      // clips go up as one batch (one judge pass over the stills) instead of one exec per shot.
+      let stillReviewsPending = 0;
+      let wakeDrain = null;
+      const nudgeDrain = () => { const wake = wakeDrain; wakeDrain = null; wake?.(); };
+      let judgeIdleRan = false;
       const previewedJobs = new Set();
       // Keyed by job and output digest: a regen keeps the job id, and its new still must reach
       // the watch again (Google Colab e2e 2026-10-30: two regenerated stills were never re-reviewed).
@@ -1309,7 +1359,7 @@ export function createColabBackend({
           jobsDoc: doc,
           onEvent,
           receiptsDir: join(scratch, "receipts"),
-          submitJobs: async (payload) => { refWatchQueue.push(payload); },
+          submitJobs: async (payload) => { refWatchQueue.push(payload); nudgeDrain(); },
           // Regens run on this VM while it is up; a fifth of the run budget is theirs to spend.
           liveSession: true,
           targetedEdits: refWatchEdits !== false,
@@ -1323,7 +1373,14 @@ export function createColabBackend({
       // watch's problem, not the run's (same policy as preview_ready).
       function queueReviewEvent(event) {
         if (!refWatchGate || typeof refWatchGate.handle !== "function") return;
-        reviewChain = reviewChain.then(() => refWatchGate.handle(event)).then(() => {}, () => {});
+        reviewsPending += 1;
+        const still = event?.type === "preview_ready";
+        if (still) stillReviewsPending += 1;
+        reviewChain = reviewChain.then(() => refWatchGate.handle(event)).then(() => {}, () => {}).then(() => {
+          reviewsPending -= 1;
+          if (still) stillReviewsPending -= 1;
+          nudgeDrain();
+        });
       }
 
       async function uploadJobsZip(localJobsFile) {
@@ -1385,6 +1442,7 @@ export function createColabBackend({
             if (result.code !== 0) throw new Error('Live preview download unavailable; will retry');
           },
           onReady: (payload) => {
+            if (oneStillPass) return;
             for (const entry of payload?.manifest?.jobs ?? []) if (entry?.job) previewedJobs.add(previewKey(entry));
             const event = { type: 'preview_ready', ...payload };
             emit(onEvent, event);
@@ -1436,13 +1494,20 @@ export function createColabBackend({
         // runs). Every still the batch collected that never produced a preview is handed to the
         // reference watch from the verified collection, so the gate never waits on a lost preview.
         if (refWatchGate && collect.manifest && collect.local) {
+          const passEntries = [];
           for (const entry of collect.manifest.jobs ?? []) {
             if (!entry?.job || previewedJobs.has(previewKey(entry))) continue;
             if (entry.status !== "succeeded" && entry.status !== "cached") continue;
             const planned = doc.jobs.find((job) => job.id === entry.job);
             if (!planned || isVideoJob(planned)) continue;
             previewedJobs.add(previewKey(entry));
+            if (oneStillPass) { passEntries.push(entry); continue; }
             const event = { type: "preview_ready", source: "collected", manifest: { ...collect.manifest, complete: false, jobs: [entry] }, outputDir: collect.local };
+            emit(onEvent, event);
+            queueReviewEvent(event);
+          }
+          if (passEntries.length > 0) {
+            const event = { type: "preview_ready", source: "collected", onePass: true, manifest: { ...collect.manifest, complete: false, jobs: passEntries }, outputDir: collect.local };
             emit(onEvent, event);
             queueReviewEvent(event);
           }
@@ -1528,15 +1593,46 @@ export function createColabBackend({
 
       async function drainRefWatch() {
         if (!refWatchGate) return null;
-        for (let guard = 0; guard < 64; guard += 1) {
-          await reviewChain;
-          if (refWatchQueue.length === 0) return null;
-          const outcome = await executeSubmission(refWatchQueue.shift());
-          if (outcome?.stop) return outcome;
+        let executed = 0;
+        for (;;) {
+          // One judge pass over the stills: while any still is under review, only non-video work
+          // (regens, title cutouts) may run; queued clips wait and then go up together.
+          const runnable = stillReviewsPending > 0
+            ? refWatchQueue.filter((payload) => payload?.batch !== "video")
+            : refWatchQueue.slice();
+          if (runnable.length === 0) {
+            if (reviewsPending === 0 && refWatchQueue.length === 0) {
+              await reviewChain;
+              if (refWatchQueue.length === 0 && reviewsPending === 0) return null;
+              continue;
+            }
+            // Only once clips are in flight: the first idle (stills still under review) is short,
+            // and the plates it would release are worth more GPU time than the voiceover.
+            if (!judgeIdleRan && executed > 0 && refWatchQueue.length === 0 && typeof onJudgeIdle === "function") {
+              judgeIdleRan = true;
+              emit(onEvent, { type: "judge_idle_work", phase: "start" });
+              try { await onJudgeIdle({ session, signal }); emit(onEvent, { type: "judge_idle_work", phase: "done" }); }
+              catch (error) { emit(onEvent, { type: "judge_idle_work", phase: "failed", message: redactForLog(String(error?.message ?? error)) }); }
+              continue;
+            }
+            await new Promise((resolve) => { wakeDrain = resolve; });
+            continue;
+          }
+          // Everything the watch released while the last batch ran goes up as one batch per kind.
+          for (const payload of runnable) refWatchQueue.splice(refWatchQueue.indexOf(payload), 1);
+          for (const payload of coalesceSubmissions(runnable)) {
+            if (++executed > 64) throw new ColabCliError("reference watch queued more Google Colab batches than this run will execute");
+            const outcome = await executeSubmission(payload);
+            if (outcome?.stop) return outcome;
+          }
         }
-        throw new ColabCliError("reference watch queued more Google Colab batches than this run will execute");
       }
 
+      if (typeof onBeforeBatches === "function") {
+        emit(onEvent, { type: "before_batches_work", phase: "start" });
+        try { await onBeforeBatches({ session, signal }); emit(onEvent, { type: "before_batches_work", phase: "done" }); }
+        catch (error) { emit(onEvent, { type: "before_batches_work", phase: "failed", message: redactForLog(String(error?.message ?? error)) }); }
+      }
       for (const name of planned) {
         signal?.throwIfAborted();
         const subset = name ? jobs.filter((job) => job.batch === name) : jobs;

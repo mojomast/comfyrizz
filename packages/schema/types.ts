@@ -1,7 +1,7 @@
 // GENERATED FILE - do not edit by hand.
 //
 // Source:        packages/schema/package-v1.schema.json
-// Schema sha256: d1f42e745c46e651531bd26d5cb67cedbe4033853c7ccbb04dcd37874af1f5d0
+// Schema sha256: c8bdc041153cd05c474b4adcc25f269af95d3152959a64c5848f26c555647137
 // Generator:     packages/schema/scripts/gen-types.mjs (v1.0.0)
 //
 // Regenerate: pnpm --filter @comfyrizz/schema gen:types
@@ -179,6 +179,18 @@ export interface PackageV1 {
    * judge-loop v2: per-package reference-watch policy switches.
    */
   refWatch?: {
+    /**
+     * judge-workflow v3: after its first regen, one shot may use at most this share of the regen
+     * allowance (0 = no share cap).
+     * [min 0, max 1, default 0.4]
+     */
+    perShotRegenShare?: number;
+    /**
+     * judge-workflow v3: a shot stops regenerating this many minutes after its first review (0 = no
+     * time cap).
+     * [min 0, max 240, default 12]
+     */
+    perShotWallMinutes?: number;
     /**
      * Off by default. When true, a still whose only hard failure is framing gets at most one regen
      * (none if the regen budget is closed), then is accepted with a framing-drift note in the run
@@ -1107,6 +1119,13 @@ export interface Gen {
    * SKILLS-PORT: per-shot override of last-frame chaining (true forces it on, false forces it off).
    */
   chainFromPrevious?: boolean;
+  /**
+   * judge-workflow v3: when a still prompt plans a wide or full-body shot, the planner puts a
+   * physical framing sentence first (head to toe, feet on the ground, moderate distance). Set false
+   * to keep the prompt verbatim.
+   * [default true]
+   */
+  framingLead?: boolean;
   /**
    * judge-loop v2: ids from the package characters list that appear in this asset; the reference
    * watch judges identity against them.

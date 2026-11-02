@@ -384,6 +384,14 @@
       "additionalProperties": false,
       "description": "judge-loop v2: per-package reference-watch policy switches.",
       "properties": {
+        "perShotRegenShare": {
+          "type": "number", "minimum": 0, "maximum": 1, "default": 0.4,
+          "description": "judge-workflow v3: after its first regen, one shot may use at most this share of the regen allowance (0 = no share cap)."
+        },
+        "perShotWallMinutes": {
+          "type": "number", "minimum": 0, "maximum": 240, "default": 12,
+          "description": "judge-workflow v3: a shot stops regenerating this many minutes after its first review (0 = no time cap)."
+        },
         "framingGiveUp": {
           "type": "boolean",
           "default": false,
@@ -2409,6 +2417,11 @@
         "chainFromPrevious": {
           "type": "boolean",
           "description": "SKILLS-PORT: per-shot override of last-frame chaining (true forces it on, false forces it off)."
+        },
+        "framingLead": {
+          "type": "boolean",
+          "default": true,
+          "description": "judge-workflow v3: when a still prompt plans a wide or full-body shot, the planner puts a physical framing sentence first (head to toe, feet on the ground, moderate distance). Set false to keep the prompt verbatim."
         },
         "characters": {
           "type": "array",

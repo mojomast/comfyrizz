@@ -3,6 +3,8 @@
 // Pure module: no network, clock or disk. Contracts live in
 // docs/tasks/RW00_CONTRACTS.md and @comfyrizz/schema/ref-review.
 
+import { framingLead } from '../../../../packages/jobs/src/framing.mjs';
+
 const STEER_PLACEHOLDER = '<steer>';
 const REPLACE_REF_PLACEHOLDER = '<replace-ref>';
 const MIN_WORDS = 100;
@@ -80,7 +82,20 @@ function captionParts(previousPrompt, verdict, characters) {
     if (sentence) parts.push({ text: sentence, mandatory });
   };
 
-  add(oppositeWords(textOf(previousPrompt)), false);
+  // judge-workflow v3: when framing failed, the framing goes FIRST (FLUX picks the camera from the
+  // start of the prompt). Use the planned shot-size lead, else the judge's framing fix hints.
+  const framingFailed = checks.some((item) => item?.pass === false && item?.dimension === 'framing');
+  let previous = textOf(previousPrompt);
+  if (framingFailed) {
+    const lead = framingLead(previous);
+    if (lead) {
+      if (previous.startsWith(lead)) previous = previous.slice(lead.length).trim();
+      add(lead, true);
+    } else if (fixHints.length > 0) {
+      add(oppositeWords(textOf(fixHints[0])), true);
+    }
+  }
+  add(oppositeWords(previous), false);
 
   for (const item of checks) {
     if (item?.pass !== true) continue;
