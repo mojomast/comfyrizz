@@ -391,6 +391,7 @@ def run(
     transcribe_fn=None,
     takes_per_line: int = DEFAULT_TAKES_PER_LINE,
     seed_base: int = 0,
+    cache_dir=None,
 ) -> dict:
     """Synthesise every narration line and write durations plus the take report."""
     package = json.loads(Path(package_path).read_text())
@@ -402,6 +403,9 @@ def run(
     audio = root / "audio"
     audio.mkdir(parents=True, exist_ok=True)
     template = json.loads(Path(graph_path or DEFAULT_GRAPH).read_text())
+    from vo_cache import line_risk, load_cache, plan_reuse, policy_for
+    policy = policy_for(package)
+    reuse = plan_reuse(lines, load_cache(cache_dir)) if (cache_dir and policy.get("cache") is not False) else {}
 
     submit = submit_graph_fn or functools.partial(submit_graph, comfy=comfy)
     asr = transcribe_fn or functools.partial(
@@ -431,12 +435,21 @@ def run(
             "out": audio,
             "takes_per_line": takes_per_line,
             "seed_base": seed_base,
+            "reuse": reuse,
+            "line_risk": line_risk,
+            "max_takes_per_line": policy.get("maxTakesPerLine"),
+            "risky_max_takes": policy.get("riskyMaxTakes"),
         },
     )
 
     take_report = _take_report(lines, report, recorded, transcripts, takes_per_line)
     (audio / "take_report.json").write_text(json.dumps(take_report, indent=2) + "\n")
     _write_scene_audio(lines, audio, report)
+    for ident in reuse:
+        take_report["lines"][ident] = {**take_report["lines"].get(ident, {}), "cached": True, "flagged": False}
+    take_report["flagged"] = [i for i in take_report["flagged"] if i not in reuse]
+    take_report["cached"] = sorted(reuse)
+    take_report["risky"] = {l["id"]: line_risk(l["text"]) for l in lines if line_risk(l["text"]) and l["id"] not in reuse}
     flagged = list(take_report["flagged"])
     return {
         "report": report,
@@ -452,14 +465,17 @@ def main(argv=None) -> int:
     parser.add_argument("--out", required=True, type=Path)
     parser.add_argument("--comfy", default=DEFAULT_COMFY)
     parser.add_argument("--graph", type=Path, default=DEFAULT_GRAPH)
+    parser.add_argument("--cache", type=Path, default=None, help="a previous --out dir whose passed takes may be reused")
     args = parser.parse_args(argv)
-    result = run(args.package, args.out, comfy=args.comfy, graph_path=args.graph)
+    result = run(args.package, args.out, comfy=args.comfy, graph_path=args.graph, cache_dir=args.cache)
     print(
         json.dumps(
             {
                 "event": "chatterbox_take_report",
                 "takes": len(result["takeReport"]["takes"]),
                 "flagged": result["flagged"],
+                "cached": result["takeReport"].get("cached", []),
+                "risky": result["takeReport"].get("risky", {}),
             }
         ),
         flush=True,

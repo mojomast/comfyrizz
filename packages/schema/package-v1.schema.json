@@ -198,6 +198,16 @@
       ],
       "unevaluatedProperties": false,
       "properties": {
+        "takes": {
+          "type": "object",
+          "additionalProperties": false,
+          "description": "Chatterbox take budget and reuse (Goat Getaway). cache: reuse a previous run's passed takes when a line's text matches word for word (default true when a cache dir is given). maxTakesPerLine: cap on takes per line (default takes_per_line x 3). riskyMaxTakes: lower cap for lines pre-flagged as likely to loop or hallucinate (short, colon fragments, repeated words, odd names); the best take is kept when a cap runs out.",
+          "properties": {
+            "cache": { "type": "boolean" },
+            "maxTakesPerLine": { "type": "integer", "minimum": 1, "maximum": 12 },
+            "riskyMaxTakes": { "type": "integer", "minimum": 1, "maximum": 12 }
+          }
+        },
         "enabled": {
           "type": "boolean"
         },

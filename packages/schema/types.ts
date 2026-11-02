@@ -1,7 +1,7 @@
 // GENERATED FILE - do not edit by hand.
 //
 // Source:        packages/schema/package-v1.schema.json
-// Schema sha256: c8bdc041153cd05c474b4adcc25f269af95d3152959a64c5848f26c555647137
+// Schema sha256: c1d38cbbc4faa257df6c4faf6d523e1a2df2e15d067ea0ef20030c5733a1c2fd
 // Generator:     packages/schema/scripts/gen-types.mjs (v1.0.0)
 //
 // Regenerate: pnpm --filter @comfyrizz/schema gen:types
@@ -86,6 +86,18 @@ export interface PackageV1 {
     text_on_accent?: HexColor;
     };
   voice?: {
+    /**
+     * Chatterbox take budget and reuse (Goat Getaway). cache: reuse a previous run's passed takes when
+     * a line's text matches word for word (default true when a cache dir is given). maxTakesPerLine:
+     * cap on takes per line (default takes_per_line x 3). riskyMaxTakes: lower cap for lines
+     * pre-flagged as likely to loop or hallucinate (short, colon fragments, repeated words, odd
+     * names); the best take is kept when a cap runs out.
+     */
+    takes?: {
+      cache?: boolean;
+      maxTakesPerLine?: number;
+      riskyMaxTakes?: number;
+      };
     enabled: boolean;
     /**
      * kokoro (default) is the CPU narrator. qwen3-tts is the optional Qwen3-TTS 1.7B backend; when its

@@ -230,3 +230,80 @@ def test_take_seconds_read_a_non_wav_take(tmp_path, monkeypatch):
     take.write_bytes(b"fLaC" + b"\0" * 64)
     monkeypatch.setattr(narrate, "_read_audio", lambda path: (np.zeros(48000, dtype=np.float32), 24000))
     assert narrate._result_seconds(None, take) == 2.0
+
+
+# --- Goat Getaway voiceover: take cache + retake budget --------------------------------------
+
+def _scene_pkg(tmp_path, scenes, takes=None):
+    path = write_package(tmp_path, scenes)
+    if takes is not None:
+        data = json.loads(path.read_text()); data["voice"]["takes"] = takes; path.write_text(json.dumps(data))
+    return path
+
+
+def test_cached_passed_takes_are_reused_and_only_changed_or_failed_lines_are_voiced(tmp_path):
+    first_dir = tmp_path / "run1"; first_dir.mkdir()
+    pkg = _scene_pkg(first_dir, [
+        {"id": "s_a", "narration": "Nana Rosa had three rules today."},
+        {"id": "s_b", "narration": "Biscuit had broken rule three quickly."},
+        {"id": "s_c", "narration": "The landing needed a lot more work."},
+    ])
+    comfy = FakeComfy(first_dir)
+    asr = ScriptedAsr(["Nana Rosa had three rules today.", "Biscuit had broken rule three quickly.",
+                       "nope", "nope", "nope", "nope", "nope", "nope", "nope"])
+    narrate.run(pkg, first_dir / "out", submit_graph_fn=comfy, transcribe_fn=asr)
+    first = json.loads((first_dir / "out/audio/durations.json").read_text())
+    assert first["scenes"]["s_c_line_001"]["qa"]["flagged"] is True
+
+    second_dir = tmp_path / "run2"; second_dir.mkdir()
+    pkg2 = _scene_pkg(second_dir, [
+        {"id": "s_a", "narration": "Nana Rosa had three rules today."},           # unchanged, passed -> cached
+        {"id": "s_b", "narration": "Biscuit had broken every rule quickly."},       # text changed -> voiced
+        {"id": "s_c", "narration": "The landing needed a lot more work."},        # failed before -> voiced
+    ])
+    comfy2 = FakeComfy(second_dir)
+    asr2 = ScriptedAsr(["Biscuit had broken every rule quickly.", "The landing needed a lot more work."])
+    result = narrate.run(pkg2, second_dir / "out", submit_graph_fn=comfy2, transcribe_fn=asr2, cache_dir=first_dir / "out")
+    assert len(comfy2.calls) == 2, "only the changed and the failed line are voiced"
+    assert result["takeReport"]["cached"] == ["s_a_line_001"]
+    report = json.loads((second_dir / "out/audio/durations.json").read_text())
+    assert report["scenes"]["s_a_line_001"]["qa"]["cached"] is True
+    assert (second_dir / "out/audio/narration/s_a_line_001.wav").exists()
+    assert (second_dir / "out/audio/s_a.wav").exists()
+    assert result["flagged"] == []
+
+
+def test_cache_can_be_turned_off_per_package(tmp_path):
+    first_dir = tmp_path / "run1"; first_dir.mkdir()
+    pkg = _scene_pkg(first_dir, [{"id": "s_a", "narration": "Nana Rosa had three rules today."}])
+    narrate.run(pkg, first_dir / "out", submit_graph_fn=FakeComfy(first_dir), transcribe_fn=ScriptedAsr(["Nana Rosa had three rules today."]))
+    second_dir = tmp_path / "run2"; second_dir.mkdir()
+    pkg2 = _scene_pkg(second_dir, [{"id": "s_a", "narration": "Nana Rosa had three rules today."}], takes={"cache": False})
+    comfy = FakeComfy(second_dir)
+    narrate.run(pkg2, second_dir / "out", submit_graph_fn=comfy, transcribe_fn=ScriptedAsr(["Nana Rosa had three rules today."]), cache_dir=first_dir / "out")
+    assert len(comfy.calls) == 1
+
+
+def test_risky_lines_get_their_own_retake_cap_and_keep_the_best_take(tmp_path):
+    pkg = _scene_pkg(tmp_path, [
+        {"id": "s_a", "narration": "Top attitude: unlimited."},                     # short + colon -> risky
+        {"id": "s_b", "narration": "So Nana fired up the old green lawnmower."},    # ordinary
+    ], takes={"maxTakesPerLine": 4, "riskyMaxTakes": 2})
+    comfy = FakeComfy(tmp_path)
+    asr = ScriptedAsr(["wrong words here"])
+    result = narrate.run(pkg, tmp_path / "out", submit_graph_fn=comfy, transcribe_fn=asr)
+    report = json.loads((tmp_path / "out/audio/durations.json").read_text())
+    assert report["scenes"]["s_a_line_001"]["qa"]["attempts"] == 2
+    assert set(report["scenes"]["s_a_line_001"]["qa"]["risk"]) >= {"short", "colon-fragment"}
+    assert report["scenes"]["s_b_line_001"]["qa"]["attempts"] == 4
+    assert len(comfy.calls) == 6
+    assert "s_a_line_001" in result["takeReport"]["risky"]
+    assert (tmp_path / "out/audio/narration/s_a_line_001.wav").exists(), "the best rejected take is kept"
+
+
+def test_line_risk_flags_loop_prone_lines_and_leaves_ordinary_ones():
+    from vo_cache import line_risk
+    assert "colon-fragment" in line_risk("Rule four: more scarves.")
+    assert "short" in line_risk("The landing needed work.")
+    assert "alphanumeric" in line_risk("Rogue agent CLAW-9 went off script tonight.")
+    assert line_risk("Nana Rosa has four rules now and she means it.") == []
