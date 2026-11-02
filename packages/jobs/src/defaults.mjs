@@ -236,7 +236,7 @@ export function applyPromptDefaults(params, { kind, textAllowed = false, hasSour
     }
   }
 
-  if (parts.length > 1) {
+  if (parts.length > 1 || parts[0] !== prompt) {
     params.prompt = parts.join(", ");
   }
   return { applied, warnings };

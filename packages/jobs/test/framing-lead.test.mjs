@@ -32,3 +32,10 @@ test('the planner applies the lead to stills only, and a package can opt out', (
   applyPromptDefaults(off, { kind: 'still', framingLead: false });
   assert.doesNotMatch(off.prompt, /moderate distance/);
 });
+
+test('the lead is written even when no other guard applies (prompt already satisfies the text guard)', () => {
+  const p = { prompt: 'Wide shot at night of Gus on a red scooter, no logo on his beanie' };
+  applyPromptDefaults(p, { kind: 'still' });
+  assert.match(p.prompt, /^Wide shot, camera at a moderate distance/);
+  assert.match(p.prompt, /Gus on a red scooter/);
+});
