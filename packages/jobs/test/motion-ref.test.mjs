@@ -42,8 +42,10 @@ const WORKFLOW_SHA = "c".repeat(64);
 const GOLDEN_NO_MOTION = {
   "a_cutout.still": "1a96b4358ffb7ce9631246ea7ba62715df3435475b7df572c7750cba743380b4",
   "a_plate1_still.still": "d151fb1ae63f2c534a2634c9b7d127c0efa33ce3f37047599cd89cc4947e91a1",
-  "a_plate1.plate": "ec2f8632ab503e4b7fab9fe372f8906bee1e70b68fec5bd8c13293ddccc3df6f",
-  "a_plate1.upscale": "b8f222215f53a163ea345f4a0717dd2b8de7333ebcc043b1e17b5c84e886b4d7",
+  // Re-pinned after a270dbec (#70) replaced the negative "no text…" TEXT_GUARD with the positive
+  // Klein guard; the plate prompt (and so its key) changed by design. Stills opt out of the guard text here.
+  "a_plate1.plate": "f96570e53c347db010708556c098c43ed82c99c1bf32243ef8ac2d62aa341399",
+  "a_plate1.upscale": "9ea2d7ec314814ee4b22b4305a47cc41f177e191ea8159e04ed93ee0551c990f", // follows the plate prompt (same re-pin)
   "a_narr.audio": "728ace3192217249dc8dc5984863dd2ad95b4e3cc239e577cee02ecb84f4806a",
 };
 
