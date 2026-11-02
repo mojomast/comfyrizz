@@ -379,6 +379,18 @@
     "audio": {
       "$ref": "#/$defs/packageAudio"
     },
+    "refWatch": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "judge-loop v2: per-package reference-watch policy switches.",
+      "properties": {
+        "framingGiveUp": {
+          "type": "boolean",
+          "default": false,
+          "description": "Off by default. When true, a still whose only hard failure is framing gets at most one regen (none if the regen budget is closed), then is accepted with a framing-drift note in the run report instead of being held."
+        }
+      }
+    },
     "characters": {
       "type": "array",
       "maxItems": 16,

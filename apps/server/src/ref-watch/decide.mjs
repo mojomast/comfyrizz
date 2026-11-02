@@ -69,7 +69,9 @@ export function decide({ verdict, attempt, regenJobsUsed, stillCount, identityFa
   // and none when the regen budget is closed; then accept with a soft note.
   const framingOnly = failures.length > 0 && failures.every((check) => check.dimension === 'framing')
     && (!editPlan || editPlan.dimensions.every((dimension) => dimension === 'framing'));
-  if (framingOnly) {
+  // Off by default (policy.framingGiveUp): calibration showed it accepts real shot-size misses
+  // when the one regen also misses, so a package must opt in (package.refWatch.framingGiveUp).
+  if (framingOnly && policy.framingGiveUp === true) {
     const regenOpen = Number.isSafeInteger(attempt) && attempt < Math.min(1, policy.maxRegensPerStill)
       && Number.isSafeInteger(regenJobsUsed) && regenJobsUsed < refRegenJobCap(stillCount, policy);
     if (!regenOpen) {

@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { decide } from '../../src/ref-watch/decide.mjs';
-import { validateRefDecision } from '../../../../packages/schema/src/ref-review.mjs';
+import { validateRefDecision, REF_POLICY_DEFAULTS } from '../../../../packages/schema/src/ref-review.mjs';
 
 const sha = 'a'.repeat(64);
 const check = (dimension, pass, severity = 'hard') => ({ dimension, pass, severity, evidence: `${dimension} ${pass ? 'ok' : 'off'}` });
@@ -10,7 +10,8 @@ const verdict = (fails) => ({
   schema: 'comfyrizz.ref-review.verdict/v1', jobId: 'o1.still', keyframeSha256: sha, reviewer: 'pi', overall: 'fail',
   checks: dims.map((d) => check(d, !fails.includes(d))), fixHints: ['full-body wide shot'],
 });
-const run = (fails, attempt, regenJobsUsed = 0) => decide({ verdict: verdict(fails), attempt, regenJobsUsed, stillCount: 7, identityFailures: 0 });
+const ON = { ...REF_POLICY_DEFAULTS, framingGiveUp: true };
+const run = (fails, attempt, regenJobsUsed = 0, policy = ON) => decide({ verdict: verdict(fails), attempt, regenJobsUsed, stillCount: 7, identityFailures: 0, policy });
 
 test('framing-only: one regen, then accept with a soft note', () => {
   assert.equal(run(['framing'], 0).action, 'reprompt');
@@ -35,4 +36,13 @@ test('framing plus another hard fail keeps the normal path (no early give-up)', 
 
 test('prompt (untrusted) plus framing is still framing-only', () => {
   assert.equal(run(['framing', 'prompt'], 1).action, 'accept');
+});
+
+test('default policy (framingGiveUp off) keeps pre-give-up framing behaviour', () => {
+  const off = REF_POLICY_DEFAULTS;
+  assert.notEqual(off.framingGiveUp, true);
+  assert.equal(run(['framing'], 0, 0, off).action, 'reprompt');
+  assert.equal(run(['framing'], 1, 0, off).action, 'reprompt');
+  assert.equal(run(['framing'], 2, 0, off).action, 'escalate');
+  assert.equal(run(['framing'], 0, 999, off).action, 'escalate');
 });

@@ -155,6 +155,9 @@ export function createRefWatchController({
   const productionId = jobsDoc.productionId ?? jobsDoc.packageId ?? null;
   const runId = typeof jobsDoc.runId === 'string' && jobsDoc.runId ? jobsDoc.runId : 'run';
   const caps = { ...REF_POLICY_DEFAULTS, ...(policy ?? {}) };
+  // Per-package opt-in (package.refWatch.framingGiveUp -> jobsDoc.refWatchPolicy); a caller policy wins.
+  if (policy?.framingGiveUp === undefined && jobsDoc.refWatchPolicy?.framingGiveUp === true) caps.framingGiveUp = true;
+  const framingDrift = [];
   // A package run on a live Google Colab session has no production budget ledger, so every regen
   // used to escalate. A caller-given regen allowance stands in for it.
   if (!budgetLedger && Number.isFinite(regenBudgetUnits) && regenBudgetUnits >= 0) {
@@ -767,6 +770,10 @@ export function createRefWatchController({
       editsTried: record.editsTried,
       policy: caps,
     });
+    if (decision?.action === 'accept' && decision.softNote && /^framing-only/.test(String(decision.reason))) {
+      framingDrift.push({ jobId: seed.jobId, attempt: record.attempt, note: decision.softNote });
+      emit({ type: 'ref_framing_drift', jobId: seed.jobId, keyframeSha256: seed.keyframeSha256, attempt: record.attempt, note: decision.softNote });
+    }
     if (!targetedEdits && decision?.action === 'targeted_edit') {
       decision = { ...decision, action: 'reprompt', reason: `${decision.reason} (targeted edits off)`, nextPrompt: STEER_PLACEHOLDER };
       delete decision.editInstruction;
@@ -1164,6 +1171,8 @@ export function createRefWatchController({
     return {
       regenJobsUsed,
       cap: refRegenJobCap(stillCount, caps),
+      framingGiveUp: caps.framingGiveUp === true,
+      framingDrift: framingDrift.map((entry) => ({ ...entry })),
       states: Object.fromEntries([...states].map(([id, value]) => [id, { ...value }])),
     };
   }

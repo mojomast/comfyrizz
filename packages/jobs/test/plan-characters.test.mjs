@@ -19,3 +19,13 @@ test('gen.characters become identity locks on still and plate jobs, outside the 
   assert.equal(plain.characters, undefined);
   assert.equal(plain.cacheKey, still.cacheKey);
 });
+
+test('package refWatch.framingGiveUp reaches the jobs doc only when opted in', async () => {
+  const { readFileSync } = await import('node:fs');
+  const { planJobs } = await import('../src/index.mjs');
+  const pkg = JSON.parse(readFileSync(new URL('./fixtures/clawpocalypse.package.json', import.meta.url), 'utf8'));
+  const off = planJobs(pkg);
+  assert.equal(off.refWatchPolicy, undefined);
+  const on = planJobs({ ...pkg, refWatch: { framingGiveUp: true } });
+  assert.deepEqual(on.refWatchPolicy, { framingGiveUp: true });
+});

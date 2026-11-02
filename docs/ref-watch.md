@@ -244,3 +244,13 @@ Blacklist at the level of the pair, not the whole model. One model can be reliab
 The W4 calibration (2026-10-30) ran deepseek-v4.1-flash through the shipped `reviewStill` path on 28 labelled FLUX 3 Klein stills (11 known-good, 17 known-bad). `prompt` came out `trusted: false`: it holds too many good stills, flagging small wording differences such as "medium shot" vs a chest-up crop. It is blacklisted for that model in `REF_UNTRUSTED_DIMENSIONS` (`apps/server/src/ref-watch/decide.mjs`). A failed `prompt` check is still reported in the verdict and in the why drawer, but it never holds or regenerates a still. Every other hard failure still holds the still. Clear the entry only after a re-calibration with more labelled stills shows `prompt` as trusted.
 
 The framing question defines shot sizes as bands with tolerance (ref-review skill 1.1.0): a medium shot covers chest-up to waist-up crops, neighbouring sizes count as a match, and framing fails only when the size is clearly different, the subject is missing or cut off, or the composition contradicts the plan. Re-calibrated on the same 28 stills and labels after that change: technical, identity, anatomy and framing at 1.00 accuracy, text_artifact 0.93, prompt 0.96, with 0 false passes on every dimension. `prompt` stays blacklisted until a larger labelled set confirms it.
+
+## Framing give-up (per-package switch, off by default)
+
+Set `"refWatch": { "framingGiveUp": true }` in a package to turn it on.
+
+- **When it applies:** a still whose only hard failure is `framing`, judged after any second opinion. The `prompt` dimension is untrusted, so a prompt failure alongside framing doesn't count against it.
+- **What it does:** the still gets at most one regen, or none if the regen budget is already closed. After that it is accepted with a soft note, instead of being re-rendered until the caps run out.
+- **What gets reported:** each time it fires, the controller emits `ref_framing_drift` and adds the shot to `snapshot().framingDrift`, which appears in the run report as `refWatch.framingDrift`. The snapshot's `framingGiveUp` flag shows whether the switch is on.
+- **Why it is off by default:** on the W4 and gold calibration sets, a bad still that still fails framing after its regen would be accepted. That is 6 false passes: b03, w4_03, w4_06, w4_13, w4_14 and w4_24. With the switch off, framing holds behave exactly as before `1f79b2f4`.
+- **When to turn it on:** for packages where finishing the film matters more than exact shot size.

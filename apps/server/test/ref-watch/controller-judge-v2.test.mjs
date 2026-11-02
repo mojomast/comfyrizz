@@ -78,3 +78,35 @@ test('a clip with a hard morphing failure is re-rendered once with a new seed an
   const verdicts = events.filter((event) => event.type === 'ref_clip_verdict');
   assert.deepEqual(verdicts.map((event) => event.retry), [true, false]);
 });
+
+function framingSetup(refWatchPolicy) {
+  const jobs = [still('still_a'), video('video_a', 'still_a', 0)];
+  const submitted = []; const events = [];
+  const controller = createRefWatchController({ jobsDoc: { productionId: 'p', runId: 'r', jobs, ...(refWatchPolicy ? { refWatchPolicy } : {}) }, submitJobs: async (payload) => { submitted.push(payload); }, onEvent: (event) => { events.push(event); }, now: () => '2026-11-02T00:00:00.000Z', liveSession: true, regenBudgetUnits: 5, targetedEdits: false, reviewer: async ({ request }) => verdict(request, 'framing') });
+  return { controller, submitted, events };
+}
+
+test('framing give-up is off by default: a framing-only still is regenerated, never accepted with a note', async () => {
+  const { controller, events } = framingSetup(null);
+  await controller.start();
+  await controller.handle(preview('still_a'));
+  await controller.handle(preview('still_a', 'v2'));
+  assert.equal(events.some((event) => event.type === 'ref_framing_drift'), false);
+  assert.equal(events.some((event) => event.type === 'ref_gate_open' && event.jobId === 'still_a'), false);
+  assert.equal(controller.snapshot().framingGiveUp, false);
+  assert.deepEqual(controller.snapshot().framingDrift, []);
+});
+
+test('package opt-in: one framing regen, then accepted with a framing-drift note in the run report', async () => {
+  const { controller, submitted, events } = framingSetup({ framingGiveUp: true });
+  await controller.start();
+  await controller.handle(preview('still_a'));
+  assert.equal(submitted.filter((entry) => entry.batch === 'regen').length, 1);
+  await controller.handle(preview('still_a', 'v2'));
+  assert.ok(events.some((event) => event.type === 'ref_framing_drift' && event.jobId === 'still_a'), JSON.stringify(events.map((e) => [e.type, e.decision?.action, e.decision?.reason, e.decision?.attempt])));
+  assert.ok(events.some((event) => event.type === 'ref_gate_open' && event.jobId === 'still_a'));
+  const snap = controller.snapshot();
+  assert.equal(snap.framingGiveUp, true);
+  assert.equal(snap.framingDrift.length, 1);
+  assert.equal(snap.framingDrift[0].jobId, 'still_a');
+});

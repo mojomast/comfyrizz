@@ -1358,6 +1358,8 @@ export function planJobs(pkg, opts = {}) {
     return still ? [{ stillJobId: still.id, text: String(card.text ?? ""), ...(card.background ? { background: card.background } : {}) }] : [];
   });
   if (titleCards.length > 0) doc.titleCards = titleCards;
+  // judge-loop v2: per-package ref-watch policy opt-ins (outside the job hash).
+  if (pkg.refWatch && pkg.refWatch.framingGiveUp === true) doc.refWatchPolicy = { framingGiveUp: true };
   doc.hash = sha256Hex(canonical({ ...doc, hash: undefined }));
   return doc;
 }
