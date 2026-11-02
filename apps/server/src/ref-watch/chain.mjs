@@ -41,6 +41,8 @@ export function chainDefaultFor({ shot, previousShot, override } = {}) {
   if (override === true) return true;
   if (override === false) return false;
   if (!isObject(shot) || !isObject(previousShot)) return false;
+  // Chain progress: the planner marks a shot that is a new beat; it re-anchors on its own still.
+  if (typeof shot.reanchor === 'string' && shot.reanchor) return false;
   if (typeof shot.sceneId !== 'string' || shot.sceneId === '') return false;
   if (shot.sceneId !== previousShot.sceneId) return false;
 

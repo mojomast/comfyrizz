@@ -110,3 +110,56 @@ test('package opt-in: one framing regen, then accepted with a framing-drift note
   assert.equal(snap.framingDrift.length, 1);
   assert.equal(snap.framingDrift[0].jobId, 'still_a');
 });
+
+test('chain progress: a chained clip that fails the prompt check is re-rendered once from its own keyframe; an unchained one is not', async () => {
+  const jobs = [still('still_a', 's1'), still('still_b', 's1'), video('video_a', 'still_a', 0), video('video_b', 'still_b', 1)];
+  jobs[2].shot = { sceneId: 'x', index: 0 }; jobs[3].shot = { sceneId: 'x', index: 1 };
+  const submitted = []; const events = []; const requests = [];
+  const controller = createRefWatchController({
+    jobsDoc: { productionId: 'p', runId: 'r', jobs }, submitJobs: async (payload) => { submitted.push(payload); }, onEvent: (event) => { events.push(event); },
+    now: () => '2026-11-02T00:00:00.000Z', liveSession: true, regenBudgetUnits: 1, targetedEdits: false,
+    reviewer: async ({ request }) => verdict(request),
+    extractLastFrame: async () => ({ path: '/tmp/last.png', sha256: 'c'.repeat(64) }),
+    reviewKeyframe: async () => ({ overall: 'pass', checks: [{ dimension: 'identity', pass: true, severity: 'hard', evidence: 'same' }] }),
+    clipReviewer: async ({ request }) => { requests.push(request); return verdict({ ...request, keyframeSha256: 'a'.repeat(64) }, 'prompt'); },
+    sampleClipFrames: async () => ({ path: '/tmp/grid.png', sha256: 'b'.repeat(64) }),
+  });
+  await controller.start();
+  await controller.handle(preview('still_a'));
+  await controller.handle(preview('still_b'));
+  await controller.handle({ type: 'video_collected', jobId: 'video_a', path: '/tmp/video_a.mp4' });
+  assert.equal(events.filter((e) => e.type === 'ref_clip_verdict' && e.jobId === 'video_a').at(-1).retry, false, 'an unchained clip with a soft prompt miss is not re-rendered');
+  const chained = submitted.flatMap((entry) => entry.jobs).find((job) => job.id === 'video_b');
+  assert.ok(chained?.loadImage, `video_b was released chained: ${JSON.stringify(events.filter((e) => e.type === 'ref_chain_planned'))}`);
+  await controller.handle({ type: 'video_collected', jobId: 'video_b', path: '/tmp/video_b.mp4' });
+  assert.match(requests.at(-1).prompt, /must still show THIS shot's action/);
+  const verdictB = events.filter((e) => e.type === 'ref_clip_verdict' && e.jobId === 'video_b').at(-1);
+  assert.equal(verdictB.retry, true); assert.equal(verdictB.stalled, true);
+  const retry = submitted.flatMap((entry) => entry.jobs).filter((job) => job.id === 'video_b').at(-1);
+  assert.equal(retry.clipRetry, 1);
+  assert.equal(retry.loadImage, undefined, 're-anchored: no previous-clip frame');
+  assert.equal(retry.chainFallback, 'keyframe');
+  await controller.handle({ type: 'video_collected', jobId: 'video_b', path: '/tmp/video_b.mp4' });
+  assert.equal(events.filter((e) => e.type === 'ref_clip_verdict' && e.jobId === 'video_b').at(-1).retry, false, 'at most one re-anchor');
+});
+
+test('chain progress: a shot the planner marked as a new beat is released re-anchored, not chained', async () => {
+  const jobs = [still('still_a', 's1'), still('still_b', 's1'), video('video_a', 'still_a', 0), video('video_b', 'still_b', 1)];
+  jobs[2].shot = { sceneId: 'x', index: 0 }; jobs[3].shot = { sceneId: 'x', index: 1, reanchor: 'new beat: ramp, pond' };
+  const submitted = []; const events = [];
+  const controller = createRefWatchController({
+    jobsDoc: { productionId: 'p', runId: 'r', jobs }, submitJobs: async (payload) => { submitted.push(payload); }, onEvent: (event) => { events.push(event); },
+    now: () => '2026-11-02T00:00:00.000Z', liveSession: true, regenBudgetUnits: 1, targetedEdits: false,
+    reviewer: async ({ request }) => verdict(request),
+    extractLastFrame: async () => ({ path: '/tmp/last.png', sha256: 'c'.repeat(64) }),
+    reviewKeyframe: async () => ({ overall: 'pass', checks: [{ dimension: 'identity', pass: true, severity: 'hard', evidence: 'same' }] }),
+  });
+  await controller.start();
+  await controller.handle(preview('still_a'));
+  await controller.handle(preview('still_b'));
+  const b = submitted.flatMap((entry) => entry.jobs).find((job) => job.id === 'video_b');
+  assert.ok(b, 'released without waiting for video_a');
+  assert.equal(b.loadImage, undefined);
+  const planned = events.find((e) => e.type === 'ref_chain_planned' && e.jobId === 'video_b');
+  assert.match(planned.reason, /re-anchored on its own keyframe/);
+});

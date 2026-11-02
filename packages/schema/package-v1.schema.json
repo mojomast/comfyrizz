@@ -2428,6 +2428,12 @@
           "type": "boolean",
           "description": "SKILLS-PORT: per-shot override of last-frame chaining (true forces it on, false forces it off)."
         },
+        "chainMode": {
+          "type": "string",
+          "enum": ["auto", "lastFrame", "reanchor"],
+          "default": "auto",
+          "description": "Chain progress: auto (default) chains from the previous clip's last frame only when this shot continues the same moment; a shot whose still prompt is a new beat (4+ new content words) re-anchors on its own keyframe. lastFrame always chains; reanchor never does. chainFromPrevious still overrides."
+        },
         "framingLead": {
           "type": "boolean",
           "default": true,

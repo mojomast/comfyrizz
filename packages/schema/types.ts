@@ -1,7 +1,7 @@
 // GENERATED FILE - do not edit by hand.
 //
 // Source:        packages/schema/package-v1.schema.json
-// Schema sha256: c1d38cbbc4faa257df6c4faf6d523e1a2df2e15d067ea0ef20030c5733a1c2fd
+// Schema sha256: 1fee9916182b9d439548f2e7348899cf56e2c195c42e53e9de4a8e7a8ff8de8a
 // Generator:     packages/schema/scripts/gen-types.mjs (v1.0.0)
 //
 // Regenerate: pnpm --filter @comfyrizz/schema gen:types
@@ -1131,6 +1131,14 @@ export interface Gen {
    * SKILLS-PORT: per-shot override of last-frame chaining (true forces it on, false forces it off).
    */
   chainFromPrevious?: boolean;
+  /**
+   * Chain progress: auto (default) chains from the previous clip's last frame only when this shot
+   * continues the same moment; a shot whose still prompt is a new beat (4+ new content words)
+   * re-anchors on its own keyframe. lastFrame always chains; reanchor never does. chainFromPrevious
+   * still overrides.
+   * [default "auto"]
+   */
+  chainMode?: "auto" | "lastFrame" | "reanchor";
   /**
    * judge-workflow v3: when a still prompt plans a wide or full-body shot, the planner puts a
    * physical framing sentence first (head to toe, feet on the ground, moderate distance). Set false

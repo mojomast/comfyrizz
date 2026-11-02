@@ -454,6 +454,7 @@ export function createRefWatchController({
           } else {
             const chainPlan = await chainPlanFor(next, previousLive);
             if (chainPlan?.loadImage) {
+              chainedVideos.add(video.id);
               next.loadImage = chainPlan.loadImage;
               next.imgToVideoInplace = chainPlan.imgToVideoInplace;
             }
@@ -469,7 +470,8 @@ export function createRefWatchController({
             continue;
           }
         } else {
-          emitChainPlanned(video, false, null, 'chaining is off for this shot');
+          const reanchor = typeof video.shot?.reanchor === 'string' ? video.shot.reanchor : null;
+          emitChainPlanned(video, false, reanchor ? 'keyframe' : null, reanchor ? `re-anchored on its own keyframe (${reanchor})` : 'chaining is off for this shot');
         }
       }
       deferredVideos.delete(video.id);
@@ -1053,6 +1055,12 @@ export function createRefWatchController({
   // technical failure re-renders the clip once with a new seed when the regen budget allows;
   // otherwise the clip is kept and the verdict is only reported.
   const clipAttempts = new Map();
+  // Shots released with the previous clip's last frame (live keeps the planned job, so remember).
+  const chainedVideos = new Set();
+  function chainedClip(clip) {
+    return Boolean(clip && (chainedVideos.has(clip.id) || clip.chainFrameApplied || clip.loadImage?.path));
+  }
+
   async function clipNeedsRetry(clip) {
     if (typeof clipReviewer !== 'function' || typeof sampleClipFrames !== 'function' || !clip.localPath) return false;
     let verdict = null;
@@ -1062,7 +1070,9 @@ export function createRefWatchController({
         schema: REF_REVIEW_REQUEST_SCHEMA, productionId: productionId ?? 'production', runId: runId ?? 'run', jobId: clip.id,
         shotId: clip.shotId || clip.scene || clip.id, keyframeSha256: grid.sha256 ?? '0'.repeat(64), imagePath: grid.path,
         width: 1536, height: 576, plannedWidth: 1536, plannedHeight: 576, attempt: 0, kind: 'clip',
-        prompt: clip.params?.prompt || clip.prompt || 'video clip', characters: charactersFor(clip),
+        prompt: (chainedClip(clip) ? 'This clip continues from the previous shot\'s last frame; it must still show THIS shot\'s action, not the previous situation carrying on. ' : '')
+          + (clip.params?.prompt || clip.prompt || 'video clip'),
+        characters: charactersFor(clip),
       };
       verdict = await clipReviewer({ request, image: { path: grid.path, sha256: request.keyframeSha256 } });
     } catch {
@@ -1070,11 +1080,14 @@ export function createRefWatchController({
     }
     const hard = (verdict?.checks ?? []).filter((check) => check.pass === false && check.severity === 'hard'
       && ['identity', 'anatomy', 'technical'].includes(check.dimension));
+    // Chain progress: a chained clip that fails the prompt check did not move the story forward
+    // (it kept the previous shot's situation). Re-render it once from its own keyframe.
+    const stalled = chainedClip(clip) && (verdict?.checks ?? []).some((check) => check.pass === false && check.dimension === 'prompt');
     const tries = clipAttempts.get(clip.id) ?? 0;
     const cost = 0.17;
     const affordable = !(Number(regenBudgetUnits) >= 0) || (regenUnitsSpent + cost <= Number(regenBudgetUnits));
-    const retry = hard.length > 0 && tries < clipRetries && affordable;
-    emit({ type: 'ref_clip_verdict', jobId: clip.id, overall: verdict?.overall ?? 'error', hard: hard.map((check) => check.dimension), failed: (verdict?.checks ?? []).filter((check) => check.pass === false).map((check) => check.dimension), retry });
+    const retry = (hard.length > 0 || stalled) && tries < clipRetries && affordable;
+    emit({ type: 'ref_clip_verdict', jobId: clip.id, overall: verdict?.overall ?? 'error', hard: hard.map((check) => check.dimension), failed: (verdict?.checks ?? []).filter((check) => check.pass === false).map((check) => check.dimension), retry, ...(stalled ? { stalled: true } : {}) });
     if (!retry) return false;
     clipAttempts.set(clip.id, tries + 1);
     regenUnitsSpent += cost;
@@ -1087,6 +1100,18 @@ export function createRefWatchController({
       params: next.params, seed, width: next.dims?.width, height: next.dims?.height, frames: next.frames,
     });
     next.clipRetry = tries + 1;
+    if (stalled) chainedVideos.delete(clip.id);
+    if (stalled && hard.length === 0) {
+      const planned = gatedVideos.find((job) => job.id === clip.id);
+      delete next.loadImage;
+      delete next.imgToVideoInplace;
+      delete next.chainFrameApplied;
+      if (planned && 'fileInputs' in planned) next.fileInputs = structuredClone(planned.fileInputs);
+      else delete next.fileInputs;
+      next.chainFallback = 'keyframe';
+      next.chainFallbackReason = 'chained clip did not show its own action; re-anchored on its keyframe';
+      emitChainPlanned(next, false, 'keyframe', next.chainFallbackReason);
+    }
     live.set(clip.id, next);
     await submitJobs({ batch: 'video', jobs: [next] });
     return true;
