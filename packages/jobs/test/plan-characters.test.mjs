@@ -29,3 +29,11 @@ test('package refWatch.framingGiveUp reaches the jobs doc only when opted in', a
   const on = planJobs({ ...pkg, refWatch: { framingGiveUp: true } });
   assert.deepEqual(on.refWatchPolicy, { framingGiveUp: true });
 });
+
+test('package refWatch pass-through switches reach the jobs doc only when changed from the default', async () => {
+  const { readFileSync } = await import('node:fs');
+  const { planJobs } = await import('../src/index.mjs');
+  const pkg = JSON.parse(readFileSync(new URL('./fixtures/clawpocalypse.package.json', import.meta.url), 'utf8'));
+  assert.equal(planJobs({ ...pkg, refWatch: { passThroughHeld: true } }).refWatchPolicy, undefined);
+  assert.deepEqual(planJobs({ ...pkg, refWatch: { passThroughHeld: false, passThroughHardFailures: true } }).refWatchPolicy, { passThroughHeld: false, passThroughHardFailures: true });
+});

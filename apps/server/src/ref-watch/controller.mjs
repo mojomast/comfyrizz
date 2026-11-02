@@ -3,6 +3,9 @@
 // the same production budget ledger self-repair spends from, and only after
 // the regen estimate. Nothing here calls Google Colab, Comfy, or the network.
 import { createHash } from 'node:crypto';
+import { CLIP_PROMPT_NOTE, judgePrompt } from './judge-prompt.mjs';
+
+export const PASS_THROUGH_BLOCKING = Object.freeze(['identity', 'anatomy', 'technical']);
 import { mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { cacheKeyFor } from '../../../../packages/jobs/src/plan.mjs';
@@ -149,6 +152,9 @@ export function createRefWatchController({
   sampleClipFrames = null,
   clipRetries = 1,
   targetedEdits = true,
+  // One-pass still mode (colab oneStillPass): every escalated still gets one regen before the clip
+  // batch, and a still that still fails is passed through with a warning unless the failure blocks.
+  onePass = false,
 } = {}) {
   if (!isObject(jobsDoc)) throw new TypeError('createRefWatchController requires a jobsDoc object');
   if (typeof submitJobs !== 'function') throw new TypeError('createRefWatchController requires submitJobs');
@@ -177,6 +183,18 @@ export function createRefWatchController({
   const titleCards = Array.isArray(jobsDoc.titleCards) ? jobsDoc.titleCards.filter(isObject) : [];
   const stillIds = new Set(stillJobs.map((job) => job.id));
   const stillCount = stillJobs.length;
+  // Goat live check 2026-11-02: the shared production cap is max(2, 25% of stills) = 2 for a
+  // 7-still film. With every still judged in one pass, the first two regens used it up and the
+  // next three escalations were held with 'production regen cap exhausted' (goat2 only needed
+  // two). One-pass mode gives every still one regen; the regen CU allowance still caps spend.
+  if (onePass) {
+    caps.maxRegensPerStill = Math.min(caps.maxRegensPerStill, 1);
+    caps.maxRegenJobs = Math.max(caps.maxRegenJobs, stillCount);
+    caps.maxRegenFraction = Math.max(caps.maxRegenFraction, 1);
+  }
+  const passThroughHeld = onePass && jobsDoc.refWatchPolicy?.passThroughHeld !== false;
+  const passThroughHard = jobsDoc.refWatchPolicy?.passThroughHardFailures === true;
+  const passThroughs = [];
   const steerPrompt = steer?.steerPrompt ?? steerDefault.steerPrompt;
   const fillDecision = steer?.fillDecision ?? steerDefault.fillDecision;
   const chooseReplacementRef = steer?.chooseReplacementRef ?? steerDefault.chooseReplacementRef;
@@ -317,6 +335,16 @@ export function createRefWatchController({
       deferredVideos.delete(video.id);
       emit({ type: 'ref_gate_held', jobId: video.id, keyframeSha256, state: 'skipped', skipped: { stillJobId: stillId, reason } });
     }
+  }
+
+  // Hard failures that still block a one-pass pass-through: faces/characters (identity, which
+  // includes scene continuity), bodies (anatomy) and broken frames (technical), plus judge errors.
+  function passThroughFor(verdict) {
+    if (!passThroughHeld || !verdict || verdict.overall === 'error' || !validateRefVerdict(verdict).ok) return null;
+    const failedChecks = (verdict.checks ?? []).filter((check) => check.pass === false);
+    const blocking = failedChecks.filter((check) => check.severity === 'hard' && PASS_THROUGH_BLOCKING.includes(check.dimension));
+    if (blocking.length > 0 && !passThroughHard) return null;
+    return { failed: [...new Set(failedChecks.map((check) => check.dimension))] };
   }
 
   function holdDecision(seed, decision, verdicts) {
@@ -664,7 +692,7 @@ export function createRefWatchController({
       height: measured?.height ?? plannedHeight,
       plannedWidth,
       plannedHeight,
-      prompt: job.params?.prompt || job.prompt || 'untitled still',
+      prompt: judgePrompt(job.params?.prompt || job.prompt) || 'untitled still',
       attempt: record.attempt,
       characters,
       ...(record.attempt > 0 && Array.isArray(record.lastHardFails) && record.lastHardFails.length
@@ -1006,6 +1034,14 @@ export function createRefWatchController({
       emitEstimate(true);
     }
 
+    const passThrough = decision.action !== 'accept' && decision.action !== 'override'
+      ? passThroughFor(verdict) : null;
+    if (passThrough) {
+      decision = { schema: REF_DECISION_SCHEMA, jobId: seed.jobId, keyframeSha256: seed.keyframeSha256, attempt: record.attempt,
+        action: 'override', reason: `one-pass pass-through: ${passThrough.failed.join(', ') || 'held'} (${decision.reason ?? decision.action})` };
+      passThroughs.push({ jobId: seed.jobId, ...passThrough });
+      emit({ type: 'ref_pass_through', jobId: seed.jobId, keyframeSha256: seed.keyframeSha256, attempt: record.attempt, warning: true, failed: passThrough.failed, reason: decision.reason });
+    }
     if (decision.action === 'accept' || decision.action === 'override') {
       record.state = decision.action === 'override' ? 'overridden' : 'accepted';
       acceptedSha.set(seed.jobId, seed.keyframeSha256);
@@ -1070,8 +1106,9 @@ export function createRefWatchController({
         schema: REF_REVIEW_REQUEST_SCHEMA, productionId: productionId ?? 'production', runId: runId ?? 'run', jobId: clip.id,
         shotId: clip.shotId || clip.scene || clip.id, keyframeSha256: grid.sha256 ?? '0'.repeat(64), imagePath: grid.path,
         width: 1536, height: 576, plannedWidth: 1536, plannedHeight: 576, attempt: 0, kind: 'clip',
-        prompt: (chainedClip(clip) ? 'This clip continues from the previous shot\'s last frame; it must still show THIS shot\'s action, not the previous situation carrying on. ' : '')
-          + (clip.params?.prompt || clip.prompt || 'video clip'),
+        prompt: CLIP_PROMPT_NOTE
+          + (chainedClip(clip) ? 'This clip continues from the previous shot\'s last frame; it must still show THIS shot\'s action, not the previous situation carrying on. ' : '')
+          + (judgePrompt(clip.params?.prompt || clip.prompt) || 'video clip'),
         characters: charactersFor(clip),
       };
       verdict = await clipReviewer({ request, image: { path: grid.path, sha256: request.keyframeSha256 } });
@@ -1227,6 +1264,7 @@ export function createRefWatchController({
       cap: refRegenJobCap(stillCount, caps),
       framingGiveUp: caps.framingGiveUp === true,
       framingDrift: framingDrift.map((entry) => ({ ...entry })),
+      passThroughs: passThroughs.map((entry) => ({ ...entry, failed: [...entry.failed] })),
       shotRegenUnits: Object.fromEntries(shotSpend),
       states: Object.fromEntries([...states].map(([id, value]) => [id, { ...value }])),
     };

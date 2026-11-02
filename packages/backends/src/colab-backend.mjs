@@ -1364,6 +1364,7 @@ export function createColabBackend({
           liveSession: true,
           targetedEdits: refWatchEdits !== false,
           regenBudgetUnits: Number(budgetUnits) > 0 ? Number(budgetUnits) * 0.2 : undefined,
+          onePass: oneStillPass === true,
         };
         refWatchGate = typeof refWatch === "function" ? await refWatch(watchContext) : refWatch;
       }

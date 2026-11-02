@@ -1,7 +1,7 @@
 // GENERATED FILE - do not edit by hand.
 //
 // Source:        packages/schema/package-v1.schema.json
-// Schema sha256: 1fee9916182b9d439548f2e7348899cf56e2c195c42e53e9de4a8e7a8ff8de8a
+// Schema sha256: 56adbf90a15c8a3cd602419bd0b48e15dac71afb45c86a5705d5b7122e4c8a40
 // Generator:     packages/schema/scripts/gen-types.mjs (v1.0.0)
 //
 // Regenerate: pnpm --filter @comfyrizz/schema gen:types
@@ -203,6 +203,19 @@ export interface PackageV1 {
      * [min 0, max 240, default 12]
      */
     perShotWallMinutes?: number;
+    /**
+     * One-pass still mode: a still that is still failing after its one regen goes to video with a
+     * ref_pass_through warning instead of losing its clip. Hard identity, anatomy and technical
+     * failures still block unless passThroughHardFailures is true.
+     * [default true]
+     */
+    passThroughHeld?: boolean;
+    /**
+     * Off by default. When true, a one-pass pass-through also lets stills with hard identity, anatomy
+     * or technical failures through (with a warning).
+     * [default false]
+     */
+    passThroughHardFailures?: boolean;
     /**
      * Off by default. When true, a still whose only hard failure is framing gets at most one regen
      * (none if the regen budget is closed), then is accepted with a framing-drift note in the run

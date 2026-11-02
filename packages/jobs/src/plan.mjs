@@ -1379,6 +1379,8 @@ export function planJobs(pkg, opts = {}) {
   if (pkg.refWatch && typeof pkg.refWatch === "object") {
     const policy = {};
     if (pkg.refWatch.framingGiveUp === true) policy.framingGiveUp = true;
+    if (pkg.refWatch.passThroughHeld === false) policy.passThroughHeld = false;
+    if (pkg.refWatch.passThroughHardFailures === true) policy.passThroughHardFailures = true;
     for (const key of ["perShotRegenShare", "perShotWallMinutes"]) {
       if (Number.isFinite(pkg.refWatch[key])) policy[key] = pkg.refWatch[key];
     }

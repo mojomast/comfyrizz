@@ -307,3 +307,29 @@ def test_line_risk_flags_loop_prone_lines_and_leaves_ordinary_ones():
     assert "short" in line_risk("The landing needed work.")
     assert "alphanumeric" in line_risk("Rogue agent CLAW-9 went off script tonight.")
     assert line_risk("Nana Rosa has four rules now and she means it.") == []
+
+
+def test_take_count_only_counts_lines_voiced_this_run(tmp_path):
+    # Goat live check 2026-11-02: 12 cached lines + 1 voiced line reported 58 takes (the cached
+    # run's seeds were counted). Only this run's takes count; cached lines show 0 attempts.
+    first_dir = tmp_path / "run1"; first_dir.mkdir()
+    pkg = _scene_pkg(first_dir, [
+        {"id": "s_a", "narration": "Nana Rosa had three rules today."},
+        {"id": "s_b", "narration": "Biscuit had broken rule three quickly."},
+    ])
+    narrate.run(pkg, first_dir / "out", submit_graph_fn=FakeComfy(first_dir),
+                transcribe_fn=ScriptedAsr(["nope", "Nana Rosa had three rules today.", "Biscuit had broken rule three quickly."]))
+    second_dir = tmp_path / "run2"; second_dir.mkdir()
+    pkg2 = _scene_pkg(second_dir, [
+        {"id": "s_a", "narration": "Nana Rosa had three rules today."},
+        {"id": "s_b", "narration": "Biscuit had broken every rule quickly."},
+    ])
+    comfy2 = FakeComfy(second_dir)
+    result = narrate.run(pkg2, second_dir / "out", submit_graph_fn=comfy2,
+                         transcribe_fn=ScriptedAsr(["Biscuit had broken every rule quickly."]), cache_dir=first_dir / "out")
+    report = result["takeReport"]
+    assert len(report["takes"]) == len(comfy2.calls) == 1
+    assert report["lines"]["s_a_line_001"]["attempts"] == 0 and report["lines"]["s_a_line_001"]["cached"] is True
+    assert report["voiced"] == ["s_b_line_001"]
+    on_disk = json.loads((second_dir / "out/audio/take_report.json").read_text())
+    assert on_disk["cached"] == ["s_a_line_001"] and len(on_disk["takes"]) == 1

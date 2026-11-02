@@ -323,13 +323,22 @@ def _take_report(
     recorded: Mapping,
     transcripts: Mapping,
     takes_per_line: int,
+    reuse: Mapping | None = None,
 ) -> dict:
+    # Goat live check 2026-11-02: a reused line's measure still carries the cached run's QA seeds,
+    # so counting them reported 58 takes when only one line (7 takes) was voiced. Cached lines
+    # are listed with zero attempts and never add takes.
+    reuse = reuse or {}
     takes: list[dict] = []
     summaries: dict[str, dict] = {}
     flagged: list[str] = []
     for line in lines:
         measure = report["scenes"].get(line["id"])
         if measure is None:
+            continue
+        if line["id"] in reuse:
+            summaries[line["id"]] = {"scene": line["scene"], "text": line["text"], "spoken": line["spoken"],
+                                     "selected": None, "flagged": False, "cached": True, "attempts": 0, "seeds": []}
             continue
         line_takes = _line_takes(line, measure, recorded, transcripts)
         selection = select_take(line["spoken"], line_takes)
@@ -442,14 +451,12 @@ def run(
         },
     )
 
-    take_report = _take_report(lines, report, recorded, transcripts, takes_per_line)
+    take_report = _take_report(lines, report, recorded, transcripts, takes_per_line, reuse)
+    take_report["cached"] = sorted(reuse)
+    take_report["voiced"] = sorted(i for i, v in take_report["lines"].items() if not v.get("cached"))
+    take_report["risky"] = {l["id"]: line_risk(l["text"]) for l in lines if line_risk(l["text"]) and l["id"] not in reuse}
     (audio / "take_report.json").write_text(json.dumps(take_report, indent=2) + "\n")
     _write_scene_audio(lines, audio, report)
-    for ident in reuse:
-        take_report["lines"][ident] = {**take_report["lines"].get(ident, {}), "cached": True, "flagged": False}
-    take_report["flagged"] = [i for i in take_report["flagged"] if i not in reuse]
-    take_report["cached"] = sorted(reuse)
-    take_report["risky"] = {l["id"]: line_risk(l["text"]) for l in lines if line_risk(l["text"]) and l["id"] not in reuse}
     flagged = list(take_report["flagged"])
     return {
         "report": report,

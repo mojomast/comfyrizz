@@ -402,6 +402,16 @@
           "type": "number", "minimum": 0, "maximum": 240, "default": 12,
           "description": "judge-workflow v3: a shot stops regenerating this many minutes after its first review (0 = no time cap)."
         },
+        "passThroughHeld": {
+          "type": "boolean",
+          "default": true,
+          "description": "One-pass still mode: a still that is still failing after its one regen goes to video with a ref_pass_through warning instead of losing its clip. Hard identity, anatomy and technical failures still block unless passThroughHardFailures is true."
+        },
+        "passThroughHardFailures": {
+          "type": "boolean",
+          "default": false,
+          "description": "Off by default. When true, a one-pass pass-through also lets stills with hard identity, anatomy or technical failures through (with a warning)."
+        },
         "framingGiveUp": {
           "type": "boolean",
           "default": false,
