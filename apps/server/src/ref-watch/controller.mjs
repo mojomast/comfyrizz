@@ -1038,7 +1038,7 @@ export function createRefWatchController({
     const cost = 0.17;
     const affordable = !(Number(regenBudgetUnits) >= 0) || (regenUnitsSpent + cost <= Number(regenBudgetUnits));
     const retry = hard.length > 0 && tries < clipRetries && affordable;
-    emit({ type: 'ref_clip_verdict', jobId: clip.id, overall: verdict?.overall ?? 'error', hard: hard.map((check) => check.dimension), retry });
+    emit({ type: 'ref_clip_verdict', jobId: clip.id, overall: verdict?.overall ?? 'error', hard: hard.map((check) => check.dimension), failed: (verdict?.checks ?? []).filter((check) => check.pass === false).map((check) => check.dimension), retry });
     if (!retry) return false;
     clipAttempts.set(clip.id, tries + 1);
     regenUnitsSpent += cost;

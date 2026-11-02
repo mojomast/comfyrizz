@@ -32,10 +32,19 @@ function asSentence(value) {
 
 // Flipping negative words ("not" -> "fully") can invert meaning, so a sentence with
 // negative wording is dropped rather than rewritten. Fix hints are positive by contract.
+// judge-loop v2: drop only the negative clause (split on commas/semicolons inside a
+// sentence), so one "no signs" clause no longer deletes a whole one-sentence prompt.
 function oppositeWords(value) {
   return value
     .split(/(?<=[.!?])\s+/)
-    .filter((sentence) => sentence && lintSteer(sentence).length === 0)
+    .map((sentence) => {
+      if (!sentence || lintSteer(sentence).length === 0) return sentence;
+      const kept = sentence.split(/\s*[,;]\s*/).filter((clause) => clause && lintSteer(clause).length === 0);
+      if (!kept.length) return '';
+      const joined = kept.join(', ').replace(/[,\s]+$/, '');
+      return /[.!?]$/.test(joined) ? joined : `${joined}.`;
+    })
+    .filter(Boolean)
     .join(' ')
     .replace(/\s+/g, ' ')
     .replace(/\s+([,.;:!?])/g, '$1')
@@ -75,11 +84,13 @@ function captionParts(previousPrompt, verdict, characters) {
 
   for (const item of checks) {
     if (item?.pass !== true) continue;
-    add(`The finished still shows ${oppositeWords(textOf(item.evidence))}`, false);
+    const shown = oppositeWords(textOf(item.evidence));
+    if (shown) add(`The finished still shows ${shown}`, false);
   }
 
   for (const hint of fixHints) {
-    add(`In the finished still, ${oppositeWords(textOf(hint))}`, true);
+    const fix = oppositeWords(textOf(hint));
+    if (fix) add(`In the finished still, ${fix}`, true);
   }
 
   for (const character of cast) {
