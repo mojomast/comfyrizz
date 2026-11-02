@@ -398,6 +398,8 @@ export function createColabBackend({
   wallClockCapMinutes = 180,
   gpu = "G4",
   reserveMinutes = COLLECT_AND_STOP_RESERVE_MINUTES,
+  // judge-loop v2: collection may use budget headroom beyond the 2-minute earmark (0 = strict earmark).
+  collectionHeadroomMinutes = 8,
   warnFraction = WARN_FRACTION,
   bootstrapScript = join(REPO, "colab", "bootstrap.py"),
   waitReadyScript = join(REPO, "colab", "wait_ready.py"),
@@ -1886,6 +1888,7 @@ export function createColabBackend({
   // nothing is collected. Never enlarge the budget, wall cap or independent watchdog.
   // Charge previous collections plus this window's elapsed time against the committed
   // estimate floor, so another collect cannot spend the same earmarked budget twice.
+  const collectionHeadroomMs = Math.max(0, Number(collectionHeadroomMinutes) || 0) * 60000;
   function collectionAllowance(collectionElapsedMs = 0) {
     const reserveMs = Number.isFinite(Number(reserveMinutes)) ? Math.max(0, Number(reserveMinutes) * 60000) : 0;
     const collectionMs = Math.min(120000, reserveMs / 3);
@@ -1893,6 +1896,12 @@ export function createColabBackend({
     let available = collectionMs;
     const started = state.startedAtMs;
     if (started !== null) {
+      // judge-loop v2: the 2-minute earmark is a floor, not a ceiling. Two kernel
+      // reconnects (60 s each) used to burn the whole window before the bundle step and
+      // the finished clips were abandoned. When the budget has room beyond the stop
+      // reserve, collection may use it (up to COLLECTION_HEADROOM_MAX_MS); the budget and
+      // wall-clock terms below still keep the stop reserve intact.
+      if (reserveMs > 0) available = Math.max(collectionMs, collectionHeadroomMs);
       const elapsed = Math.max(0, now() - started);
       if (wallClockCapMinutes > 0) available = Math.min(available, wallClockCapMinutes * 60000 - elapsed);
       const collectionUnits = (state.collectionSpentMs + collectionElapsedMs) / 3600000 * ratePerHour;
