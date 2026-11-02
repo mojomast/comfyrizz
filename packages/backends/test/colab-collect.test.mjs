@@ -371,7 +371,7 @@ test("an exact admission quote funds first collection and reconnect, including t
 test("custom collection reserves retain a positive stop share; zero reserves issue no collection calls", async (t) => {
   for (const reserveMinutes of [0, 0.3, 1, 6, 9]) {
     await t.test(`${reserveMinutes}-minute reserve`, async () => {
-      const ws = colabWorkspace({ options: { reserveMinutes, budgetUnits: 100, now: () => 100000 } });
+      const ws = colabWorkspace({ options: { reserveMinutes, budgetUnits: 100, now: () => 100000, collectionHeadroomMinutes: 0 } });
       ws.backend.state.startedAtMs = 100000;
       const run = ws.cli.run.bind(ws.cli);
       const timers = [];
@@ -693,4 +693,18 @@ test("production scratch is per production, path-safe, and never defaults inside
   rmSync(legacy.inspect().scratch, { recursive: true, force: true });
   rmSync(production.inspect().scratch, { recursive: true, force: true });
   assert.equal(statSync(runtimeDir).isDirectory(), true);
+});
+
+test("judge-loop v2: a slow first collection call (two 60 s reconnects) no longer exhausts the window", async () => {
+  for (const [headroom, ok] of [[8, true]]) {
+    let clock = 100000;
+    const ws = colabWorkspace({ options: { budgetUnits: 100, now: () => clock, collectionHeadroomMinutes: headroom } });
+    ws.backend.state.startedAtMs = 100000;
+    const run = ws.cli.run.bind(ws.cli);
+    let calls = 0;
+    ws.cli.run = (args, opts) => { if (calls++ === 0) clock += 150000; return run(args, opts); };
+    const result = await ws.backend.collectOut();
+    const limited = (result.problems ?? []).some((p) => /preserving stop reserve/.test(String(p)));
+    assert.equal(!limited, ok, `headroom ${headroom}: ${JSON.stringify(result.problems)}`);
+  }
 });

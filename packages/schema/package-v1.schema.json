@@ -379,6 +379,33 @@
     "audio": {
       "$ref": "#/$defs/packageAudio"
     },
+    "refWatch": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "judge-loop v2: per-package reference-watch policy switches.",
+      "properties": {
+        "framingGiveUp": {
+          "type": "boolean",
+          "default": false,
+          "description": "Off by default. When true, a still whose only hard failure is framing gets at most one regen (none if the regen budget is closed), then is accepted with a framing-drift note in the run report instead of being held."
+        }
+      }
+    },
+    "characters": {
+      "type": "array",
+      "maxItems": 16,
+      "description": "judge-loop v2: the story bible. Each character's identity lock and wardrobe are what the reference watch checks stills and clips against.",
+      "items": {
+        "type": "object",
+        "required": ["id", "identityLock"],
+        "additionalProperties": false,
+        "properties": {
+          "id": { "type": "string", "pattern": "^[a-z][a-z0-9_-]{0,31}$" },
+          "identityLock": { "type": "string", "minLength": 3, "maxLength": 400 },
+          "wardrobeState": { "type": "string", "minLength": 3, "maxLength": 300 }
+        }
+      }
+    },
     "titleCards": {
       "type": "array",
       "maxItems": 4,
@@ -2382,6 +2409,12 @@
         "chainFromPrevious": {
           "type": "boolean",
           "description": "SKILLS-PORT: per-shot override of last-frame chaining (true forces it on, false forces it off)."
+        },
+        "characters": {
+          "type": "array",
+          "maxItems": 8,
+          "items": { "type": "string", "pattern": "^[a-z][a-z0-9_-]{0,31}$" },
+          "description": "judge-loop v2: ids from the package characters list that appear in this asset; the reference watch judges identity against them."
         }
       }
     },

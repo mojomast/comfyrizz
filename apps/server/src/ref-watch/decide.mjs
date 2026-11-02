@@ -63,6 +63,27 @@ export function decide({ verdict, attempt, regenJobsUsed, stillCount, identityFa
   }
 
   const failures = hardFailures(checks, untrustedDimensions);
+  // judge-loop v2 framing early give-up: framing is the judge's least reliable hard check
+  // and re-rendering for it alone stalled whole runs (o1 regenerated three times). When
+  // framing is the ONLY hard failure (after any second opinion), allow at most one regen,
+  // and none when the regen budget is closed; then accept with a soft note.
+  const framingOnly = failures.length > 0 && failures.every((check) => check.dimension === 'framing')
+    && (!editPlan || editPlan.dimensions.every((dimension) => dimension === 'framing'));
+  // Off by default (policy.framingGiveUp): calibration showed it accepts real shot-size misses
+  // when the one regen also misses, so a package must opt in (package.refWatch.framingGiveUp).
+  if (framingOnly && policy.framingGiveUp === true) {
+    const regenOpen = Number.isSafeInteger(attempt) && attempt < Math.min(1, policy.maxRegensPerStill)
+      && Number.isSafeInteger(regenJobsUsed) && regenJobsUsed < refRegenJobCap(stillCount, policy);
+    if (!regenOpen) {
+      return {
+        ...base,
+        action: 'accept',
+        reason: attempt >= 1 ? 'framing-only hard fail after one regen; accepted with soft note' : 'framing-only hard fail with regen budget closed; accepted with soft note',
+        softNote: failures.map((check) => check.evidence).filter(Boolean).join(' ').slice(0, 400) || 'framing differs from the plan',
+      };
+    }
+    return { ...base, action: 'reprompt', reason: 'hard checks failed: framing', nextPrompt: STEER_PLACEHOLDER };
+  }
   const perStillOpen = Number.isSafeInteger(attempt) && attempt < policy.maxRegensPerStill;
   const productionOpen = Number.isSafeInteger(regenJobsUsed) && regenJobsUsed < refRegenJobCap(stillCount, policy);
   if (!perStillOpen || !productionOpen) {

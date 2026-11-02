@@ -246,7 +246,7 @@ for (const mode of ['cancel', 'deadline']) {
     await assert.rejects(ws.run({ signal: controller.signal, onEvent: event => {
       if (event.type === 'collection_attempt' && event.operation === 'download') {
         if (mode === 'cancel') controller.abort(new Error('cancel bulk transfer'));
-        else clock += 120000;
+        else clock += 600000; // past the 8-minute headroom window too
       }
     } }), error => {
       assert.match(error.message, mode === 'cancel' ? /cancel bulk/ : /deadline\/budget/);

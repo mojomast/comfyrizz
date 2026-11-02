@@ -24,7 +24,13 @@ MAX_DURATION_SCALE = 1.8
 # Chatterbox takes carry lead-in/tail silence; on a three-word line that alone breaks the 1.8x
 # bound (GPU e2e 2026-10-30: "His never was." 2.4 s vs 2.16 s). Allow it once per take.
 SILENCE_ALLOWANCE_SECONDS = 1.0
-REASON_ORDER = ("truncated", "extra-words", "repeated-word", "wer", "duration")
+REASON_ORDER = ("truncated", "extra-words", "repeated-word", "wer", "duration", "faded")
+# judge-loop v2 audio QA (the-keeper s3, Nov 2026): the ASR heard "waiting for dawn" but it was
+# rendered ~15 dB under the rest of the line, so the film lost it. A take whose later speech-length
+# burst sits far below its loudest burst is rejected as "faded" and retaken.
+FADED_RATIO = 0.25
+FADED_MIN_SECONDS = 0.3
+SILENCE_DBFS = -40.0
 
 
 class TakeReasons(list):
@@ -87,6 +93,53 @@ def _structure(spoken: list[str], transcript: list[str]) -> tuple[bool, bool, bo
     return truncated, extra, repeated
 
 
+def speech_bursts(samples, rate: int, silence_dbfs: float = SILENCE_DBFS, min_gap: float = 0.25) -> list[tuple[float, float, float]]:
+    """Non-silent bursts as (start, end, rms), split at silences of at least ``min_gap`` seconds."""
+    import numpy as np
+
+    x = np.asarray(samples, dtype=np.float32).reshape(-1)
+    if x.size == 0 or not rate:
+        return []
+    hop = max(1, int(rate * 0.02))
+    frames = x[: x.size // hop * hop].reshape(-1, hop)
+    if frames.size == 0:
+        return []
+    level = 20 * np.log10(np.sqrt((frames ** 2).mean(axis=1)) + 1e-9)
+    loud = level > silence_dbfs
+    bursts: list[tuple[float, float, float]] = []
+    start = None
+    quiet_run = 0
+    gap_frames = max(1, int(min_gap / 0.02))
+    for index, on in enumerate(loud):
+        if on:
+            if start is None:
+                start = index
+            quiet_run = 0
+        elif start is not None:
+            quiet_run += 1
+            if quiet_run >= gap_frames:
+                end = index - quiet_run + 1
+                bursts.append((start, end))
+                start = None
+                quiet_run = 0
+    if start is not None:
+        bursts.append((start, len(loud) - quiet_run))
+    out = []
+    for begin, end in bursts:
+        chunk = frames[begin:end].reshape(-1)
+        out.append((begin * 0.02, end * 0.02, float(np.sqrt((chunk ** 2).mean())) if chunk.size else 0.0))
+    return out
+
+
+def faded(samples, rate: int) -> bool:
+    """True when a speech-length burst after the first is far quieter than the loudest burst."""
+    bursts = speech_bursts(samples, rate)
+    if len(bursts) < 2:
+        return False
+    loudest = max(rms for _, _, rms in bursts)
+    return any(end - start >= FADED_MIN_SECONDS and rms < loudest * FADED_RATIO for start, end, rms in bursts[1:])
+
+
 def _classify(spoken: str, take: Mapping, expected: float, words: list[str]) -> list[str]:
     transcript = take.get("transcript")
     transcript = transcript if isinstance(transcript, str) else ""
@@ -109,6 +162,14 @@ def _classify(spoken: str, take: Mapping, expected: float, words: list[str]) -> 
         seconds = float("nan")
     if not (expected * MIN_DURATION_SCALE <= seconds <= expected * MAX_DURATION_SCALE + SILENCE_ALLOWANCE_SECONDS):
         reasons.append("duration")
+    samples = take.get("_samples")
+    rate = take.get("_rate")
+    if samples is not None and rate:
+        try:
+            if faded(samples, int(rate)):
+                reasons.append("faded")
+        except Exception:  # audio QA is advisory; a bad buffer never breaks take selection
+            pass
     return reasons
 
 

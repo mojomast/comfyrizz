@@ -1,7 +1,7 @@
 // GENERATED FILE - do not edit by hand.
 //
 // Source:        packages/schema/package-v1.schema.json
-// Schema sha256: 178e28dac126ee86d86386a49ed3feec7d1103cd3847c4a7f4790f30e13c8048
+// Schema sha256: d1f42e745c46e651531bd26d5cb67cedbe4033853c7ccbb04dcd37874af1f5d0
 // Generator:     packages/schema/scripts/gen-types.mjs (v1.0.0)
 //
 // Regenerate: pnpm --filter @comfyrizz/schema gen:types
@@ -175,6 +175,28 @@ export interface PackageV1 {
   presenter?: Presenter;
   captions?: PackageCaptions;
   audio?: PackageAudio;
+  /**
+   * judge-loop v2: per-package reference-watch policy switches.
+   */
+  refWatch?: {
+    /**
+     * Off by default. When true, a still whose only hard failure is framing gets at most one regen
+     * (none if the regen budget is closed), then is accepted with a framing-drift note in the run
+     * report instead of being held.
+     * [default false]
+     */
+    framingGiveUp?: boolean;
+    };
+  /**
+   * judge-loop v2: the story bible. Each character's identity lock and wardrobe are what the
+   * reference watch checks stills and clips against.
+   * [maxItems 16]
+   */
+  characters?: Array<{
+    id: string;
+    identityLock: string;
+    wardrobeState?: string;
+    }>;
   /**
    * SKILLS-PORT: title cards whose text sits behind the subject. Each names a generated still; once
    * reference watch accepts it, a BiRefNet cutout job is queued and the card is composed as plate,
@@ -1085,6 +1107,12 @@ export interface Gen {
    * SKILLS-PORT: per-shot override of last-frame chaining (true forces it on, false forces it off).
    */
   chainFromPrevious?: boolean;
+  /**
+   * judge-loop v2: ids from the package characters list that appear in this asset; the reference
+   * watch judges identity against them.
+   * [maxItems 8]
+   */
+  characters?: Array<string>;
   }
 
 export interface Asset {
