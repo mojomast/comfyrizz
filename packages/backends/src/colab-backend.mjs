@@ -825,9 +825,14 @@ export function createColabBackend({
   /** ADMIT-BEFORE-YOU-SPEND: the reserve formula, and the wall clock, checked before a job batch. */
   function admit(jobs, { onEvent = null } = {}) {
     const estimate = estimateJobs(jobs);
+    // judge-workflow v3 live run: the VM bills while the judge reviews clips between
+    // batches, and collection already charges that wall time. Admission ignored it, so a
+    // late re-render batch was admitted that left collection nothing (all clips lost).
+    // Charge admission the same way: max(job ledger, VM wall time at the billed rate).
+    const wallUnits = state.startedAtMs ? Math.max(0, now() - state.startedAtMs) / 3600000 * ratePerHour : 0;
     const decision = assessBudget({
       budgetUnits,
-      spentEstimate: state.spentEstimate,
+      spentEstimate: Math.max(state.spentEstimate, wallUnits - state.committedEstimate),
       committedEstimate: state.committedEstimate,
       nextJobUpperEstimate: nextUpper(jobs),
       ratePerHour,

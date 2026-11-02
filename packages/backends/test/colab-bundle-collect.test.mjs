@@ -357,3 +357,20 @@ test('oversized inventory is refused before pack/download; local and remote syml
     });
   }
 });
+
+test('v3 live run: VM wall time burnt between batches (judge reviewing clips) is charged at admission, so a late batch is refused instead of starving collection', async t => {
+  let clock = 100000;
+  const ws = workspace(t, { budgetUnits: 4.4, now: () => clock });
+  let batches = 0;
+  const events = [];
+  const result = await ws.run({ onEvent: event => {
+    events.push(event);
+    // After the first batch is collected, the judge idles the VM for 26 minutes (~3.9 units at 8.9/h).
+    if (event.type === 'collect' && ++batches === 1) clock += 26 * 60000;
+  } });
+  const refused = events.find(e => e.type === 'refused');
+  assert.ok(refused, 'the second batch is refused once wall time has used the budget');
+  assert.equal(events.filter(e => e.type === 'collection_limit').length, 0, 'collection never hits the deadline');
+  assert.equal(result.teardown.state, 'stopped');
+  for (const name of ws.names.filter(n => /still/.test(n) && !/manifest/.test(n))) assert.ok(existsSync(join(ws.scratchDir, 'out', name)), name);
+});
