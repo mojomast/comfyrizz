@@ -130,6 +130,9 @@ export function createRefWatchController({
   planChained = planChainedShot,
   liveSession = false,
   regenBudgetUnits,
+  // judge-workflow v3: per-shot caps so one stubborn still cannot starve the run.
+  perShotRegenShare = 0.4,
+  perShotWallMinutes = 12,
   // Judge loop (Nov 1 research, JUDGE_RESEARCH.md): reviews for one batch run concurrently (the
   // GPU idles while the judge thinks), a lone hard fail on a high-variance dimension gets one
   // second opinion before it holds a still, and targeted edits can be turned off so a run that
@@ -187,6 +190,26 @@ export function createRefWatchController({
   const deferredVideos = new Set();
   let regenJobsUsed = 0;
   let regenUnitsSpent = 0;
+  const shotSpend = new Map();
+  const shotFirstSeenMs = new Map();
+  const shotPolicy = { ...(isObject(jobsDoc.refWatchPolicy) ? jobsDoc.refWatchPolicy : {}) };
+  const shareCap = Number.isFinite(Number(shotPolicy.perShotRegenShare)) ? Number(shotPolicy.perShotRegenShare) : perShotRegenShare;
+  const wallCapMin = Number.isFinite(Number(shotPolicy.perShotWallMinutes)) ? Number(shotPolicy.perShotWallMinutes) : perShotWallMinutes;
+  const clockMs = () => { const value = typeof now === 'function' ? Date.parse(now()) : NaN; return Number.isFinite(value) ? value : Date.now(); };
+  // A shot may not spend more than its share of the regen allowance, nor keep regenerating past
+  // its wall-clock window (first review + perShotWallMinutes). Returns a reason, or null if allowed.
+  function shotCapReason(jobId, hold) {
+    const spent = shotSpend.get(jobId) ?? 0;
+    // The first regen of a shot is always allowed (the global ledger still decides whether it fits).
+    if (spent > 0 && Number.isFinite(regenBudgetUnits) && regenBudgetUnits > 0 && shareCap > 0 && spent + hold > shareCap * regenBudgetUnits + 1e-9) {
+      return `per-shot budget cap: this shot would use ${(spent + hold).toFixed(2)} of its ${(shareCap * regenBudgetUnits).toFixed(2)} unit share`;
+    }
+    const first = shotFirstSeenMs.get(jobId);
+    if (wallCapMin > 0 && first !== undefined && clockMs() - first > wallCapMin * 60000) {
+      return `per-shot time cap: regenerating for more than ${wallCapMin} minutes`;
+    }
+    return null;
+  }
   let started = false;
   let chain = Promise.resolve();
 
@@ -695,6 +718,7 @@ export function createRefWatchController({
     const job = live.get(seed.jobId);
     if (!job) return;
     record.state = 'reviewing';
+    if (!shotFirstSeenMs.has(seed.jobId)) shotFirstSeenMs.set(seed.jobId, clockMs());
 
     const { measured, request, characters } = await buildRequest(seed, job, record);
     if (!validateRefReviewRequest(request).ok) {
@@ -866,7 +890,11 @@ export function createRefWatchController({
         };
       } else {
         const hold = holdUnits(estimateResult);
-        if (hold === null || !budgetFits(hold)) {
+        const shotCap = hold === null ? null : shotCapReason(seed.jobId, hold);
+        if (shotCap) {
+          emit({ type: 'ref_shot_capped', jobId: seed.jobId, keyframeSha256: seed.keyframeSha256, reason: shotCap, attempt: record.attempt });
+          decision = { ...decision, action: 'escalate', reason: shotCap };
+        } else if (hold === null || !budgetFits(hold)) {
           decision = {
             ...decision,
             action: 'escalate',
@@ -887,6 +915,7 @@ export function createRefWatchController({
                 attempt: record.attempt,
               },
             });
+            shotSpend.set(seed.jobId, (shotSpend.get(seed.jobId) ?? 0) + hold);
           } catch (error) {
             decision = {
               ...decision,
@@ -1173,6 +1202,7 @@ export function createRefWatchController({
       cap: refRegenJobCap(stillCount, caps),
       framingGiveUp: caps.framingGiveUp === true,
       framingDrift: framingDrift.map((entry) => ({ ...entry })),
+      shotRegenUnits: Object.fromEntries(shotSpend),
       states: Object.fromEntries([...states].map(([id, value]) => [id, { ...value }])),
     };
   }

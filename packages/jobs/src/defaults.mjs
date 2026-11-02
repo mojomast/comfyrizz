@@ -1,3 +1,4 @@
+import { leadWithFraming } from "./framing.mjs";
 // Prompt defaults the planner applies to every image/video job, and why.
 //
 // GPU test 2 shipped 134 jobs and these are the prompt lessons that cost real units:
@@ -180,13 +181,21 @@ export function applyMotionRoleDefaults(params, { role = null, kind, hasSourceIm
  * @param {string} [opts.asset]
  * @returns {{applied: object[], warnings: object[]}}
  */
-export function applyPromptDefaults(params, { kind, textAllowed = false, hasSourceImage = false, textFrames = false, asset = null } = {}) {
+export function applyPromptDefaults(params, { kind, textAllowed = false, hasSourceImage = false, textFrames = false, asset = null, framingLead = true } = {}) {
   const applied = [];
   const warnings = [];
   const prompt = typeof params.prompt === "string" ? params.prompt.trim() : null;
   if (prompt === null || prompt === "") return { applied, warnings };
 
   const parts = [prompt];
+  // judge-workflow v3: a still that plans a wide/full-body shot leads with physical framing.
+  if (kind === "still" && framingLead !== false) {
+    const led = leadWithFraming(prompt);
+    if (led.applied) {
+      parts[0] = led.prompt;
+      applied.push({ guard: "framing", value: led.lead, because: "FLUX decides the camera from the start of the prompt; 'wide shot' alone renders medium shots (Clawpocalypse o1, w4 framing set)" });
+    }
+  }
   if (!textAllowed && !TEXT_GUARD_SATISFIED.test(prompt)) {
     parts.push(TEXT_GUARD);
     applied.push({

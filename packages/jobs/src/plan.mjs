@@ -885,6 +885,7 @@ export function planJobs(pkg, opts = {}) {
       const applied = applyPromptDefaults(params, {
         kind,
         asset: assetId,
+        framingLead: gen.framingLead !== false,
         textAllowed,
         textFrames: textAllowed || sourceInputs.text === true || sourceInputs.allowText === true,
         hasSourceImage: typeof inputs.image === "string" && inputs.image !== "",
@@ -1359,7 +1360,14 @@ export function planJobs(pkg, opts = {}) {
   });
   if (titleCards.length > 0) doc.titleCards = titleCards;
   // judge-loop v2: per-package ref-watch policy opt-ins (outside the job hash).
-  if (pkg.refWatch && pkg.refWatch.framingGiveUp === true) doc.refWatchPolicy = { framingGiveUp: true };
+  if (pkg.refWatch && typeof pkg.refWatch === "object") {
+    const policy = {};
+    if (pkg.refWatch.framingGiveUp === true) policy.framingGiveUp = true;
+    for (const key of ["perShotRegenShare", "perShotWallMinutes"]) {
+      if (Number.isFinite(pkg.refWatch[key])) policy[key] = pkg.refWatch[key];
+    }
+    if (Object.keys(policy).length > 0) doc.refWatchPolicy = policy;
+  }
   doc.hash = sha256Hex(canonical({ ...doc, hash: undefined }));
   return doc;
 }
