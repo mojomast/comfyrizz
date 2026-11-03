@@ -361,6 +361,8 @@ export const BOOTSTRAP_OVERHEAD_MINUTES = 4;
  * leash is long and the script's own heartbeat is what keeps the two honest.
  */
 export const BOOTSTRAP_SILENCE_MS = 180000;
+/** Silence allowed on a batch exec before it counts as lost (silent model loads and decodes). */
+export const RUN_SILENCE_MS = 300000;
 /** G6-6: wall (and silence) budget for `colab new`; the assign POST is silent and can exceed 60 s. */
 export const NEW_WALL_MS = 300000;
 /** G6-6: the CLI output of an assign the Google frontend gave up on (HTTP 503 after ~60 s). */
@@ -1458,6 +1460,9 @@ export function createColabBackend({
             step: "run",
             timeout: 3600,
             wallMs: 3660000,
+            // The runner prints progress only while a sampler runs; model loads and decodes are
+            // silent. The CLI's 60 s default killed a Qwen edit batch mid-decode (All the RAM run).
+            silenceMs: RUN_SILENCE_MS,
             onEvent: null,
             signal,
             onLog: text => progress.write(text),
@@ -1582,6 +1587,31 @@ export function createColabBackend({
             && plannedSubset.every((job) => group.some((item) => item.id === job.id));
           if (!full) await uploadOverlay(name, group);
           last = await runBatch(name, group);
+          // All the RAM live run 2026-11-02: a lost regen batch ended the whole run before any clip
+          // went up. In one-pass mode the run goes on: a still the reconcile finished is reviewed,
+          // and the rest are reported to the watch as lost (it re-runs or passes them through).
+          if (last?.stop && last.result?.lost && oneStillPass && refWatchGate && payload?.batch === "regen" && !group.some(isVideoJob)) {
+            emit(onEvent, { type: "regen_batch_lost", batch: name, jobs: group.map((job) => job.id) });
+            const before = new Set(previewedJobs);
+            try {
+              collect = await collectOut({ onEvent, expectComplete: false, signal });
+              if (collect?.manifest) { manifest = collect.manifest; batchManifests.push(collect.manifest); }
+            } catch (error) {
+              emit(onEvent, { type: "regen_lost_collect_failed", message: redactForLog(String(error?.message ?? error)) });
+            }
+            const fresh = [];
+            for (const entry of collect?.manifest?.jobs ?? []) {
+              if (!entry?.job || !group.some((job) => job.id === entry.job)) continue;
+              if (entry.status !== "succeeded" || before.has(previewKey(entry))) continue;
+              previewedJobs.add(previewKey(entry));
+              fresh.push(entry);
+            }
+            if (fresh.length > 0) queueReviewEvent({ type: "preview_ready", source: "collected", onePass: true, manifest: { ...collect.manifest, complete: false, jobs: fresh }, outputDir: collect.local });
+            const lostIds = group.map((job) => job.id).filter((id) => !fresh.some((entry) => entry.job === id));
+            if (lostIds.length > 0) queueReviewEvent({ type: "regen_lost", jobIds: lostIds, reason: last.result?.reconcile?.note ?? "regen batch lost" });
+            last = null;
+            continue;
+          }
           if (last?.stop) return last;
           for (const job of group) {
             if (!isVideoJob(job)) continue;

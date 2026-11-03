@@ -828,8 +828,11 @@ export function createRefWatchController({
       framingDrift.push({ jobId: seed.jobId, attempt: record.attempt, note: decision.softNote });
       emit({ type: 'ref_framing_drift', jobId: seed.jobId, keyframeSha256: seed.keyframeSha256, attempt: record.attempt, note: decision.softNote });
     }
-    if (!targetedEdits && decision?.action === 'targeted_edit') {
-      decision = { ...decision, action: 'reprompt', reason: `${decision.reason} (targeted edits off)`, nextPrompt: STEER_PLACEHOLDER };
+    // All the RAM live run 2026-11-02: in one-pass mode a Qwen edit swaps a second large model in
+    // mid-run; its silent load and decode outlasted the exec's silence window and the batch was lost.
+    // One-pass regens are plain reprompts on the already-loaded still model.
+    if ((!targetedEdits || onePass) && decision?.action === 'targeted_edit') {
+      decision = { ...decision, action: 'reprompt', reason: `${decision.reason} (${onePass ? 'one-pass: plain regen' : 'targeted edits off'})`, nextPrompt: STEER_PLACEHOLDER };
       delete decision.editInstruction;
       delete decision.editDimension;
     }
@@ -995,6 +998,7 @@ export function createRefWatchController({
           decision,
         });
         emitEstimate();
+        Object.assign(record, { lastSeed: seed, lastVerdict: verdict, lastVerdicts: verdicts, lastHold: holdUnits(estimateResult) });
         await submitJobs({ batch: 'regen', jobs: [structuredClone(regen)] });
         emit({
           type: 'ref_regen_queued',
@@ -1022,6 +1026,7 @@ export function createRefWatchController({
           decision,
         });
         emitEstimate();
+        Object.assign(record, { lastSeed: seed, lastVerdict: verdict, lastVerdicts: verdicts, lastHold: holdUnits(estimateResult) });
         await submitJobs({ batch: 'regen', jobs: [structuredClone(edit)] });
         emit({
           type: 'ref_regen_queued',
@@ -1184,8 +1189,70 @@ export function createRefWatchController({
   });
   const pending = [];
 
+  // One-pass mode: a regen batch that was lost or timed out on the VM. Re-run it once as a plain
+  // regen if the regen allowance still fits; otherwise the still passes through with a warning
+  // (blocking hard failures still hold it, per the package switches), so the clips still go up.
+  async function regenLost(jobId, reason = 'regen batch lost') {
+    const record = states.get(jobId);
+    if (!record || record.state !== 'regenerating' || !record.lastSeed) return;
+    const seed = record.lastSeed;
+    const hold = Number.isFinite(record.lastHold) ? record.lastHold : null;
+    let retried = false;
+    if (!record.lostRetried && hold !== null && budgetFits(hold)) {
+      try {
+        budgetLedger.reserve({
+          reservationId: `ref-regen-lost:${jobId}:${record.attempt}`, upperBound: hold, collectAndStopReserve: 0,
+          idempotencyKey: `ref-regen-lost-hold:${productionId ?? 'production'}:${jobId}:${record.attempt}`,
+          evidence: { reason: 'ref_regen_lost_retry', jobId, keyframeSha256: seed.keyframeSha256, attempt: record.attempt },
+        });
+        retried = true;
+      } catch { retried = false; }
+    }
+    if (retried) {
+      record.lostRetried = true;
+      const original = jobs.find((job) => job.id === jobId);
+      const regen = structuredClone(original);
+      const seedValue = freshSeed(original.seed ?? original.params?.seed, record.attempt + 7);
+      regen.seed = seedValue;
+      if (!isObject(regen.params)) regen.params = {};
+      regen.params.seed = seedValue;
+      const lostJob = live.get(jobId);
+      if (lostJob?.generator === original.generator && lostJob?.params?.prompt) { regen.prompt = lostJob.prompt; regen.params.prompt = lostJob.params.prompt; }
+      regen.cacheKey = cacheKeyFor({ workflowSha256: regen.workflowSha256, generator: regen.generator, model: regen.model, modelRevision: regen.modelRevision, params: regen.params, seed: seedValue, width: regen.dims?.width, height: regen.dims?.height, frames: regen.frames });
+      regen.refRegen = { attempt: record.attempt, seed: seedValue, lostRetry: true };
+      live.set(jobId, regen);
+      emit({ type: 'ref_regen_lost', jobId, keyframeSha256: seed.keyframeSha256, retry: true, reason });
+      await submitJobs({ batch: 'regen', jobs: [structuredClone(regen)] });
+      return;
+    }
+    emit({ type: 'ref_regen_lost', jobId, keyframeSha256: seed.keyframeSha256, retry: false, reason });
+    const verdict = record.lastVerdict;
+    const verdicts = record.lastVerdicts ?? [verdict];
+    const passThrough = passThroughFor(verdict);
+    if (passThrough) {
+      const decision = { schema: REF_DECISION_SCHEMA, jobId, keyframeSha256: seed.keyframeSha256, attempt: record.attempt, action: 'override', reason: `one-pass pass-through after a lost regen: ${passThrough.failed.join(', ') || 'held'}` };
+      passThroughs.push({ jobId, ...passThrough, lostRegen: true });
+      emit({ type: 'ref_pass_through', jobId, keyframeSha256: seed.keyframeSha256, attempt: record.attempt, warning: true, failed: passThrough.failed, reason: decision.reason });
+      record.state = 'overridden';
+      acceptedSha.set(jobId, seed.keyframeSha256);
+      rememberAccepted(live.get(jobId) ?? jobs.find((job) => job.id === jobId), seed, verdict);
+      persist(seed.keyframeSha256, verdicts, decision);
+      emit({ type: 'ref_review_verdict', jobId, keyframeSha256: seed.keyframeSha256, state: 'overridden', verdict, decision });
+      emit({ type: 'ref_gate_open', jobId, keyframeSha256: seed.keyframeSha256, state: 'overridden' });
+      await queueTitleCutouts(jobId);
+      await maybeReleaseVideos();
+      return;
+    }
+    holdDecision(seed, { schema: REF_DECISION_SCHEMA, jobId, keyframeSha256: seed.keyframeSha256, attempt: record.attempt, action: 'escalate', reason: `regen lost; ${reason}` }, verdicts);
+    await maybeReleaseVideos();
+  }
+
   async function handleUnlocked(event) {
     pending.length = 0;
+    if (isObject(event) && event.type === 'regen_lost') {
+      for (const jobId of Array.isArray(event.jobIds) ? event.jobIds : []) await regenLost(jobId, event.reason);
+      return;
+    }
     if (isObject(event) && event.type === 'video_collected') {
       const collected = typeof event.jobId === 'string' ? live.get(event.jobId) : null;
       if (collected) {

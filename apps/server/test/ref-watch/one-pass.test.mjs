@@ -17,7 +17,7 @@ const preview = (id, text = id) => ({ type: 'preview_ready', manifest: { jobs: [
 const verdict = (request, failing = null) => ({ schema: REF_VERDICT_SCHEMA, jobId: request.jobId, keyframeSha256: request.keyframeSha256, reviewer: 'fake', overall: failing ? 'fail' : 'pass', checks: DIMS.map((dimension) => ({ dimension, pass: dimension !== failing, severity: 'hard', evidence: `${dimension} evidence` })), fixHints: failing ? [`fix ${failing}`] : [] });
 
 const N = 7;
-function setup({ onePass, failing, refWatchPolicy, budget = 5 }) {
+function setup({ onePass, failing, refWatchPolicy, budget = 5, extra = {} }) {
   const jobs = [];
   for (let i = 0; i < N; i += 1) jobs.push(still(`still_${i}`));
   for (let i = 0; i < N; i += 1) jobs.push(video(`video_${i}`, `still_${i}`, i));
@@ -25,7 +25,7 @@ function setup({ onePass, failing, refWatchPolicy, budget = 5 }) {
   const controller = createRefWatchController({
     jobsDoc: { productionId: 'p', runId: 'r', jobs, ...(refWatchPolicy ? { refWatchPolicy } : {}) },
     submitJobs: async (payload) => { submitted.push(payload); }, onEvent: (event) => { events.push(event); },
-    now: () => '2026-11-02T00:00:00.000Z', liveSession: true, regenBudgetUnits: budget, targetedEdits: false, onePass,
+    now: () => '2026-11-02T00:00:00.000Z', liveSession: true, regenBudgetUnits: budget, targetedEdits: false, onePass, ...extra,
     reviewer: async ({ request }) => { requests.push(request); return verdict(request, failing(request.jobId)); },
   });
   return { controller, submitted, events, requests };
@@ -100,4 +100,47 @@ test('the judge reads the shot prompt without the text guard or the start-frame 
   for (const r of ctx.requests) assert.equal(r.prompt, 'A wide shot of Nana on a ride-on mower in a sunflower field');
   assert.equal(judgePrompt(`Use the provided start image as the first frame. The mower splashes into the pond. Tracking shot, no cuts., ${TEXT_GUARD}`), 'The mower splashes into the pond. Tracking shot, no cuts.');
   assert.equal(judgePrompt('A plain grey studio background, a red cube.'), 'A plain grey studio background, a red cube.', 'a real background request is kept');
+});
+
+test('one-pass: a lost regen is re-run once as a plain regen, then passes through with a warning', async () => {
+  const ctx = setup({ onePass: true, failing: (id) => (id === 'still_2' ? 'text_artifact' : null) });
+  await runAll(ctx, 1);
+  assert.deepEqual(regens(ctx.submitted), ['still_2']);
+  await ctx.controller.handle({ type: 'regen_lost', jobIds: ['still_2'], reason: 'exec timed out' });
+  assert.deepEqual(regens(ctx.submitted), ['still_2', 'still_2'], 're-run once');
+  const retry = ctx.submitted.filter((e) => e.batch === 'regen').at(-1).jobs[0];
+  assert.equal(retry.refRegen.lostRetry, true);
+  assert.equal(videos(ctx.submitted).has('video_2'), false);
+  await ctx.controller.handle({ type: 'regen_lost', jobIds: ['still_2'], reason: 'exec timed out' });
+  assert.equal(regens(ctx.submitted).length, 2, 'no second re-run');
+  const warn = ctx.events.filter((e) => e.type === 'ref_pass_through');
+  assert.equal(warn.length, 1);
+  assert.equal(videos(ctx.submitted).size, N, 'every clip goes up');
+  assert.deepEqual(ctx.events.filter((e) => e.type === 'ref_regen_lost').map((e) => e.retry), [true, false]);
+});
+
+test('one-pass: a lost regen with no budget left passes through at once; a blocking failure still holds', async () => {
+  const ctx = setup({ onePass: true, budget: 0.4, failing: (id) => (id === 'still_2' ? 'text_artifact' : null) });
+  await runAll(ctx, 1);
+  if (regens(ctx.submitted).length === 1) {
+    await ctx.controller.handle({ type: 'regen_lost', jobIds: ['still_2'] });
+    assert.equal(regens(ctx.submitted).length, 1, 'allowance spent: no re-run');
+  }
+  assert.equal(videos(ctx.submitted).size, N);
+  const hard = setup({ onePass: true, failing: (id) => (id === 'still_2' ? 'anatomy' : null) });
+  await runAll(hard, 1);
+  await hard.controller.handle({ type: 'regen_lost', jobIds: ['still_2'] });
+  await hard.controller.handle({ type: 'regen_lost', jobIds: ['still_2'] });
+  assert.equal(videos(hard.submitted).has('video_2'), false);
+  assert.equal(videos(hard.submitted).size, N - 1, 'the other clips still go up');
+});
+
+test('one-pass: a targeted edit becomes a plain regen on the loaded still model', async () => {
+  for (const onePass of [true, false]) {
+    const ctx = setup({ onePass, failing: (id) => (id === 'still_2' ? 'text_artifact' : null), extra: { targetedEdits: true } });
+    await runAll(ctx, 1);
+    const job = ctx.submitted.find((e) => e.batch === 'regen')?.jobs[0];
+    assert.ok(job);
+    assert.equal(job.generator === 'qwen-edit-2511', !onePass, `onePass=${onePass}`);
+  }
 });
