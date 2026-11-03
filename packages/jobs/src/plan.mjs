@@ -7,6 +7,7 @@
 // 64 (32 at stage 1) and frame counts to 8n+1, and gives each job a cache key over
 // (workflow sha, resolved inputs, model revision, seed, dims, frames). A still that
 // names a cast member also folds the reference file's sha256 into that key.
+import { chainProgress } from "./chain-progress.mjs";
 import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
@@ -1008,6 +1009,21 @@ export function planJobs(pkg, opts = {}) {
       if (sceneIndex >= 0 && position !== undefined) {
         job.shot = { sceneId: position.sceneId, index: position.index };
         if (gen.cut === true || gen.transition === "hard") job.shot.cut = true;
+        // Chain progress: a shot that is a new beat re-anchors on its own still instead of the
+        // previous clip's last frame (see chain-progress.mjs).
+        const previousId = [...platePositions].find(([, p]) => p.sceneId === position.sceneId && p.index === position.index - 1)?.[0];
+        const stillPromptOf = (id) => {
+          const image = pkg.assets?.[id]?.gen?.inputs?.image;
+          return typeof image === "string" ? pkg.assets?.[image]?.gen?.inputs?.prompt : undefined;
+        };
+        if (previousId && !job.shot.cut) {
+          const progress = chainProgress({
+            previousPrompt: stillPromptOf(previousId),
+            prompt: stillPromptOf(assetId),
+            mode: typeof gen.chainMode === "string" ? gen.chainMode : "auto",
+          });
+          if (progress.reanchor) job.shot.reanchor = progress.reason;
+        }
       }
       if (typeof gen.chainFromPrevious === "boolean") job.chainFromPreviousOverride = gen.chainFromPrevious;
     }
@@ -1363,6 +1379,8 @@ export function planJobs(pkg, opts = {}) {
   if (pkg.refWatch && typeof pkg.refWatch === "object") {
     const policy = {};
     if (pkg.refWatch.framingGiveUp === true) policy.framingGiveUp = true;
+    if (pkg.refWatch.passThroughHeld === false) policy.passThroughHeld = false;
+    if (pkg.refWatch.passThroughHardFailures === true) policy.passThroughHardFailures = true;
     for (const key of ["perShotRegenShare", "perShotWallMinutes"]) {
       if (Number.isFinite(pkg.refWatch[key])) policy[key] = pkg.refWatch[key];
     }

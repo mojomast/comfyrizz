@@ -120,3 +120,56 @@ test("v3 scheduling: voiceover first, one judge pass over the stills, unchained 
   t.diagnostic(`projected ${units.toFixed(2)} units for 7 clips + voiceover; timeline ${JSON.stringify(ws.log.map((l) => `${((l.at - ws.startedAt()) / MIN).toFixed(1)}m ${l.what}`))}`);
   assert.ok(units <= 6, `7 clips + voiceover fit in 6 units (got ${units.toFixed(2)})`);
 });
+
+test("one-pass: a lost regen batch does not end the run; the watch hears regen_lost and every clip still goes up", async (t) => {
+  const root = mkdtempSync(join(tmpdir(), "comfyrizz-v3-lost-"));
+  t.after(() => rmSync(root, { recursive: true, force: true }));
+  const ids = ["a", "b", "c"];
+  const stills = ids.map((s) => ({ id: `a_${s}_still.still`, kind: "still", batch: "stills", output: `assets/a_${s}_still.png` }));
+  const plates = ids.map((s) => ({ id: `a_${s}_plate.plate`, kind: "plate", batch: "plates", output: `out/intermediates/a_${s}_plate.plate.mp4`, deps: [`a_${s}_still.still`] }));
+  const doc = { v: 1, hash: "c".repeat(64), packageId: "pkg_lost", batches: [{ name: "stills", jobs: stills.map((j) => j.id) }, { name: "plates", jobs: plates.map((j) => j.id) }], jobs: [...stills, ...plates] };
+  const jobsFile = join(root, "jobs.json");
+  writeFileSync(jobsFile, JSON.stringify(doc));
+  const manifest = { v: 1, run_id: "r", jobsHash: doc.hash, packageId: "pkg_lost", complete: true, counts: { succeeded: 6 }, jobs: [...stills, ...plates].map((j) => ({ job: j.id, status: "succeeded", outputs: [{ relative: j.output }] })) };
+  const files = [{ path: `${REMOTE}/out/manifest.json`, content: JSON.stringify(manifest) }, ...[...stills, ...plates].map((j) => ({ path: `${REMOTE}/out/${j.output}`, content: j.id }))];
+  const fake = installFakeColab(root, { state: { usage: "Current balance: 300.00 compute units\nUsage rate: 10.00/hr\nActive assignments: 0\n", scripts: { "run_jobs.py": { output: '{"v":1,"event":"batch_done","value":1}', files } } } });
+  mkdirSync(join(root, "remote", "content", "comfyrizz"), { recursive: true });
+  let context = null; let pendingBatch = null; let regenRuns = 0;
+  const lost = [];
+  const gate = {
+    async handle(event) {
+      if (event.type === "preview_ready") {
+        const fresh = (event.manifest?.jobs ?? []).map((entry) => /^a_(\w)_still\.still$/.exec(entry.job)?.[1]).filter(Boolean);
+        for (const s of fresh) {
+          if (s === "b" && regenRuns === 0) { await context.submitJobs({ batch: "regen", jobs: [{ ...stills[1], seed: 99 }] }); continue; }
+          await context.submitJobs({ batch: "video", jobs: [plates.find((p) => p.id === `a_${s}_plate.plate`)] });
+        }
+      } else if (event.type === "regen_lost") {
+        lost.push(...event.jobIds);
+        await context.submitJobs({ batch: "video", jobs: [plates[1]] });
+      }
+    },
+  };
+  const cli = makeCli(fake);
+  const original = cli.run.bind(cli);
+  cli.run = async (args, opts = {}) => {
+    if (args[0] === "exec" && String(args[args.indexOf("-f") + 1]).endsWith("run_jobs.py") && pendingBatch?.jobs === 1 && pendingBatch?.batch === "stills") {
+      regenRuns += 1;
+      return { code: null, timedOut: true, output: "", log: "" };
+    }
+    return original(args, opts);
+  };
+  const events = [];
+  const backend = createColabBackend({
+    cli, packageId: "pkg_lost", scratchDir: join(root, "scratch"), logDir: join(root, "logs"), packageDir: null,
+    budgetUnits: 6.0, oneStillPass: true, progressDir: null, watchdogMinutes: 0, teardownRetryMs: 1, collectionRetryMs: 1,
+    refWatch: async (ctx) => { context = ctx; return gate; },
+  });
+  const result = await backend.run(jobsFile, (event) => { events.push(event); if (event.type === "batch_start") pendingBatch = event; });
+  assert.equal(regenRuns, 1);
+  assert.ok(events.some((e) => e.type === "regen_batch_lost"), "the lost regen batch is reported");
+  assert.deepEqual(lost, ["a_b_still.still"]);
+  const plateJobs = events.filter((e) => e.type === "batch_start" && e.batch === "plates").reduce((n, e) => n + e.jobs, 0);
+  assert.equal(plateJobs, 3, `all 3 clips go up: ${JSON.stringify(events.filter((e) => /batch|lost|refused/.test(e.type)).map((e) => [e.type, e.batch, e.jobs]))}`);
+  assert.notEqual(result?.lost, true);
+});

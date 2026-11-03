@@ -1,7 +1,7 @@
 // GENERATED FILE - do not edit by hand.
 //
 // Source:        packages/schema/package-v1.schema.json
-// Schema sha256: c8bdc041153cd05c474b4adcc25f269af95d3152959a64c5848f26c555647137
+// Schema sha256: 56adbf90a15c8a3cd602419bd0b48e15dac71afb45c86a5705d5b7122e4c8a40
 // Generator:     packages/schema/scripts/gen-types.mjs (v1.0.0)
 //
 // Regenerate: pnpm --filter @comfyrizz/schema gen:types
@@ -86,6 +86,18 @@ export interface PackageV1 {
     text_on_accent?: HexColor;
     };
   voice?: {
+    /**
+     * Chatterbox take budget and reuse (Goat Getaway). cache: reuse a previous run's passed takes when
+     * a line's text matches word for word (default true when a cache dir is given). maxTakesPerLine:
+     * cap on takes per line (default takes_per_line x 3). riskyMaxTakes: lower cap for lines
+     * pre-flagged as likely to loop or hallucinate (short, colon fragments, repeated words, odd
+     * names); the best take is kept when a cap runs out.
+     */
+    takes?: {
+      cache?: boolean;
+      maxTakesPerLine?: number;
+      riskyMaxTakes?: number;
+      };
     enabled: boolean;
     /**
      * kokoro (default) is the CPU narrator. qwen3-tts is the optional Qwen3-TTS 1.7B backend; when its
@@ -191,6 +203,19 @@ export interface PackageV1 {
      * [min 0, max 240, default 12]
      */
     perShotWallMinutes?: number;
+    /**
+     * One-pass still mode: a still that is still failing after its one regen goes to video with a
+     * ref_pass_through warning instead of losing its clip. Hard identity, anatomy and technical
+     * failures still block unless passThroughHardFailures is true.
+     * [default true]
+     */
+    passThroughHeld?: boolean;
+    /**
+     * Off by default. When true, a one-pass pass-through also lets stills with hard identity, anatomy
+     * or technical failures through (with a warning).
+     * [default false]
+     */
+    passThroughHardFailures?: boolean;
     /**
      * Off by default. When true, a still whose only hard failure is framing gets at most one regen
      * (none if the regen budget is closed), then is accepted with a framing-drift note in the run
@@ -1119,6 +1144,14 @@ export interface Gen {
    * SKILLS-PORT: per-shot override of last-frame chaining (true forces it on, false forces it off).
    */
   chainFromPrevious?: boolean;
+  /**
+   * Chain progress: auto (default) chains from the previous clip's last frame only when this shot
+   * continues the same moment; a shot whose still prompt is a new beat (4+ new content words)
+   * re-anchors on its own keyframe. lastFrame always chains; reanchor never does. chainFromPrevious
+   * still overrides.
+   * [default "auto"]
+   */
+  chainMode?: "auto" | "lastFrame" | "reanchor";
   /**
    * judge-workflow v3: when a still prompt plans a wide or full-body shot, the planner puts a
    * physical framing sentence first (head to toe, feet on the ground, moderate distance). Set false

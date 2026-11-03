@@ -3,6 +3,9 @@
 // the same production budget ledger self-repair spends from, and only after
 // the regen estimate. Nothing here calls Google Colab, Comfy, or the network.
 import { createHash } from 'node:crypto';
+import { CLIP_PROMPT_NOTE, judgePrompt } from './judge-prompt.mjs';
+
+export const PASS_THROUGH_BLOCKING = Object.freeze(['identity', 'anatomy', 'technical']);
 import { mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { cacheKeyFor } from '../../../../packages/jobs/src/plan.mjs';
@@ -149,6 +152,9 @@ export function createRefWatchController({
   sampleClipFrames = null,
   clipRetries = 1,
   targetedEdits = true,
+  // One-pass still mode (colab oneStillPass): every escalated still gets one regen before the clip
+  // batch, and a still that still fails is passed through with a warning unless the failure blocks.
+  onePass = false,
 } = {}) {
   if (!isObject(jobsDoc)) throw new TypeError('createRefWatchController requires a jobsDoc object');
   if (typeof submitJobs !== 'function') throw new TypeError('createRefWatchController requires submitJobs');
@@ -177,6 +183,18 @@ export function createRefWatchController({
   const titleCards = Array.isArray(jobsDoc.titleCards) ? jobsDoc.titleCards.filter(isObject) : [];
   const stillIds = new Set(stillJobs.map((job) => job.id));
   const stillCount = stillJobs.length;
+  // Goat live check 2026-11-02: the shared production cap is max(2, 25% of stills) = 2 for a
+  // 7-still film. With every still judged in one pass, the first two regens used it up and the
+  // next three escalations were held with 'production regen cap exhausted' (goat2 only needed
+  // two). One-pass mode gives every still one regen; the regen CU allowance still caps spend.
+  if (onePass) {
+    caps.maxRegensPerStill = Math.min(caps.maxRegensPerStill, 1);
+    caps.maxRegenJobs = Math.max(caps.maxRegenJobs, stillCount);
+    caps.maxRegenFraction = Math.max(caps.maxRegenFraction, 1);
+  }
+  const passThroughHeld = onePass && jobsDoc.refWatchPolicy?.passThroughHeld !== false;
+  const passThroughHard = jobsDoc.refWatchPolicy?.passThroughHardFailures === true;
+  const passThroughs = [];
   const steerPrompt = steer?.steerPrompt ?? steerDefault.steerPrompt;
   const fillDecision = steer?.fillDecision ?? steerDefault.fillDecision;
   const chooseReplacementRef = steer?.chooseReplacementRef ?? steerDefault.chooseReplacementRef;
@@ -319,6 +337,16 @@ export function createRefWatchController({
     }
   }
 
+  // Hard failures that still block a one-pass pass-through: faces/characters (identity, which
+  // includes scene continuity), bodies (anatomy) and broken frames (technical), plus judge errors.
+  function passThroughFor(verdict) {
+    if (!passThroughHeld || !verdict || verdict.overall === 'error' || !validateRefVerdict(verdict).ok) return null;
+    const failedChecks = (verdict.checks ?? []).filter((check) => check.pass === false);
+    const blocking = failedChecks.filter((check) => check.severity === 'hard' && PASS_THROUGH_BLOCKING.includes(check.dimension));
+    if (blocking.length > 0 && !passThroughHard) return null;
+    return { failed: [...new Set(failedChecks.map((check) => check.dimension))] };
+  }
+
   function holdDecision(seed, decision, verdicts) {
     skipShotsFor(seed.jobId, seed.keyframeSha256, decision?.reason ?? 'still held');
     const record = ensure(seed.jobId);
@@ -454,6 +482,7 @@ export function createRefWatchController({
           } else {
             const chainPlan = await chainPlanFor(next, previousLive);
             if (chainPlan?.loadImage) {
+              chainedVideos.add(video.id);
               next.loadImage = chainPlan.loadImage;
               next.imgToVideoInplace = chainPlan.imgToVideoInplace;
             }
@@ -469,7 +498,8 @@ export function createRefWatchController({
             continue;
           }
         } else {
-          emitChainPlanned(video, false, null, 'chaining is off for this shot');
+          const reanchor = typeof video.shot?.reanchor === 'string' ? video.shot.reanchor : null;
+          emitChainPlanned(video, false, reanchor ? 'keyframe' : null, reanchor ? `re-anchored on its own keyframe (${reanchor})` : 'chaining is off for this shot');
         }
       }
       deferredVideos.delete(video.id);
@@ -662,7 +692,7 @@ export function createRefWatchController({
       height: measured?.height ?? plannedHeight,
       plannedWidth,
       plannedHeight,
-      prompt: job.params?.prompt || job.prompt || 'untitled still',
+      prompt: judgePrompt(job.params?.prompt || job.prompt) || 'untitled still',
       attempt: record.attempt,
       characters,
       ...(record.attempt > 0 && Array.isArray(record.lastHardFails) && record.lastHardFails.length
@@ -798,8 +828,11 @@ export function createRefWatchController({
       framingDrift.push({ jobId: seed.jobId, attempt: record.attempt, note: decision.softNote });
       emit({ type: 'ref_framing_drift', jobId: seed.jobId, keyframeSha256: seed.keyframeSha256, attempt: record.attempt, note: decision.softNote });
     }
-    if (!targetedEdits && decision?.action === 'targeted_edit') {
-      decision = { ...decision, action: 'reprompt', reason: `${decision.reason} (targeted edits off)`, nextPrompt: STEER_PLACEHOLDER };
+    // All the RAM live run 2026-11-02: in one-pass mode a Qwen edit swaps a second large model in
+    // mid-run; its silent load and decode outlasted the exec's silence window and the batch was lost.
+    // One-pass regens are plain reprompts on the already-loaded still model.
+    if ((!targetedEdits || onePass) && decision?.action === 'targeted_edit') {
+      decision = { ...decision, action: 'reprompt', reason: `${decision.reason} (${onePass ? 'one-pass: plain regen' : 'targeted edits off'})`, nextPrompt: STEER_PLACEHOLDER };
       delete decision.editInstruction;
       delete decision.editDimension;
     }
@@ -965,6 +998,7 @@ export function createRefWatchController({
           decision,
         });
         emitEstimate();
+        Object.assign(record, { lastSeed: seed, lastVerdict: verdict, lastVerdicts: verdicts, lastHold: holdUnits(estimateResult) });
         await submitJobs({ batch: 'regen', jobs: [structuredClone(regen)] });
         emit({
           type: 'ref_regen_queued',
@@ -992,6 +1026,7 @@ export function createRefWatchController({
           decision,
         });
         emitEstimate();
+        Object.assign(record, { lastSeed: seed, lastVerdict: verdict, lastVerdicts: verdicts, lastHold: holdUnits(estimateResult) });
         await submitJobs({ batch: 'regen', jobs: [structuredClone(edit)] });
         emit({
           type: 'ref_regen_queued',
@@ -1004,6 +1039,14 @@ export function createRefWatchController({
       emitEstimate(true);
     }
 
+    const passThrough = decision.action !== 'accept' && decision.action !== 'override'
+      ? passThroughFor(verdict) : null;
+    if (passThrough) {
+      decision = { schema: REF_DECISION_SCHEMA, jobId: seed.jobId, keyframeSha256: seed.keyframeSha256, attempt: record.attempt,
+        action: 'override', reason: `one-pass pass-through: ${passThrough.failed.join(', ') || 'held'} (${decision.reason ?? decision.action})` };
+      passThroughs.push({ jobId: seed.jobId, ...passThrough });
+      emit({ type: 'ref_pass_through', jobId: seed.jobId, keyframeSha256: seed.keyframeSha256, attempt: record.attempt, warning: true, failed: passThrough.failed, reason: decision.reason });
+    }
     if (decision.action === 'accept' || decision.action === 'override') {
       record.state = decision.action === 'override' ? 'overridden' : 'accepted';
       acceptedSha.set(seed.jobId, seed.keyframeSha256);
@@ -1053,6 +1096,12 @@ export function createRefWatchController({
   // technical failure re-renders the clip once with a new seed when the regen budget allows;
   // otherwise the clip is kept and the verdict is only reported.
   const clipAttempts = new Map();
+  // Shots released with the previous clip's last frame (live keeps the planned job, so remember).
+  const chainedVideos = new Set();
+  function chainedClip(clip) {
+    return Boolean(clip && (chainedVideos.has(clip.id) || clip.chainFrameApplied || clip.loadImage?.path));
+  }
+
   async function clipNeedsRetry(clip) {
     if (typeof clipReviewer !== 'function' || typeof sampleClipFrames !== 'function' || !clip.localPath) return false;
     let verdict = null;
@@ -1062,7 +1111,10 @@ export function createRefWatchController({
         schema: REF_REVIEW_REQUEST_SCHEMA, productionId: productionId ?? 'production', runId: runId ?? 'run', jobId: clip.id,
         shotId: clip.shotId || clip.scene || clip.id, keyframeSha256: grid.sha256 ?? '0'.repeat(64), imagePath: grid.path,
         width: 1536, height: 576, plannedWidth: 1536, plannedHeight: 576, attempt: 0, kind: 'clip',
-        prompt: clip.params?.prompt || clip.prompt || 'video clip', characters: charactersFor(clip),
+        prompt: CLIP_PROMPT_NOTE
+          + (chainedClip(clip) ? 'This clip continues from the previous shot\'s last frame; it must still show THIS shot\'s action, not the previous situation carrying on. ' : '')
+          + (judgePrompt(clip.params?.prompt || clip.prompt) || 'video clip'),
+        characters: charactersFor(clip),
       };
       verdict = await clipReviewer({ request, image: { path: grid.path, sha256: request.keyframeSha256 } });
     } catch {
@@ -1070,11 +1122,14 @@ export function createRefWatchController({
     }
     const hard = (verdict?.checks ?? []).filter((check) => check.pass === false && check.severity === 'hard'
       && ['identity', 'anatomy', 'technical'].includes(check.dimension));
+    // Chain progress: a chained clip that fails the prompt check did not move the story forward
+    // (it kept the previous shot's situation). Re-render it once from its own keyframe.
+    const stalled = chainedClip(clip) && (verdict?.checks ?? []).some((check) => check.pass === false && check.dimension === 'prompt');
     const tries = clipAttempts.get(clip.id) ?? 0;
     const cost = 0.17;
     const affordable = !(Number(regenBudgetUnits) >= 0) || (regenUnitsSpent + cost <= Number(regenBudgetUnits));
-    const retry = hard.length > 0 && tries < clipRetries && affordable;
-    emit({ type: 'ref_clip_verdict', jobId: clip.id, overall: verdict?.overall ?? 'error', hard: hard.map((check) => check.dimension), failed: (verdict?.checks ?? []).filter((check) => check.pass === false).map((check) => check.dimension), retry });
+    const retry = (hard.length > 0 || stalled) && tries < clipRetries && affordable;
+    emit({ type: 'ref_clip_verdict', jobId: clip.id, overall: verdict?.overall ?? 'error', hard: hard.map((check) => check.dimension), failed: (verdict?.checks ?? []).filter((check) => check.pass === false).map((check) => check.dimension), retry, ...(stalled ? { stalled: true } : {}) });
     if (!retry) return false;
     clipAttempts.set(clip.id, tries + 1);
     regenUnitsSpent += cost;
@@ -1087,6 +1142,18 @@ export function createRefWatchController({
       params: next.params, seed, width: next.dims?.width, height: next.dims?.height, frames: next.frames,
     });
     next.clipRetry = tries + 1;
+    if (stalled) chainedVideos.delete(clip.id);
+    if (stalled && hard.length === 0) {
+      const planned = gatedVideos.find((job) => job.id === clip.id);
+      delete next.loadImage;
+      delete next.imgToVideoInplace;
+      delete next.chainFrameApplied;
+      if (planned && 'fileInputs' in planned) next.fileInputs = structuredClone(planned.fileInputs);
+      else delete next.fileInputs;
+      next.chainFallback = 'keyframe';
+      next.chainFallbackReason = 'chained clip did not show its own action; re-anchored on its keyframe';
+      emitChainPlanned(next, false, 'keyframe', next.chainFallbackReason);
+    }
     live.set(clip.id, next);
     await submitJobs({ batch: 'video', jobs: [next] });
     return true;
@@ -1122,8 +1189,70 @@ export function createRefWatchController({
   });
   const pending = [];
 
+  // One-pass mode: a regen batch that was lost or timed out on the VM. Re-run it once as a plain
+  // regen if the regen allowance still fits; otherwise the still passes through with a warning
+  // (blocking hard failures still hold it, per the package switches), so the clips still go up.
+  async function regenLost(jobId, reason = 'regen batch lost') {
+    const record = states.get(jobId);
+    if (!record || record.state !== 'regenerating' || !record.lastSeed) return;
+    const seed = record.lastSeed;
+    const hold = Number.isFinite(record.lastHold) ? record.lastHold : null;
+    let retried = false;
+    if (!record.lostRetried && hold !== null && budgetFits(hold)) {
+      try {
+        budgetLedger.reserve({
+          reservationId: `ref-regen-lost:${jobId}:${record.attempt}`, upperBound: hold, collectAndStopReserve: 0,
+          idempotencyKey: `ref-regen-lost-hold:${productionId ?? 'production'}:${jobId}:${record.attempt}`,
+          evidence: { reason: 'ref_regen_lost_retry', jobId, keyframeSha256: seed.keyframeSha256, attempt: record.attempt },
+        });
+        retried = true;
+      } catch { retried = false; }
+    }
+    if (retried) {
+      record.lostRetried = true;
+      const original = jobs.find((job) => job.id === jobId);
+      const regen = structuredClone(original);
+      const seedValue = freshSeed(original.seed ?? original.params?.seed, record.attempt + 7);
+      regen.seed = seedValue;
+      if (!isObject(regen.params)) regen.params = {};
+      regen.params.seed = seedValue;
+      const lostJob = live.get(jobId);
+      if (lostJob?.generator === original.generator && lostJob?.params?.prompt) { regen.prompt = lostJob.prompt; regen.params.prompt = lostJob.params.prompt; }
+      regen.cacheKey = cacheKeyFor({ workflowSha256: regen.workflowSha256, generator: regen.generator, model: regen.model, modelRevision: regen.modelRevision, params: regen.params, seed: seedValue, width: regen.dims?.width, height: regen.dims?.height, frames: regen.frames });
+      regen.refRegen = { attempt: record.attempt, seed: seedValue, lostRetry: true };
+      live.set(jobId, regen);
+      emit({ type: 'ref_regen_lost', jobId, keyframeSha256: seed.keyframeSha256, retry: true, reason });
+      await submitJobs({ batch: 'regen', jobs: [structuredClone(regen)] });
+      return;
+    }
+    emit({ type: 'ref_regen_lost', jobId, keyframeSha256: seed.keyframeSha256, retry: false, reason });
+    const verdict = record.lastVerdict;
+    const verdicts = record.lastVerdicts ?? [verdict];
+    const passThrough = passThroughFor(verdict);
+    if (passThrough) {
+      const decision = { schema: REF_DECISION_SCHEMA, jobId, keyframeSha256: seed.keyframeSha256, attempt: record.attempt, action: 'override', reason: `one-pass pass-through after a lost regen: ${passThrough.failed.join(', ') || 'held'}` };
+      passThroughs.push({ jobId, ...passThrough, lostRegen: true });
+      emit({ type: 'ref_pass_through', jobId, keyframeSha256: seed.keyframeSha256, attempt: record.attempt, warning: true, failed: passThrough.failed, reason: decision.reason });
+      record.state = 'overridden';
+      acceptedSha.set(jobId, seed.keyframeSha256);
+      rememberAccepted(live.get(jobId) ?? jobs.find((job) => job.id === jobId), seed, verdict);
+      persist(seed.keyframeSha256, verdicts, decision);
+      emit({ type: 'ref_review_verdict', jobId, keyframeSha256: seed.keyframeSha256, state: 'overridden', verdict, decision });
+      emit({ type: 'ref_gate_open', jobId, keyframeSha256: seed.keyframeSha256, state: 'overridden' });
+      await queueTitleCutouts(jobId);
+      await maybeReleaseVideos();
+      return;
+    }
+    holdDecision(seed, { schema: REF_DECISION_SCHEMA, jobId, keyframeSha256: seed.keyframeSha256, attempt: record.attempt, action: 'escalate', reason: `regen lost; ${reason}` }, verdicts);
+    await maybeReleaseVideos();
+  }
+
   async function handleUnlocked(event) {
     pending.length = 0;
+    if (isObject(event) && event.type === 'regen_lost') {
+      for (const jobId of Array.isArray(event.jobIds) ? event.jobIds : []) await regenLost(jobId, event.reason);
+      return;
+    }
     if (isObject(event) && event.type === 'video_collected') {
       const collected = typeof event.jobId === 'string' ? live.get(event.jobId) : null;
       if (collected) {
@@ -1202,6 +1331,7 @@ export function createRefWatchController({
       cap: refRegenJobCap(stillCount, caps),
       framingGiveUp: caps.framingGiveUp === true,
       framingDrift: framingDrift.map((entry) => ({ ...entry })),
+      passThroughs: passThroughs.map((entry) => ({ ...entry, failed: [...entry.failed] })),
       shotRegenUnits: Object.fromEntries(shotSpend),
       states: Object.fromEntries([...states].map(([id, value]) => [id, { ...value }])),
     };

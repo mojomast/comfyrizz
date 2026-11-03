@@ -271,3 +271,11 @@ Each still has its own limits, so one stubborn shot can't use up the run:
 - **Re-prompts:** when a regen follows a framing failure, the steer prompt puts that lead (or the judge's framing fix hint) first as well.
 - **Opt out per asset:** `gen.framingLead: false` keeps the prompt verbatim.
 - **Cache keys:** only prompts that plan a wide shot change.
+
+## One-pass still mode (goat live check, 2026-11-02)
+
+When the Google Colab backend judges every still in one pass (`oneStillPass`), the controller runs with `onePass`:
+
+- **One regen per still.** The shared production cap (`max(2, 25% of stills)`, so 2 for a 7-still film) is lifted to the still count and the per-still cap is 1. The regen CU allowance (a fifth of the run budget) still caps spend. On the goat run the first two regens used the shared cap and three more stills were held with `production regen cap exhausted`, so their clips were dropped.
+- **Pass-through.** A still that still fails after its regen (or whose regen the allowance cannot afford) goes to video as `overridden` with a `ref_pass_through` warning event and a `snapshot().passThroughs` entry. Hard `identity` (including scene continuity), `anatomy` and `technical` failures and judge errors still block. Package switches: `refWatch.passThroughHeld` (default true) and `refWatch.passThroughHardFailures` (default false).
+- **Judge prompt.** The judge reads the shot prompt without the planner's text guard and without "Use the provided start image as the first frame." Clips also get a note that camera and pacing wording cannot be judged from six frames. The guard's "plain untextured backgrounds" made the judge fail the prompt check on clips that clearly showed the action.

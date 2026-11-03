@@ -198,6 +198,16 @@
       ],
       "unevaluatedProperties": false,
       "properties": {
+        "takes": {
+          "type": "object",
+          "additionalProperties": false,
+          "description": "Chatterbox take budget and reuse (Goat Getaway). cache: reuse a previous run's passed takes when a line's text matches word for word (default true when a cache dir is given). maxTakesPerLine: cap on takes per line (default takes_per_line x 3). riskyMaxTakes: lower cap for lines pre-flagged as likely to loop or hallucinate (short, colon fragments, repeated words, odd names); the best take is kept when a cap runs out.",
+          "properties": {
+            "cache": { "type": "boolean" },
+            "maxTakesPerLine": { "type": "integer", "minimum": 1, "maximum": 12 },
+            "riskyMaxTakes": { "type": "integer", "minimum": 1, "maximum": 12 }
+          }
+        },
         "enabled": {
           "type": "boolean"
         },
@@ -391,6 +401,16 @@
         "perShotWallMinutes": {
           "type": "number", "minimum": 0, "maximum": 240, "default": 12,
           "description": "judge-workflow v3: a shot stops regenerating this many minutes after its first review (0 = no time cap)."
+        },
+        "passThroughHeld": {
+          "type": "boolean",
+          "default": true,
+          "description": "One-pass still mode: a still that is still failing after its one regen goes to video with a ref_pass_through warning instead of losing its clip. Hard identity, anatomy and technical failures still block unless passThroughHardFailures is true."
+        },
+        "passThroughHardFailures": {
+          "type": "boolean",
+          "default": false,
+          "description": "Off by default. When true, a one-pass pass-through also lets stills with hard identity, anatomy or technical failures through (with a warning)."
         },
         "framingGiveUp": {
           "type": "boolean",
@@ -2417,6 +2437,12 @@
         "chainFromPrevious": {
           "type": "boolean",
           "description": "SKILLS-PORT: per-shot override of last-frame chaining (true forces it on, false forces it off)."
+        },
+        "chainMode": {
+          "type": "string",
+          "enum": ["auto", "lastFrame", "reanchor"],
+          "default": "auto",
+          "description": "Chain progress: auto (default) chains from the previous clip's last frame only when this shot continues the same moment; a shot whose still prompt is a new beat (4+ new content words) re-anchors on its own keyframe. lastFrame always chains; reanchor never does. chainFromPrevious still overrides."
         },
         "framingLead": {
           "type": "boolean",

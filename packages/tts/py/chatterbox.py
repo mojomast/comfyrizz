@@ -246,6 +246,12 @@ def synth_lines(lines: list, options: dict | None = None, **dependencies) -> dic
     # takes_per_line takes, then up to MAX_REGENERATIONS more rounds of the same size (SP05 brief);
     # the loop stops at the first accepted take, so a clean line still costs one graph call.
     max_takes = requested * (1 + MAX_REGENERATIONS)
+    # Goat Getaway voiceover: per-line retake caps (package voice.takes) and a take cache.
+    if config.get("max_takes_per_line"):
+        max_takes = max(1, int(config["max_takes_per_line"]))
+    risky_cap = int(config["risky_max_takes"]) if config.get("risky_max_takes") else None
+    reuse = config.get("reuse") or {}
+    risk_of = config.get("line_risk")
     template = _graph_template(config)
 
     report: dict = {
@@ -276,11 +282,24 @@ def synth_lines(lines: list, options: dict | None = None, **dependencies) -> dic
         text = record["text"].strip()
         spoken = record["spoken"].strip()
         line_language = record.get("language") if isinstance(record.get("language"), str) else language
+        cached = reuse.get(ident)
+        if cached is not None:
+            destination, audio = _write_line_audio(out, ident, Path(cached["wav"]), None, SAMPLE_RATE, float(cached["record"].get("seconds", 0.0)))
+            entry = dict(cached["record"])
+            entry["file"] = destination.relative_to(out.parent).as_posix()
+            entry["qa"] = {**entry.get("qa", {}), "cached": True}
+            report["scenes"][ident] = entry
+            if audio is not None:
+                full.append(audio)
+                full.append(np.zeros(int(round(WORD_SPLIT_GAP * SAMPLE_RATE)), dtype=np.float32))
+            continue
+        risk = list(risk_of(text)) if callable(risk_of) else []
+        line_cap = min(max_takes, risky_cap) if (risk and risky_cap) else max_takes
         takes: list[dict] = []
         seeds: list[int] = []
         selected = None
         result = None
-        for attempt in range(max_takes):
+        for attempt in range(line_cap):
             seed = seed_base + index * max_takes + attempt
             seeds.append(seed)
             graph = _build_graph(
@@ -345,6 +364,7 @@ def synth_lines(lines: list, options: dict | None = None, **dependencies) -> dic
                 "attempts": len(takes),
                 "seeds": seeds,
                 "reasons": [str(reason) for reason in result["reasons"]],
+                **({"risk": risk, "cap": line_cap} if risk else {}),
             },
         }
         if audio is not None:
