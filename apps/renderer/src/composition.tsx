@@ -68,6 +68,7 @@ export function PackageComposition({
   mediaDims,
   mixAudio = true,
   reducedMotion = false,
+  moneyShot,
   mediaSources = null,
   look = null,
 }: {
@@ -80,6 +81,8 @@ export function PackageComposition({
   mediaDims?: MediaDimsMap;
   mixAudio?: boolean;
   reducedMotion?: boolean;
+  /** Default on. False, or COMFYRIZZ_MONEY_SHOT=0, keeps the fade-in open. */
+  moneyShot?: boolean;
   mediaSources?: MediaSources | null;
   look?: LookSidecar | null;
 }) {
@@ -155,6 +158,7 @@ export function PackageComposition({
           {...(resolved.captions ? { captions: resolved.captions } : {})}
           {...(resolved.lyrics ? { lyrics: resolved.lyrics } : {})}
           reducedMotion={reducedMotion}
+          moneyShot={moneyShot}
         />
       </LookLayer>
     </MasterMusicMuteProvider>

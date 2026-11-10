@@ -1,7 +1,8 @@
 import React from 'react';
-import { useCurrentFrame, useVideoConfig } from 'remotion';
+import { useVideoConfig } from 'remotion';
 import type { ForegroundItem } from '../../../packages/schema/types';
 import { fadeUp } from './motion/primitives.js';
+import { useSceneFrame } from './scene-frame';
 import { presenterBox } from './presenter-model.js';
 
 /**
@@ -26,7 +27,7 @@ export function InsetFrame({
   ringColor?: string;
   children: React.ReactNode;
 }) {
-  const frame = useCurrentFrame();
+  const frame = useSceneFrame();
   const { width, height, fps } = useVideoConfig();
   const box = presenterBox({
     placement: placement ?? 'pip-br',

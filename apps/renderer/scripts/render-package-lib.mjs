@@ -18,6 +18,7 @@ import { collectMediaDims, dimMismatches } from '../src/media-dims.js';
 import { normalizeMixLoudness } from './mix-loudness.mjs';
 import { loadCompositionManifest } from '../../../packages/compositions/src/index.mjs';
 import { assertModelContribution } from '../../../packages/jobs/src/model-contribution.mjs';
+import { moneyShotEnabled, selectMoneyShot } from '../src/money-shot.js';
 
 const here = dirname(fileURLToPath(import.meta.url));
 export const repoRoot = resolve(here, '..', '..', '..');
@@ -264,7 +265,7 @@ function remotionArguments({ still, compositionId, outputPath, propsPath, public
   ];
 }
 
-function stagePackageRender(packagePath, outputPath, { onLog = () => {}, publicDir, compositionId = 'PackageDemo', still = false, frame = 0, final = null, intent = 'final', narration, scale, mixAudio = true, normalizeLoudness = true, captionOverrides: explicitOverrides, editor = null } = {}) {
+function stagePackageRender(packagePath, outputPath, { onLog = () => {}, publicDir, compositionId = 'PackageDemo', still = false, frame = 0, final = null, intent = 'final', narration, scale, mixAudio = true, normalizeLoudness = true, captionOverrides: explicitOverrides, editor = null, moneyShot } = {}) {
   const raw = JSON.parse(readFileSync(packagePath, 'utf8'));
   const packageDir = dirname(packagePath);
   // A9: validate the package as stored — the base `file` and `variants` are checked (H12 variant
@@ -312,8 +313,12 @@ function stagePackageRender(packagePath, outputPath, { onLog = () => {}, publicD
   const mediaPath = join(packageDir, 'media.json');
   const media = existsSync(mediaPath) ? JSON.parse(readFileSync(mediaPath, 'utf8')) : undefined;
   const propsPath = `${outputPath.replace(/\.(mp4|png|jpg)$/, '')}.props.json`;
-  writeFileSync(propsPath, JSON.stringify({ pkg, timeline, generatedAssets, ...(mixAudio ? {} : { mixAudio: false }), ...(media ? { media } : {}), ...(missingMedia.length > 0 ? { missingMedia: missingMedia.map(item => item.file) } : {}), ...(Object.keys(mediaDims).length > 0 ? { mediaDims } : {}) }));
+  const moneyShotOn = moneyShotEnabled(moneyShot);
+  const shot = selectMoneyShot(pkg, timeline, { moneyShot: moneyShotOn });
+  writeFileSync(propsPath, JSON.stringify({ pkg, timeline, generatedAssets, moneyShot: moneyShotOn, ...(mixAudio ? {} : { mixAudio: false }), ...(media ? { media } : {}), ...(missingMedia.length > 0 ? { missingMedia: missingMedia.map(item => item.file) } : {}), ...(Object.keys(mediaDims).length > 0 ? { mediaDims } : {}) }));
   onLog(`inlined ${Object.keys(generatedAssets).length} generated asset(s)`);
+  if (!moneyShotOn) onLog('money shot off');
+  else if (shot.enabled) onLog(`money shot ${shot.sceneId} at local frame ${shot.settleFrame} (${shot.reason})`);
   onLog(`compiled ${timeline.durationInFrames} frames, hash ${timeline.hash}`);
   if (timeline.provisional) onLog('warning: narration is not measured; timeline is provisional and must not be exported as final');
   for (const item of missingMedia) onLog(`warning: media not in this clone: ${item.id} (${item.file})`);

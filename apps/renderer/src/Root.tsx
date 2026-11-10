@@ -19,7 +19,7 @@ const timeline = timelineJson as unknown as Timeline;
 const narratedPkg = narratedPkgJson as unknown as PackageV1;
 const narratedTimeline = narratedTimelineJson as unknown as Timeline;
 
-type DemoProps = { pkg: PackageV1; timeline: Timeline; scenes?: Scene[]; generatedAssets?: Record<string, InlineAsset>; media?: MediaSidecar; missingMedia?: string[]; mediaDims?: MediaDimsMap; mixAudio?: boolean; reducedMotion?: boolean };
+type DemoProps = { pkg: PackageV1; timeline: Timeline; scenes?: Scene[]; generatedAssets?: Record<string, InlineAsset>; media?: MediaSidecar; missingMedia?: string[]; mediaDims?: MediaDimsMap; mixAudio?: boolean; reducedMotion?: boolean; moneyShot?: boolean };
 
 function LaunchDemo(props: Partial<DemoProps>) {
   return (
@@ -48,7 +48,7 @@ function NarratedDemo() {
  * The export path used by renderPackage and the server. Same resolved narration,
  * captions and mix as the web Player. No preview mediaSources: files stay on staticFile.
  */
-function PackageDemo({ pkg: demoPkg, timeline: demoTimeline, scenes, generatedAssets, media, missingMedia, mediaDims, mixAudio = true, reducedMotion = false }: Partial<DemoProps>) {
+function PackageDemo({ pkg: demoPkg, timeline: demoTimeline, scenes, generatedAssets, media, missingMedia, mediaDims, mixAudio = true, reducedMotion = false, moneyShot }: Partial<DemoProps>) {
   return (
     <PackageComposition
       pkg={demoPkg ?? pkg}
@@ -60,6 +60,7 @@ function PackageDemo({ pkg: demoPkg, timeline: demoTimeline, scenes, generatedAs
       mediaDims={mediaDims}
       mixAudio={mixAudio}
       reducedMotion={reducedMotion}
+      moneyShot={moneyShot}
     />
   );
 }
