@@ -9,10 +9,13 @@ and [Colab automation and compute allowances](features/google-colab.md).
 
 ## Recent production changes
 
-- Money shot open: the default render's frame 0 is a fully revealed hero (the
-  planner's `scene.hero` shot, otherwise the strongest titled scene), held
-  until the real clock catches up. Narration is not shifted. Turn it off with
-  `COMFYRIZZ_MONEY_SHOT=0` or `moneyShot: false` on `renderPackage`. See
+- Money shot open: the default render's frame 0 is a fully revealed hero.
+  `scene.hero: true` wins; otherwise the renderer scores layout, headline, and
+  picture (`hero` before title, stat, chart, split, list, and code) and holds
+  that settled frame until the real clock catches up. A later winner is a
+  picture-only cold open. Narration is not shifted. Turn it off with
+  `COMFYRIZZ_MONEY_SHOT=0` or `moneyShot: false` on `renderPackage`. See the
+  [README](../README.md#money-shot) and
   [Timeline review and export](features/timeline-review-and-export.md).
 - [Pi production runtime and ComfyUI contribution gate](PI_PIPELINE_MIGRATION.md):
   Pi 1.4 orchestration, trusted generation/render receipts and final-export checks.

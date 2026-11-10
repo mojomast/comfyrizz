@@ -80,8 +80,18 @@ flowchart LR
 1. **Plan.** The [Pi 1.4](packages/agent/) agent (`@earendil-works/pi-agent-core` 1.4.0) runs a bounded tool loop against any OpenAI-compatible endpoint (OpenRouter, OpenCode Go or your own server). It writes a validated package ([`packages/schema`](packages/schema/)).
 2. **Approve.** Nothing paid runs until you accept the proposal. A per-production spend cap and budget ledger guard every dispatch.
 3. **Generate.** [`pipeline-py`](pipeline-py/) submits hashed, API-format ComfyUI [workflows](workflows/) (e.g. `flux3_klein_t2i`, `ltx25_i2v_2stage`). Comfyrizz starts a Google Colab GPU, installs pinned models ([`colab/models.lock.json`](colab/models.lock.json)), runs the jobs, collects the outputs and stops the VM. It reports the stop only after the Google Colab CLI confirms it. Bring your own ComfyUI instead with **My ComfyUI URL**.
-4. **Assemble.** [`apps/renderer`](apps/renderer/) renders deterministically with Remotion. Frame 0 is a fully revealed hero so the file opens on a thumbnail, not a fade from black (`COMFYRIZZ_MONEY_SHOT=0` turns that off). A final gate requires visibly used ComfyUI output with trusted generation and render receipts.
+4. **Assemble.** [`apps/renderer`](apps/renderer/) renders deterministically with Remotion. Frame 0 is a [money shot](#money-shot): a finished hero at full brightness, with the title or hook already readable. A final gate requires visibly used ComfyUI output with trusted generation and render receipts.
 5. **Edit.** Chat proposes a correction, such as re-running shot 4 with a new seed. You approve it, and only that work runs again.
+
+## Money shot
+
+Every default MP4 opens on a finished hero. Frame 0 is fully visible, so the file works as a thumbnail on X, Discord, GitHub, and players. The renderer chooses that frame. The planner's compiled timeline does not move, so narration, music, captions, and export length stay aligned.
+
+- A package scene with `scene.hero: true` wins. That optional flag also marks hero shots for Balanced iteration picks. It is separate from layout `"hero"`.
+- Otherwise the strongest scene wins. Layout score runs `hero`, then title, stat, chart, split, list, and code. A headline, picture, background plate, or drawing adds weight. Outros and textless media-only plates rank lower. An exact tie keeps the earlier scene.
+- The winner is drawn at the local frame where its entrance has settled (headline, foreground, list, chart, code, or drawing) and held there until the real clock catches up. If that shot is later in the film, frame 0 is a short picture-only cold open of it. No frames are inserted.
+
+Turn it off with `COMFYRIZZ_MONEY_SHOT=0` (`false`, `off`, and `no` also work), or pass `moneyShot: false` to `renderPackage`. Omitting the option leaves it on.
 
 Full design: [docs/SPEC.md](docs/SPEC.md).
 
