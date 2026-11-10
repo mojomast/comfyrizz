@@ -94,6 +94,24 @@ accepts an `examples/<name>/media.json` sidecar (`scrim`, `skipLayout`,
 present. The resolution logic lives in `src/media-model.js` and is unit-tested
 on plain Node 20 (`npm test`, no type stripper).
 
+## Money shot
+
+Frame 0 of a default `renderPackage` export is a finished hero, held in the
+composition (`src/money-shot.js`, `src/scene-frame.tsx`) so the MP4 opens on a
+thumbnail. Selection:
+
+- `scene.hero: true` outranks every other scene. That flag is not layout `"hero"`.
+- Otherwise score layout (`hero`, title, stat, chart, split, list, code), then
+  headline, picture, background plate, and drawing. Outros and textless
+  media-only plates rank lower. An exact tie keeps the earlier scene.
+- Draw that scene at `entranceSettleFrame` and hold it until `useCurrentFrame()`
+  catches up. A later winner is a picture-only cold open (`holdFrames`). Audio,
+  captions, and `timeline.durationInFrames` stay on the compiled clock.
+
+`COMFYRIZZ_MONEY_SHOT=0` (`false`, `off`, `no`) or `moneyShot: false` in the
+render props keeps entrances starting from an empty frame. The web preview uses
+the same composition, so a scrub of the opening matches the file.
+
 ## Determinism
 
 Each frame is a pure function of `(package, timeline, local frame)`. There is no

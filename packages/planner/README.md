@@ -60,6 +60,11 @@ npm test         # tsc + node:test
   has no such key) rather than dropping it during the merge.
 - `hash` is a SHA-256 over the canonical JSON of everything except the hash itself.
   Identical input → identical hash; any package edit changes it.
+- The money-shot open is not a compiler step. `compileTimeline` does not insert
+  frames, delay narration, or rewrite `scene.hero`. That optional package flag
+  (also used for Balanced iteration picks) is read later by the renderer, which
+  holds a settled visual frame at the start of the export. Timeline length and
+  this hash stay the same either way. See the project README.
 
 ## Types
 
