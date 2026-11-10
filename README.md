@@ -80,7 +80,7 @@ flowchart LR
 1. **Plan.** The [Pi 1.4](packages/agent/) agent (`@earendil-works/pi-agent-core` 1.4.0) runs a bounded tool loop against any OpenAI-compatible endpoint (OpenRouter, OpenCode Go or your own server). It writes a validated package ([`packages/schema`](packages/schema/)).
 2. **Approve.** Nothing paid runs until you accept the proposal. A per-production spend cap and budget ledger guard every dispatch.
 3. **Generate.** [`pipeline-py`](pipeline-py/) submits hashed, API-format ComfyUI [workflows](workflows/) (e.g. `flux3_klein_t2i`, `ltx25_i2v_2stage`). Comfyrizz starts a Google Colab GPU, installs pinned models ([`colab/models.lock.json`](colab/models.lock.json)), runs the jobs, collects the outputs and stops the VM. It reports the stop only after the Google Colab CLI confirms it. Bring your own ComfyUI instead with **My ComfyUI URL**.
-4. **Assemble.** [`apps/renderer`](apps/renderer/) renders deterministically with Remotion. A final gate requires visibly used ComfyUI output with trusted generation and render receipts.
+4. **Assemble.** [`apps/renderer`](apps/renderer/) renders deterministically with Remotion. Frame 0 is a fully revealed hero so the file opens on a thumbnail, not a fade from black (`COMFYRIZZ_MONEY_SHOT=0` turns that off). A final gate requires visibly used ComfyUI output with trusted generation and render receipts.
 5. **Edit.** Chat proposes a correction, such as re-running shot 4 with a new seed. You approve it, and only that work runs again.
 
 Full design: [docs/SPEC.md](docs/SPEC.md).

@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { AbsoluteFill, Img, staticFile, useCurrentFrame, useVideoConfig } from 'remotion';
+import { AbsoluteFill, Img, staticFile, useVideoConfig } from 'remotion';
 import type { PackageV1, Scene } from '../../../packages/schema/types';
 import { useGeneratedAssets, type InlineAsset } from './generated-assets-context';
 
@@ -25,6 +25,7 @@ import { cueDiagnostic, sceneCuePlan } from './recipes/cues.js';
 import { listRowBoxes } from './recipes/geometry.js';
 import { sketchAnnotations, sketchPaths } from './recipes/sketch.js';
 import { activeGroupAt, kineticPlan, kineticWords, kineticWordState } from './recipes/kinetic.js';
+import { useSceneFrame } from './scene-frame';
 
 /* ------------------------------------------------------------------ *
  * Motion: the eased entry tokens live in ./motion (MS1). Every layout uses
@@ -799,7 +800,7 @@ function ListLayout({ scene, pkg, frame, media }: LayoutProps) {
 }
 
 export function SceneView({ scene, pkg, media }: { scene: Scene; pkg: PackageV1; media?: MediaSidecar }) {
-  const frame = useCurrentFrame();
+  const frame = useSceneFrame();
   const resolved = resolveSceneMedia(scene, pkg, media);
   const props: LayoutProps = { scene, pkg, frame, media };
   if (resolved.mediaOnly) {

@@ -46,7 +46,7 @@ function components(bytes) {
   return result;
 }
 
-test('CPU Remotion pixels contain 190 separate square source-backed tiles and reflect a source change', { timeout: 180000 }, async t => {
+test('CPU Remotion pixels contain 190 separate square source-backed tiles and reflect a source change', { timeout: 300000 }, async t => {
   const dir = mkdtempSync(join(existsSync('/tmp/opencode') ? '/tmp/opencode' : tmpdir(), 'csv-wall-render-'));
   t.after(() => rmSync(dir, { recursive: true, force: true }));
   // DATA_STORY_CSV permits running exactly the captured source through the same pipeline.
@@ -55,13 +55,15 @@ test('CPU Remotion pixels contain 190 separate square source-backed tiles and re
   assert.equal(pkg.scenes[0].drawing.elements.length, 190);
   const path = join(dir, 'package.json');
   writeFileSync(path, JSON.stringify(pkg));
-  const early = join(dir, 'early.png'), a = join(dir, 'a.png'), later = join(dir, 'later.png');
+  const early = join(dir, 'early.png'), partial = join(dir, 'partial.png'), a = join(dir, 'a.png'), later = join(dir, 'later.png');
   renderPackage(path, early, { still: true, frame: 0 });
+  renderPackage(path, partial, { still: true, frame: 0, moneyShot: false });
   renderPackage(path, a, { still: true, frame: 30 });
   renderPackage(path, later, { still: true, frame: 60 });
-  const initial = pixels(early), first = pixels(a), second = pixels(later);
-  assert.ok(components(initial).length > 0 && components(initial).length < 190, 'the first frame should show a partial wall');
-  assert.notDeepEqual(initial, first, 'the wall must visibly build across frames');
+  const initial = pixels(early), revealed = pixels(partial), first = pixels(a), second = pixels(later);
+  assert.equal(components(initial).length, 190, 'frame 0 opens on the finished wall');
+  assert.ok(components(revealed).length > 0 && components(revealed).length < 190, 'money shot off keeps a partial first frame');
+  assert.notDeepEqual(revealed, first, 'the wall must visibly build across frames when the money shot is off');
   assert.deepEqual(second, first, 'the completed wall should hold');
   const boxes = components(first);
   assert.equal(boxes.length, 190, 'each source row must be a separate pixel island');

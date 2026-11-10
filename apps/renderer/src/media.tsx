@@ -1,9 +1,10 @@
 import React, { createContext, useContext, useMemo, useState } from 'react';
-import { AbsoluteFill, Img, Loop, OffthreadVideo, interpolate, staticFile, useCurrentFrame, useVideoConfig } from 'remotion';
+import { AbsoluteFill, Img, Loop, OffthreadVideo, interpolate, staticFile, useVideoConfig } from 'remotion';
 import type { Asset, ForegroundItem, PackageV1 } from '../../../packages/schema/types';
 import { palette, textColors, useFontFamily } from './theme';
 import { isMissingMedia, mediaPlaybackDurationSeconds } from './media-model.js';
 import { resolveMediaSrc } from './media-src.js';
+import { useSceneFrame } from './scene-frame';
 
 export type { MediaSidecar, LowerThirdContent, ResolvedSceneMedia } from './media-model.js';
 export { isRenderableMedia, resolveSceneMedia } from './media-model.js';
@@ -162,7 +163,7 @@ function panelAnimation(frame: number, anim: ForegroundItem['anim']): { opacity:
 
 /** A framed raster/video panel positioned from the foreground item. */
 export function MediaPanel({ asset, assetId, item, pkg, sceneFrames }: { asset: Asset; assetId?: string; item: ForegroundItem; pkg: PackageV1; sceneFrames: number }) {
-  const frame = useCurrentFrame();
+  const frame = useSceneFrame();
   const { width, height } = useVideoConfig();
   const mediaDims = useMediaDims();
   const real = typeof asset.file === 'string' ? mediaDims[asset.file] : undefined;
@@ -194,7 +195,7 @@ export function MediaPanel({ asset, assetId, item, pkg, sceneFrames }: { asset: 
 /** Lower-third/kicker overlay for full-bleed and media-only scenes. */
 export function LowerThird({ kicker, text, pkg, start_frame = 8, position = 'top' }: { kicker?: string; text: string; pkg: PackageV1; start_frame?: number; position?: 'top' | 'bottom' }) {
   const family = useFontFamily();
-  const frame = useCurrentFrame();
+  const frame = useSceneFrame();
   const t = interpolate(frame, [start_frame, start_frame + 20], [0, 1], { extrapolateLeft: 'clamp', extrapolateRight: 'clamp' });
   const colors = textColors(pkg);
   return (

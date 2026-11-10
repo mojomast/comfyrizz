@@ -1,5 +1,4 @@
-import React from 'react';
-import { useCurrentFrame } from 'remotion';
+import { useSceneFrame } from './scene-frame';
 import type { Scene } from '../../../packages/schema/types';
 import { drawingProgress, pointAlong } from './procedural-drawing-model.js';
 import { useFontFamily } from './theme';
@@ -13,7 +12,7 @@ type DrawingElement = { color: string; start: number; end: number; opacity?: num
 );
 
 export function ProceduralDrawing({ drawing }: { drawing: NonNullable<Scene['drawing']> }) {
-  const frame = useCurrentFrame();
+  const frame = useSceneFrame();
   const family = useFontFamily();
   return <svg viewBox="0 0 1000 1000" preserveAspectRatio="none" style={{ position: 'absolute', width: '100%', height: '100%', background: drawing.background }}>
     {(drawing.elements as DrawingElement[]).map((element, i) => {

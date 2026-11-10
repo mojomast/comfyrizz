@@ -11,6 +11,7 @@ import { collectMediaDims } from '../src/media-dims.js';
 import { materializeCompositions } from './composition-worker.mjs';
 import { resolveBrowserExecutable } from './browser-executable.mjs';
 import { assertModelContribution } from '../../../packages/jobs/src/model-contribution.mjs';
+import { moneyShotEnabled } from '../src/money-shot.js';
 
 // Resolve the exact renderer/bundler versions used by the pinned CLI.
 const require = createRequire(import.meta.resolve('@remotion/cli/package.json'));
@@ -61,7 +62,8 @@ export async function renderPipeline(packagePath, output, { signal, onEvent = ()
   if (!validatePackage(pkg).valid) throw new Error('Materialized render package failed validation');
   const missing = missingMediaFiles(pkg, packageDir);
   if (missing.length) throw new Error(`Missing render media: ${missing.map(m => m.id).join(', ')}`);
-  const props = { pkg, timeline, generatedAssets: inlineGeneratedAssets(pkg, packageDir), mediaDims: collectMediaDims(pkg, packageDir) };
+  const moneyShot = moneyShotEnabled();
+  const props = { pkg, timeline, generatedAssets: inlineGeneratedAssets(pkg, packageDir), mediaDims: collectMediaDims(pkg, packageDir), moneyShot };
   if (existsSync(join(packageDir, 'media.json'))) props.media = JSON.parse(readFileSync(join(packageDir, 'media.json')));
   writeFileSync(output.replace(/\.mp4$/, '.props.json'), JSON.stringify(props));
   const publicDir = preparePublicDir(pkg, packageDir);

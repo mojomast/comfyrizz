@@ -21,6 +21,7 @@ import { spawnSync } from 'node:child_process';
 import { validatePackage } from '../../../packages/schema/src/index.mjs';
 import { canonicalJson, compileTimeline } from '../../../packages/planner/dist/src/index.js';
 import { inlineGeneratedAssets, missingMediaFiles, preparePublicDir, rendererDir, renderPackage, renderPackageAsync } from './render-package-lib.mjs';
+import { moneyShotEnabled } from '../src/money-shot.js';
 import { cancelledError, spawnCancellable } from './cancellable-spawn.mjs';
 import { remotionCli } from './remotion-cli.mjs';
 import { resolveBrowserExecutable } from './browser-executable.mjs';
@@ -201,7 +202,7 @@ export function renderPackageIncremental(packagePath, outputPath, options = {}) 
   const cache = cacheDir ?? join(rendererDir, '.cache', pkg.id);
   mkdirSync(cache, { recursive: true });
   const propsPath = join(cache, 'props.json');
-  writeFileSync(propsPath, JSON.stringify({ pkg, timeline, scenes, generatedAssets, ...(media ? { media } : {}), ...(missingMedia.length > 0 ? { missingMedia: missingMedia.map(item => item.file) } : {}), ...(Object.keys(mediaDims).length > 0 ? { mediaDims } : {}) }));
+  writeFileSync(propsPath, JSON.stringify({ pkg, timeline, scenes, generatedAssets, moneyShot: moneyShotEnabled(options.moneyShot), ...(media ? { media } : {}), ...(missingMedia.length > 0 ? { missingMedia: missingMedia.map(item => item.file) } : {}), ...(Object.keys(mediaDims).length > 0 ? { mediaDims } : {}) }));
   onLog(`compiled ${timeline.durationInFrames} frames, hash ${timeline.hash}`);
   for (const item of missingMedia) onLog(`warning: media not in this clone: ${item.id} (${item.file})`);
   for (const item of dimProblems) onLog(`warning: declared ${item.declared.width}x${item.declared.height} for ${item.id} (${item.file}) but the file is ${item.real.width}x${item.real.height}; using the real size`);
@@ -354,7 +355,7 @@ export async function renderPackageIncrementalAsync(packagePath, outputPath, opt
   const cache = cacheDir ?? join(rendererDir, '.cache', pkg.id);
   mkdirSync(cache, { recursive: true });
   const propsPath = join(cache, 'props.json');
-  writeFileSync(propsPath, JSON.stringify({ pkg, timeline, scenes, generatedAssets, ...(media ? { media } : {}), ...(missingMedia.length > 0 ? { missingMedia: missingMedia.map(item => item.file) } : {}), ...(Object.keys(mediaDims).length > 0 ? { mediaDims } : {}) }));
+  writeFileSync(propsPath, JSON.stringify({ pkg, timeline, scenes, generatedAssets, moneyShot: moneyShotEnabled(options.moneyShot), ...(media ? { media } : {}), ...(missingMedia.length > 0 ? { missingMedia: missingMedia.map(item => item.file) } : {}), ...(Object.keys(mediaDims).length > 0 ? { mediaDims } : {}) }));
   onLog(`compiled ${timeline.durationInFrames} frames, hash ${timeline.hash}`);
   for (const item of missingMedia) onLog(`warning: media not in this clone: ${item.id} (${item.file})`);
   for (const item of dimProblems) onLog(`warning: declared ${item.declared.width}x${item.declared.height} for ${item.id} (${item.file}) but the file is ${item.real.width}x${item.real.height}; using the real size`);
